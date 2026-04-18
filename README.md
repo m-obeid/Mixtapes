@@ -112,7 +112,7 @@ A Nix flake is available. See [setup instructions](https://github.com/m-obeid/Mu
 ### From Source
 
 <details>
-<summary>Install dependencies for your distro</summary>
+<summary>Install dependencies for your distro/OS</summary>
 
 **Arch Linux:**
 ```bash
@@ -127,6 +127,11 @@ sudo dnf install git python3 python3-pip nodejs gtk4-devel adwaita-gtk4-devel we
 **Debian/Ubuntu:**
 ```bash
 sudo apt install git python3 python3-pip nodejs libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
+```
+
+**macOS:**
+```bash
+brew install gtk4 adwaita-icon-theme libadwaita python cairo cmake dbus glib gstreamer
 ```
 
 > [!NOTE]
