@@ -1,31 +1,37 @@
-import gi
+import os
+import random
 import sys
 import threading
-import random
-import os
+
+import gi
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GstAudio", "1.0")
-from gi.repository import Gst, GstAudio, GObject, GLib, GdkPixbuf
 import glob
+
+from gi.repository import GdkPixbuf, GLib, GObject, Gst, GstAudio
 from yt_dlp import YoutubeDL
-from ui.utils import get_high_res_url, get_ytimg_fallbacks
+
+from api.client import MusicClient
 from player.cache import StreamCache
 from player.downloads import DownloadManager
-from api.client import MusicClient
+from ui.utils import get_high_res_url, get_ytimg_fallbacks
 
 HAS_MPRIS = False
 HAS_SMTC = False
 if sys.platform == "win32":
     try:
         from player.smtc import SMTCAdapter
+
         HAS_SMTC = True
     except ImportError:
         pass
-else:
+elif sys.platform == "linux":
     try:
         from mprisify.server import Server
-        from player.mpris import MuseMprisAdapter, MuseEventAdapter
+
+        from player.mpris import MuseEventAdapter, MuseMprisAdapter
+
         HAS_MPRIS = True
     except ImportError:
         pass
@@ -213,7 +219,9 @@ class Player(GObject.Object):
             can_prev = self.current_queue_index > 0
             self.smtc.update_controls(can_next=can_next, can_previous=can_prev)
 
-    def _on_smtc_metadata_changed(self, obj, title, artist, thumb, video_id, like_status):
+    def _on_smtc_metadata_changed(
+        self, obj, title, artist, thumb, video_id, like_status
+    ):
         if hasattr(self, "smtc") and self.smtc:
             self.smtc.update_metadata(title, artist, thumb)
 
@@ -528,6 +536,7 @@ class Player(GObject.Object):
             like_status = str(track.get("likeStatus") or "INDIFFERENT")
 
             import traceback as _tb
+
             caller_stack = "".join(_tb.format_stack(limit=6)[:-1])
             print(
                 f"DEBUG-PLAY: index={self.current_queue_index} video_id={video_id} queue_len={len(self.queue)}\nCALLER:\n{caller_stack}",
@@ -1063,10 +1072,8 @@ class Player(GObject.Object):
             # can land *after* the new track has already reached PLAYING.
             # Reject EOS that arrives within the first second of a new track.
             import time as _time
-            if (
-                self._track_started_at
-                and _time.time() - self._track_started_at < 1.0
-            ):
+
+            if self._track_started_at and _time.time() - self._track_started_at < 1.0:
                 print(
                     "EOS within 1s of track start — ignoring (stale stream).",
                     flush=True,
@@ -1122,6 +1129,7 @@ class Player(GObject.Object):
                         self._internal_volume_change = False
                     self._is_loading = False
                     import time as _time
+
                     self._track_started_at = _time.time()
                     if getattr(self, "discord_rpc", None):
                         self.discord_rpc.update()
