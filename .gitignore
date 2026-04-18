@@ -170,3 +170,6 @@ data/
 .vscode/
 *.log
 browserold.json
+
+# macOS specific
+.DS_Store
