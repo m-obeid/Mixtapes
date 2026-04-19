@@ -8,7 +8,10 @@ on:
 jobs:
   mac:
     name: Bundle to macOS
-    runs-on: macos-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, macos-15-intel]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,9 +29,10 @@ jobs:
       - name: Bundle application
         run: |
           zsh mac/bundle.sh
+          zip -r Mixtapes.zip dist/Mixtapes.app
 
       - name: Upload Bundle
         uses: actions/upload-artifact@v4
         with:
-          name: Mixtapes.app
-          path: dist/Mixtapes.app
+          name: Mixtapes.zip
+          path: Mixtapes.zip
