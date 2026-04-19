@@ -1,3 +1,5 @@
+name: Build Mac (Experimental)
+
 on:
   push:
     branches:
@@ -17,6 +19,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
+          pip install meson-python ninja
           pip install --no-build-isolation --break-system-packages -r requirements-mac.txt
           pip install --no-build-isolation --break-system-packages pyinstaller
 
