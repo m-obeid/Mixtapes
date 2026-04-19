@@ -1,0 +1,31 @@
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  mac:
+    name: Bundle to macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Homebrew dependencies
+        run: |
+          brew install gtk4 adwaita-icon-theme libadwaita python cairo cmake dbus glib gstreamer
+
+      - name: Install Python dependencies
+        run: |
+          pip install --no-build-isolation --break-system-packages -r requirements-mac.txt
+          pip install --no-build-isolation --break-system-packages pyinstaller
+
+      - name: Bundle application
+        run: |
+          zsh mac/bundle.sh
+
+      - name: Upload Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mixtapes.app
+          path: dist/Mixtapes.app
