@@ -157,7 +157,7 @@ class LoginDialog(Adw.Window):
     def _build_windows_login_page(self):
         page = Adw.StatusPage()
         page.set_title("Quick Login")
-        page.set_description("Sign in via a login window powered by Edge WebView2.")
+        page.set_description("Sign in via a secure login window.")
         page.set_icon_name("web-browser-symbolic")
 
         clamp = Adw.Clamp()
