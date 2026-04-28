@@ -6,3 +6,4 @@ urllib3
 mutagen
 pydbus==0.6.0
 StrEnum==0.4.15
+pywebview

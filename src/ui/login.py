@@ -50,7 +50,7 @@ class LoginDialog(Adw.Window):
             self.webkit_view = WebkitLoginView()
             self.webkit_view.connect("login-finished", self.on_webkit_login_finished)
             self.stack.add_titled(self.webkit_view, "direct", "Direct Login")
-        elif IS_WINDOWS:
+        elif IS_WINDOWS or sys.platform == "darwin":
             win_login_page = self._build_windows_login_page()
             self.stack.add_titled(win_login_page, "direct", "Quick Login")
 

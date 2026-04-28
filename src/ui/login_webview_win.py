@@ -7,6 +7,7 @@ for the resulting credentials file.
 import os
 import subprocess
 import threading
+import sys
 
 
 def get_login_output_path():
@@ -20,6 +21,7 @@ def find_login_helper():
     candidates = [
         os.path.join(base, "windows", "MixtapesLogin.exe"),
         os.path.join(base, "MixtapesLogin.exe"),
+        os.path.join(base, "windows", "login_helper.py"),
     ]
     for c in candidates:
         if os.path.exists(c):
@@ -45,8 +47,13 @@ def launch_login(on_complete):
 
     def _run():
         try:
+            if helper.endswith(".py"):
+                cmd = [sys.executable, helper, "--output", output_path]
+            else:
+                cmd = [helper, "--output", output_path]
+            
             subprocess.run(
-                [helper, "--output", output_path],
+                cmd,
                 timeout=300,
             )
             if os.path.exists(output_path):

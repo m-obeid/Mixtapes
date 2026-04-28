@@ -34,6 +34,7 @@ a = Analysis(
         ("src/ui", "ui"),
         ("src/player", "player"),
         ("assets", "assets"),
+        ("windows/login_helper.py", "windows"),
         (os.path.join(gi_override_dir, "GLib.py"), "gi/overrides"),
         (os.path.join(gi_override_dir, "GObject.py"), "gi/overrides"),
         (os.path.join(gi_override_dir, "Gio.py"), "gi/overrides"),
