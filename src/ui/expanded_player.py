@@ -5,8 +5,8 @@ from ui.queue_panel import QueuePanel
 from ui.widgets.lyrics_view import LyricsView
 
 
-MAX_CAROUSEL_COVERS = 31
-CAROUSEL_PRELOAD_RADIUS = 5
+MAX_CAROUSEL_COVERS = 17
+CAROUSEL_PRELOAD_RADIUS = 3
 
 
 class ExpandedPlayer(Gtk.Box):

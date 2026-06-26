@@ -107,13 +107,29 @@ def invalidate_is_online_cache():
 # sequences were corrupting LRU state and evicting pixbufs that other threads
 # were still wiring up into textures.
 IMG_CACHE = collections.OrderedDict()
-# Each cached pixbuf is up to MAX_CACHED_DIM² × 4 bytes. A 64-entry cache at
-# 1024px can pin ~256 MB by itself after playlist/queue browsing. Keep enough
-# warm artwork for the current view and nearby tracks without letting decoded
-# covers dominate the process footprint.
-MAX_CACHE_SIZE = 24
-MAX_CACHED_DIM = 768
+# Each cached pixbuf is up to MAX_CACHED_DIM² × 4 bytes. Keep the in-process
+# cache intentionally small; disk cache still makes revisiting artwork cheap
+# without pinning decoded RGBA buffers in RAM.
+MAX_CACHE_SIZE = 12
+MAX_CACHED_DIM = 512
 IMG_CACHE_LOCK = threading.Lock()
+_LAST_MALLOC_TRIM = 0.0
+_MALLOC_TRIM_LOCK = threading.Lock()
+
+
+def _trim_process_heap(min_interval=5.0):
+    """Return freed glibc heap pages to the OS after large image evictions."""
+    global _LAST_MALLOC_TRIM
+    now = time.monotonic()
+    with _MALLOC_TRIM_LOCK:
+        if now - _LAST_MALLOC_TRIM < min_interval:
+            return
+        _LAST_MALLOC_TRIM = now
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 # Bounded executor for image fetches. Each row's `load_url` used to spawn a
 # fresh `threading.Thread`, which costs ~1-2ms apiece — when 25 rows bind at
@@ -306,8 +322,12 @@ def cache_pixbuf(url, pixbuf):
             IMG_CACHE.move_to_end(url)
             return
         IMG_CACHE[url] = pixbuf
+        evicted = False
         if len(IMG_CACHE) > MAX_CACHE_SIZE:
             IMG_CACHE.popitem(last=False)
+            evicted = True
+    if evicted:
+        _trim_process_heap()
 
 
 def decode_pixbuf_bounded(data, max_dim=MAX_CACHED_DIM):

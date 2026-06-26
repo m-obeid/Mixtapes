@@ -19,8 +19,8 @@ from ui.utils import (
 )
 
 
-MAX_BLUR_CACHE_ENTRIES = 48
-MAX_COLOR_CACHE_ENTRIES = 128
+MAX_BLUR_CACHE_ENTRIES = 16
+MAX_COLOR_CACHE_ENTRIES = 64
 _cache_lock = threading.Lock()
 _blur_cache = OrderedDict()    # cache key -> path to blurred PNG
 _color_cache = OrderedDict()   # url -> (r, g, b) normalized 0..1
@@ -187,7 +187,7 @@ def _ensure_image_bytes(url):
 def get_blurred_cover(
     url,
     blur_radius=42,
-    output_size=720,
+    output_size=512,
     tint=(0, 0, 0, 150),
     callback=None,
 ):
