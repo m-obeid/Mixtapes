@@ -1,5 +1,6 @@
 import os
 import threading
+import weakref
 import time
 import urllib.request
 import collections
@@ -924,6 +925,8 @@ class AsyncImage(Gtk.Image):
             return
         submit_fetch(fn, *args)
 
+
+
     def load_url(self, url, **kwargs):
         orig_url = url
         url = get_high_res_url(url, self.target_w)
@@ -1266,6 +1269,8 @@ class AsyncPicture(Gtk.Picture):
             return
         submit_fetch(fn, *args)
 
+
+
     def load_url(self, url, **kwargs):
         orig_url = url
         url = get_high_res_url(url, self.target_size)
@@ -1431,6 +1436,9 @@ class AsyncPicture(Gtk.Picture):
                 self.player.update_track_thumbnail(video_id, url)
 
 
+
+
+
 class MarqueeLabel(Gtk.ScrolledWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -1521,7 +1529,8 @@ class LikeButton(Gtk.Button):
         self.set_valign(Gtk.Align.CENTER)
 
         self.update_icon()
-        self.connect("clicked", self.on_clicked)
+        weak_self = weakref.ref(self)
+        self.connect("clicked", lambda btn: weak_self().on_clicked(btn) if weak_self() else None)
 
     def update_icon(self):
         if self.status == "LIKE":

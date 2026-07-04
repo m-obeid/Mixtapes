@@ -32,6 +32,34 @@ else:
 from player.discord_rpc import DiscordRPCAdapter
 
 
+_libc = None
+_last_malloc_trim = 0.0
+
+
+def _malloc_trim(min_interval=0.0):
+    """Hand glibc's freed-but-retained heap back to the OS. After a track is
+    torn down, free() leaves the blocks sitting in the arena so RSS stays
+    high — this is the "memory isn't released after I clear the queue" the
+    user sees. With MALLOC_ARENA_MAX=2 (set in main.py) almost all allocation
+    lives in the main arena, which malloc_trim(0) can actually return. No-op
+    off glibc. `min_interval` throttles back-to-back calls (rapid skips)."""
+    global _libc, _last_malloc_trim
+    if not sys.platform.startswith("linux"):
+        return
+    import time as _t
+    now = _t.monotonic()
+    if min_interval and (now - _last_malloc_trim) < min_interval:
+        return
+    try:
+        import ctypes
+        if _libc is None:
+            _libc = ctypes.CDLL("libc.so.6")
+        _libc.malloc_trim(0)
+        _last_malloc_trim = now
+    except Exception:
+        pass
+
+
 def _extract_spectrum_bands(structure):
     """Pull a list[float] of magnitudes out of a GStreamer `spectrum`
     bus-message Structure. Returns None if no path yields data.
@@ -628,6 +656,10 @@ class Player(GObject.Object):
         self._current_source_video_id = None
         self.emit("state-changed", "stopped")
         self.emit("metadata-changed", "", "", "", "", "INDIFFERENT")
+        # The user explicitly dropped the whole queue — a good moment to
+        # return the freed decode/UI buffers to the OS rather than letting
+        # glibc sit on them.
+        _malloc_trim()
 
     def play_queue_index(self, index):
         import traceback as _tb
@@ -1039,6 +1071,10 @@ class Player(GObject.Object):
         # control of the pipeline. Don't let a late stream-start apply
         # the obsolete index.
         self._pending_gapless_index = None
+        # Each track change frees the previous stream's decode buffers; nudge
+        # glibc to return them to the OS so RSS doesn't ratchet up over a long
+        # session. Throttled so rapid skipping doesn't thrash the heap walk.
+        _malloc_trim(min_interval=10.0)
         # set_state(NULL) blocks until the pipeline flushes buffers and
         # closes any open HTTP sockets — measured at ~800ms occasionally
         # when the previous track was streaming. Running it on the main

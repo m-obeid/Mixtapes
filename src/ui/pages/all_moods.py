@@ -1,3 +1,4 @@
+import weakref
 from gi.repository import Gtk, Adw, GObject
 from ui.util_classes import ScrolledWindow
 
@@ -8,6 +9,7 @@ class AllMoodsPage(Adw.Bin):
 
     def __init__(self, items, title, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        weak_self = weakref.ref(self)
         self.items = items
         self.category_title = title
 
@@ -61,9 +63,9 @@ class AllMoodsPage(Adw.Bin):
             row.set_child(box)
             row.item_data = item
             
-            click_gesture = Gtk.GestureClick()
-            click_gesture.set_button(1)
-            click_gesture.connect("released", self._on_row_activated, item)
+            click_gesture.connect(
+                "released", lambda g, n, x, y, it=item: weak_self()._on_row_activated(g, n, x, y, it) if weak_self() else None
+            )
             row.add_controller(click_gesture)
             
             self.list_box.append(row)
@@ -80,7 +82,7 @@ class AllMoodsPage(Adw.Bin):
 
         self.set_child(self.main_box)
         
-        self.connect("map", self._on_map)
+        self.connect("map", lambda w: weak_self()._on_map(w) if weak_self() else None)
 
     def filter_content(self, text):
         query = text.lower().strip()

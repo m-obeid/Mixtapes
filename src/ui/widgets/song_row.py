@@ -1,4 +1,5 @@
 import gi
+import weakref
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -34,9 +35,16 @@ class SongRowWidget(Gtk.Box):
         # Keep the downloaded indicator in sync across any view showing this
         # song — react to both completions and removals from elsewhere in the UI.
         dm = self.player.download_manager
-        self._dm_done_handler = dm.connect("item-done", self._on_dm_item_done)
-        self._dm_removed_handler = dm.connect("download-removed", self._on_dm_download_removed)
-        self.connect("destroy", self._on_destroy)
+        weak_self = weakref.ref(self)
+        self._dm_done_handler = dm.connect(
+            "item-done", lambda dm, *args: weak_self()._on_dm_item_done(dm, *args) if weak_self() else None
+        )
+        self._dm_removed_handler = dm.connect(
+            "download-removed", lambda dm, *args: weak_self()._on_dm_download_removed(dm, *args) if weak_self() else None
+        )
+        self.connect(
+            "destroy", lambda w: weak_self()._on_destroy(w) if weak_self() else None
+        )
 
         self.row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.row.set_hexpand(True)
@@ -158,19 +166,28 @@ class SongRowWidget(Gtk.Box):
         # Gesture for Right Click (Context Menu)
         gesture = Gtk.GestureClick()
         gesture.set_button(3)  # Right click
-        gesture.connect("released", self.on_right_click)
+        weak_self = weakref.ref(self)
+        gesture.connect(
+            "released", lambda g, n, x, y: weak_self().on_right_click(g, n, x, y) if weak_self() else None
+        )
         self.row.add_controller(gesture)
 
         # Long Press for touch
         lp = Gtk.GestureLongPress()
-        lp.connect("pressed", lambda g, x, y: self.on_right_click(g, 1, x, y))
+        lp.connect(
+            "pressed", lambda g, x, y: weak_self().on_right_click(g, 1, x, y) if weak_self() else None
+        )
         self.row.add_controller(lp)
 
         # Gesture for Left Click (Activation)
         left_click = Gtk.GestureClick()
         left_click.set_button(1)
-        left_click.connect("pressed", self._on_left_pressed)
-        left_click.connect("released", self._on_left_released)
+        left_click.connect(
+            "pressed", lambda g, n, x, y: weak_self()._on_left_pressed(g, n, x, y) if weak_self() else None
+        )
+        left_click.connect(
+            "released", lambda g, n, x, y: weak_self()._on_left_released(g, n, x, y) if weak_self() else None
+        )
         self.row.add_controller(left_click)
 
     def _current_video_id(self):
@@ -261,8 +278,9 @@ class SongRowWidget(Gtk.Box):
         )
 
         # Connect directly to the player metadata signal (reliable than GObject property notify)
+        weak_self = weakref.ref(self)
         self._player_handler_id = self.player.connect(
-            "metadata-changed", self._on_player_metadata_changed
+            "metadata-changed", lambda player, *args: weak_self()._on_player_metadata_changed(player, *args) if weak_self() else None
         )
 
     def _on_player_metadata_changed(self, player, *args):
@@ -306,6 +324,8 @@ class SongRowWidget(Gtk.Box):
                 self.img._is_placeholder = True
         except Exception:
             pass
+        self.page = None
+        self.model_item = None
 
     def _apply_playing_state(self, is_playing):
         if is_playing:

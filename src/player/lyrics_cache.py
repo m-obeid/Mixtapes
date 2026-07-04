@@ -51,11 +51,25 @@ class LyricsCache:
     # Soft cap on cached files; oldest mtimes get evicted on insert.
     MAX_ENTRIES = 2000
 
+    # Cap on the in-memory mirror. The disk cache holds MAX_ENTRIES, but the
+    # `_mem` dict would otherwise grow once per *played* track for a whole
+    # session (each entry is a full lyrics payload, ~5-50KB) and never shrink.
+    MAX_MEM_ENTRIES = 64
+
     def __init__(self):
         self._lock = threading.Lock()
         # Per-process in-memory mirror so the lyrics view's repeated reads
-        # don't hit disk on every progression tick.
+        # don't hit disk on every progression tick. Bounded LRU-ish: oldest
+        # insertion is dropped past MAX_MEM_ENTRIES (see _mem_put).
         self._mem = {}
+
+    def _mem_put(self, video_id, entry):
+        # Refresh recency: re-insert at the end so eviction drops genuinely
+        # stale entries, then trim from the front (oldest insertion).
+        self._mem.pop(video_id, None)
+        self._mem[video_id] = entry
+        while len(self._mem) > self.MAX_MEM_ENTRIES:
+            self._mem.pop(next(iter(self._mem)))
 
     def load(self, video_id):
         """Return the entire cache entry for ``video_id``, or ``None`` if
@@ -78,7 +92,7 @@ class LyricsCache:
             return None
         data.setdefault("results", {})
         data.setdefault("preferred_source", None)
-        self._mem[video_id] = data
+        self._mem_put(video_id, data)
         return data
 
     def get_result(self, video_id):
@@ -170,7 +184,7 @@ class LyricsCache:
                 with open(path, "w") as f:
                     json.dump(entry, f)
             os.utime(path, None)
-            self._mem[video_id] = entry
+            self._mem_put(video_id, entry)
             self._evict_old()
         except OSError as e:
             print(f"[LYRICS-CACHE] write failed for {video_id}: {e}")

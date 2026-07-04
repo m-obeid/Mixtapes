@@ -1,5 +1,6 @@
 import gi
 import threading
+import weakref
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -110,6 +111,15 @@ class QueueRowWidget(Gtk.Box):
         item.connect("notify::is-playing", self._on_item_property_changed)
         item.connect("notify::is-paused", self._on_item_property_changed)
         self._update_playing_ui()
+
+    def unbind(self):
+        if self.model_item:
+            try:
+                self.model_item.disconnect_by_func(self._on_item_property_changed)
+            except Exception:
+                pass
+            self.model_item = None
+        self.panel = None
 
     def _on_item_property_changed(self, item, pspec):
         self._update_playing_ui()
@@ -248,6 +258,7 @@ class QueuePanel(Gtk.Box):
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", self._on_factory_setup)
         factory.connect("bind", self._on_factory_bind)
+        factory.connect("unbind", self._on_factory_unbind)
 
         self.list_view = Gtk.ListView(model=self.selection_model, factory=factory)
 
@@ -257,8 +268,14 @@ class QueuePanel(Gtk.Box):
         self.append(scrolled)
 
         # Signals
-        self.player.connect("state-changed", self._on_player_update)
-        self.player.connect("metadata-changed", self._on_player_update)
+        weak_self = weakref.ref(self)
+        self._player_state_handler = self.player.connect(
+            "state-changed", lambda player, *args: weak_self()._on_player_update(player, *args) if weak_self() else None
+        )
+        self._player_metadata_handler = self.player.connect(
+            "metadata-changed", lambda player, *args: weak_self()._on_player_update(player, *args) if weak_self() else None
+        )
+        self.connect("destroy", lambda w: weak_self()._on_destroy(w) if weak_self() else None)
         self.connect("map", self._on_map)  # Refresh when visible
 
         # Initial Populate
@@ -300,14 +317,16 @@ class QueuePanel(Gtk.Box):
         from ui.widgets.add_to_playlist import mark_playlist_used
         mark_playlist_used(playlist_id)
 
+        weak_self = weakref.ref(self)
+        client = self.player.client
         def thread_func():
-            success = self.player.client.add_playlist_items(playlist_id, video_ids)
+            success = client.add_playlist_items(playlist_id, video_ids)
             if success:
                 msg = f"Added {len(video_ids)} tracks to playlist"
                 print(msg)
-                GLib.idle_add(self._show_toast, msg)
+                GLib.idle_add(lambda: weak_self()._show_toast(msg) if weak_self() else None)
             else:
-                GLib.idle_add(self._show_toast, "Failed to add tracks")
+                GLib.idle_add(lambda: weak_self()._show_toast("Failed to add tracks") if weak_self() else None)
 
         threading.Thread(target=thread_func, daemon=True).start()
 
@@ -408,6 +427,25 @@ class QueuePanel(Gtk.Box):
         item = list_item.get_item()
         widget.bind(item, self)
 
+    def _on_factory_unbind(self, factory, list_item):
+        widget = list_item.get_child()
+        if widget and hasattr(widget, "unbind"):
+            widget.unbind()
+
+    def _on_destroy(self, widget):
+        if hasattr(self, "_player_state_handler") and self._player_state_handler is not None:
+            try:
+                self.player.disconnect(self._player_state_handler)
+            except Exception:
+                pass
+            self._player_state_handler = None
+        if hasattr(self, "_player_metadata_handler") and self._player_metadata_handler is not None:
+            try:
+                self.player.disconnect(self._player_metadata_handler)
+            except Exception:
+                pass
+            self._player_metadata_handler = None
+
     def _on_row_clicked(self, gesture, n_press, x, y, list_item):
         item = list_item.get_item()
         if item and item.index != self.player.current_queue_index:
@@ -453,21 +491,23 @@ class QueuePanel(Gtk.Box):
                     AddToPlaylistPopover, mark_playlist_used,
                 )
 
+                weak_self = weakref.ref(self)
                 def _on_select(target_pid):
                     if not target_pid:
                         return
                     mark_playlist_used(target_pid)
 
+                    client = self.player.client
                     def _thread():
                         # add_playlist_items auto-swaps OMV→ATV for
                         # single-item adds.
-                        success = self.player.client.add_playlist_items(
+                        success = client.add_playlist_items(
                             target_pid, [v]
                         )
                         if success:
-                            GLib.idle_add(self._show_toast, "Added to playlist")
+                            GLib.idle_add(lambda: weak_self()._show_toast("Added to playlist") if weak_self() else None)
                         else:
-                            GLib.idle_add(self._show_toast, "Failed to add")
+                            GLib.idle_add(lambda: weak_self()._show_toast("Failed to add") if weak_self() else None)
 
                     threading.Thread(target=_thread, daemon=True).start()
 

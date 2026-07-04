@@ -39,8 +39,12 @@ class AlbumPage(BasePlaylistPage):
         thread.start()
 
     def _fetch_details(self):
+        client = self.client
+        pid = self.playlist_id
+        if not client or not pid:
+            return
         try:
-            data = self.client.get_album(self.playlist_id)
+            data = client.get_album(pid)
             title = data.get("title", "Unknown Album")
             description = data.get("description", "")
             tracks = data.get("tracks", [])
@@ -111,3 +115,4 @@ class AlbumPage(BasePlaylistPage):
             title, description, meta1, meta2, thumbnails, tracks, append, total_tracks
         )
         # self.sort_row.set_visible(False)
+

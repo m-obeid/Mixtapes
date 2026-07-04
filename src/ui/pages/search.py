@@ -1,3 +1,4 @@
+import weakref
 from gi.repository import Gtk, Adw, GObject, GLib, Pango, Gio, Gdk
 import threading
 from api.client import MusicClient
@@ -388,7 +389,8 @@ class SearchPage(Adw.Bin):
             view_all_btn = Gtk.Button(label="View All")
             view_all_btn.add_css_class("pill")
             view_all_btn.add_css_class("flat")
-            view_all_btn.connect("clicked", lambda b, i=items, t=title: self.on_view_all_clicked(i, t))
+            weak_self = weakref.ref(self)
+            view_all_btn.connect("clicked", lambda b, i=items, t=title, ws=weak_self: ws().on_view_all_clicked(i, t) if ws() else None)
             h_box.append(view_all_btn)
 
         scroll_box.set_content(h_box)
@@ -893,6 +895,7 @@ class SearchPage(Adw.Bin):
                 )
                 like_btn.set_valign(Gtk.Align.CENTER)
                 box.append(like_btn)
+                row._like_btn = like_btn
 
             row.item_data = item
             row.set_activatable(True)
@@ -906,7 +909,7 @@ class SearchPage(Adw.Bin):
             # Long Press for touch
             lp = Gtk.GestureLongPress()
             lp.connect(
-                "pressed", lambda g, x, y, r=row: self.on_row_right_click(g, 1, x, y, r)
+                "pressed", lambda g, x, y, ws=weakref.ref(self): ws().on_row_right_click(g, 1, x, y, g.get_widget()) if ws() else None
             )
             row.add_controller(lp)
 
@@ -1210,7 +1213,7 @@ class SearchPage(Adw.Bin):
             elif "browseId" in data:
                 # Check if it's a playlist or artist
                 if res_type in ["playlist", "album"] or data["browseId"].startswith(
-                    ("VL", "PL", "RD", "OL", "MPRE")
+                    ("VL", "PL", "RD", "OL", "MPRE", "FEmusic_release_")
                 ):
                     open_pid(data["browseId"])
                 else:
@@ -1416,7 +1419,7 @@ class SearchPage(Adw.Bin):
 
         # Start Radio
         action_radio = Gio.SimpleAction.new("start_radio", None)
-        action_radio.connect("activate", lambda a, p: self._on_radio_action(data))
+        action_radio.connect("activate", lambda a, p, ws=weakref.ref(self): ws()._on_radio_action(data) if ws() else None)
         group.add_action(action_radio)
 
         # Build Menu Model

@@ -1,4 +1,5 @@
 import threading
+import weakref
 from gi.repository import Gtk, Adw, GObject, GLib, Pango, Gdk, Gio
 from ui.utils import AsyncPicture, LikeButton, MarqueeLabel, show_toast
 from ui.queue_panel import QueuePanel
@@ -714,13 +715,15 @@ class ExpandedPlayer(Gtk.Box):
         from ui.widgets.add_to_playlist import mark_playlist_used
         mark_playlist_used(target_pid)
 
+        weak_self = weakref.ref(self)
+        client = self.player.client
         def _thread():
             # add_playlist_items auto-swaps OMV→ATV for single-item
             # adds, so even if the player's own swap hasn't run yet,
             # the audio version still ends up in the playlist.
-            success = self.player.client.add_playlist_items(target_pid, [vid])
+            success = client.add_playlist_items(target_pid, [vid])
             msg = "Added to playlist" if success else "Failed to add"
-            GLib.idle_add(self._show_toast, msg)
+            GLib.idle_add(lambda: weak_self()._show_toast(msg) if weak_self() else None)
 
         threading.Thread(target=_thread, daemon=True).start()
 

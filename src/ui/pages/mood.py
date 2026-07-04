@@ -1,5 +1,6 @@
 from gi.repository import Gtk, Adw, GObject, GLib, Gio, Pango, Gdk
 import threading
+import weakref
 from api.client import MusicClient
 from ui.utils import AsyncImage
 from ui.util_classes import ScrolledWindow
@@ -13,6 +14,7 @@ class MoodPage(Adw.Bin):
     def __init__(self, player, open_playlist_callback, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.player = player
+        weak_self = weakref.ref(self)
         self.open_playlist_callback = open_playlist_callback
         self.client = MusicClient()
         self.params = None
@@ -45,7 +47,10 @@ class MoodPage(Adw.Bin):
         self.flow_box.set_row_spacing(0)
         self.flow_box.set_homogeneous(True)
         self.flow_box.set_activate_on_single_click(True)
-        self.flow_box.connect("child-activated", self.on_grid_child_activated)
+        weak_self = weakref.ref(self)
+        self.flow_box.connect(
+            "child-activated", lambda fb, child: weak_self().on_grid_child_activated(fb, child) if weak_self() else None
+        )
 
         self.content_box.append(self.flow_box)
 
@@ -106,9 +111,11 @@ class MoodPage(Adw.Bin):
         self._is_loading = True
         self._loading_wrap.set_visible(True)
 
+        client = self.client
+        p = self.params
         def fetch_func():
             try:
-                new_items = self.client.get_mood_playlists(self.params)
+                new_items = client.get_mood_playlists(p)
 
                 def update_cb():
                     if new_items:
@@ -163,14 +170,16 @@ class MoodPage(Adw.Bin):
 
             gesture = Gtk.GestureClick()
             gesture.set_button(3)
-            gesture.connect("pressed", self.on_grid_right_click, item_box)
+            weak_self = weakref.ref(self)
+            gesture.connect(
+                "pressed", lambda g, n, x, y: weak_self().on_grid_right_click(g, n, x, y, g.get_widget()) if weak_self() and g.get_widget() is not None else None
+            )
             item_box.add_controller(gesture)
 
             # Long Press for touch
             lp = Gtk.GestureLongPress()
             lp.connect(
-                "pressed",
-                lambda g, x, y, ib=item_box: self.on_grid_right_click(g, 1, x, y, ib),
+                "pressed", lambda g, x, y: weak_self().on_grid_right_click(g, 1, x, y, g.get_widget()) if weak_self() and g.get_widget() is not None else None
             )
             item_box.add_controller(lp)
 
@@ -193,13 +202,18 @@ class MoodPage(Adw.Bin):
         item_box.insert_action_group("item", group)
 
         # Play Action
+        weak_self = weakref.ref(self)
         play_action = Gio.SimpleAction.new("play", None)
-        play_action.connect("activate", self._on_play_item, data)
+        play_action.connect(
+            "activate", lambda a, p, d=data: weak_self()._on_play_item(a, p, d) if weak_self() else None
+        )
         group.add_action(play_action)
 
         # Queue Action
         queue_action = Gio.SimpleAction.new("queue", None)
-        queue_action.connect("activate", self._on_queue_item, data)
+        queue_action.connect(
+            "activate", lambda a, p, d=data: weak_self()._on_queue_item(a, p, d) if weak_self() else None
+        )
         group.add_action(queue_action)
 
         menu = Gio.Menu()

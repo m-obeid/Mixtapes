@@ -1,5 +1,6 @@
 from gi.repository import Gtk, Adw, GObject, GLib, Gio, Pango, Gdk
 import threading
+import weakref
 import json
 from api.client import MusicClient
 from ui.utils import AsyncImage, parse_item_metadata
@@ -14,6 +15,7 @@ class DiscographyPage(Adw.Bin):
     def __init__(self, player, open_playlist_callback, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.player = player
+        weak_self = weakref.ref(self)
         self.open_playlist_callback = open_playlist_callback
         self.client = MusicClient()
         self.channel_id = None
@@ -36,7 +38,10 @@ class DiscographyPage(Adw.Bin):
         self.scrolled.set_vexpand(True)
 
         vadjust = self.scrolled.get_vadjustment()
-        vadjust.connect("value-changed", self._on_scroll)
+        weak_self = weakref.ref(self)
+        self._scroll_handler_id = vadjust.connect(
+            "value-changed", lambda adj: weak_self()._on_scroll(adj) if weak_self() else None
+        )
 
         # Content Box
         self.content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
@@ -55,7 +60,10 @@ class DiscographyPage(Adw.Bin):
         self.flow_box.set_row_spacing(0)
         self.flow_box.set_homogeneous(True)
         self.flow_box.set_activate_on_single_click(True)
-        self.flow_box.connect("child-activated", self.on_grid_child_activated)
+        weak_self = weakref.ref(self)
+        self.flow_box.connect(
+            "child-activated", lambda fb, child: weak_self().on_grid_child_activated(fb, child) if weak_self() else None
+        )
 
         self.content_box.append(self.flow_box)
 
@@ -156,25 +164,29 @@ class DiscographyPage(Adw.Bin):
         self._is_loading = True
         self._loading_wrap.set_visible(True)
 
+        client = self.client
+        bid = self.browse_id
+        p = self.params
+        t_title = self.title
         def fetch_func():
             try:
                 new_items = []
-                if self.browse_id and "Top Songs" in self.title:
+                if bid and "Top Songs" in t_title:
                     pass
-                elif self.browse_id and self.params:
+                elif bid and p:
                     # Albums, singles, videos - get_artist_albums with raw parser fallback
-                    new_items = self.client.get_artist_albums(
-                        self.browse_id, self.params, limit=100
+                    new_items = client.get_artist_albums(
+                        bid, p, limit=100
                     )
                     self._has_more = False
-                elif self.browse_id:
+                elif bid:
                     # Fallback: try as playlist, then raw parse
                     try:
-                        res = self.client.get_playlist(self.browse_id)
+                        res = client.get_playlist(bid)
                         new_items = res.get("tracks", []) if res else []
                     except Exception:
-                        new_items = self.client._raw_parse_channel_content(
-                            self.browse_id, None
+                        new_items = client._raw_parse_channel_content(
+                            bid, None
                         )
                     self._has_more = False
 
@@ -182,7 +194,7 @@ class DiscographyPage(Adw.Bin):
                     if new_items:
                         # Filter out items we already have
                         existing_ids = set()
-                        for item in self.items:
+                        for item in getattr(self, "items", []) or []:
                             for key in ("browseId", "videoId", "playlistId"):
                                 if item.get(key):
                                     existing_ids.add(item[key])
@@ -282,14 +294,16 @@ class DiscographyPage(Adw.Bin):
 
             gesture = Gtk.GestureClick()
             gesture.set_button(3)
-            gesture.connect("pressed", self.on_grid_right_click, item_box)
+            weak_self = weakref.ref(self)
+            gesture.connect(
+                "pressed", lambda g, n, x, y: weak_self().on_grid_right_click(g, n, x, y, g.get_widget()) if weak_self() and g.get_widget() is not None else None
+            )
             item_box.add_controller(gesture)
 
             # Long Press for touch
             lp = Gtk.GestureLongPress()
             lp.connect(
-                "pressed",
-                lambda g, x, y, ib=item_box: self.on_grid_right_click(g, 1, x, y, ib),
+                "pressed", lambda g, x, y: weak_self().on_grid_right_click(g, 1, x, y, g.get_widget()) if weak_self() and g.get_widget() is not None else None
             )
             item_box.add_controller(lp)
 
@@ -321,13 +335,18 @@ class DiscographyPage(Adw.Bin):
         item_box.insert_action_group("item", group)
 
         # Play Action
+        weak_self = weakref.ref(self)
         play_action = Gio.SimpleAction.new("play", None)
-        play_action.connect("activate", self._on_play_item, data)
+        play_action.connect(
+            "activate", lambda a, p, d=data: weak_self()._on_play_item(a, p, d) if weak_self() else None
+        )
         group.add_action(play_action)
 
         # Queue Action
         queue_action = Gio.SimpleAction.new("queue", None)
-        queue_action.connect("activate", self._on_queue_item, data)
+        queue_action.connect(
+            "activate", lambda a, p, d=data: weak_self()._on_queue_item(a, p, d) if weak_self() else None
+        )
         group.add_action(queue_action)
 
         def copy_json_action(action, param):

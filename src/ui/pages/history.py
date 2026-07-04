@@ -1,4 +1,5 @@
 import threading
+import weakref
 from typing import Callable
 
 from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GObject, Pango
@@ -26,6 +27,7 @@ class HistoryPage(Adw.Bin):
     def __init__(self, player, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.player = player
+        weak_self = weakref.ref(self)
         self.client = MusicClient()
         self._tracks = []
         # Collected on each rebuild so set_compact_mode can swap the
@@ -97,7 +99,10 @@ class HistoryPage(Adw.Bin):
 
         # Title-in-headerbar behavior matches PlaylistPage so the
         # NavigationPage's title bar stays in sync when scrolling.
-        self.scrolled.get_vadjustment().connect("value-changed", self._on_scroll)
+        weak_self = weakref.ref(self)
+        self._scroll_handler_id = self.scrolled.get_vadjustment().connect(
+            "value-changed", lambda adj: weak_self()._on_scroll(adj) if weak_self() else None
+        )
 
     # ── Loading ────────────────────────────────────────────────────────────
 
@@ -274,7 +279,10 @@ class HistoryPage(Adw.Bin):
             row = self._make_row(t)
             if row is not None:
                 listbox.append(row)
-        listbox.connect("row-activated", self._on_row_activated)
+        weak_self = weakref.ref(self)
+        listbox.connect(
+            "row-activated", lambda lb, r: weak_self()._on_row_activated(lb, r) if weak_self() else None
+        )
         box.append(listbox)
         return box
 
@@ -380,18 +388,21 @@ class HistoryPage(Adw.Bin):
         like.set_valign(Gtk.Align.CENTER)
         like.set_data(vid, track.get("likeStatus", "INDIFFERENT"))
         hb.append(like)
+        row._like_btn = like
 
         row.set_child(hb)
 
         # Right-click / long-press context menu
         click = Gtk.GestureClick()
         click.set_button(3)
-        click.connect("released", self._on_row_right_click, row)
+        weak_self = weakref.ref(self)
+        click.connect(
+            "released", lambda g, n, x, y: weak_self()._on_row_right_click(g, n, x, y, g.get_widget()) if weak_self() and g.get_widget() is not None else None
+        )
         row.add_controller(click)
         lp = Gtk.GestureLongPress()
         lp.connect(
-            "pressed",
-            lambda g, x, y, r=row: self._on_row_right_click(g, 1, x, y, r),
+            "pressed", lambda g, x, y: weak_self()._on_row_right_click(g, 1, x, y, g.get_widget()) if weak_self() and g.get_widget() is not None else None
         )
         row.add_controller(lp)
 
@@ -425,10 +436,13 @@ class HistoryPage(Adw.Bin):
         group = Gio.SimpleActionGroup()
         row.insert_action_group("row", group)
         menu = Gio.Menu()
+        weak_self = weakref.ref(self)
 
         # Play
         def _do_play(a, p):
-            self._on_row_activated(None, row)
+            s = weak_self()
+            if s:
+                s._on_row_activated(None, row)
         act = Gio.SimpleAction.new("play", None)
         act.connect("activate", _do_play)
         group.add_action(act)
@@ -436,7 +450,9 @@ class HistoryPage(Adw.Bin):
 
         # Add to queue (append without taking over playback)
         def _do_queue(a, p):
-            self.player.add_to_queue(track)
+            s = weak_self()
+            if s:
+                s.player.add_to_queue(track)
         act = Gio.SimpleAction.new("queue", None)
         act.connect("activate", _do_queue)
         group.add_action(act)
@@ -449,9 +465,11 @@ class HistoryPage(Adw.Bin):
             aname = artists[0].get("name", "")
 
             def _do_artist(a, p):
-                root = self.get_root()
-                if root and hasattr(root, "open_artist"):
-                    root.open_artist(aid, aname)
+                s = weak_self()
+                if s:
+                    root = s.get_root()
+                    if root and hasattr(root, "open_artist"):
+                        root.open_artist(aid, aname)
             act = Gio.SimpleAction.new("artist", None)
             act.connect("activate", _do_artist)
             group.add_action(act)
@@ -463,9 +481,11 @@ class HistoryPage(Adw.Bin):
             alb_id = album["id"]
 
             def _do_album(a, p):
-                root = self.get_root()
-                if root and hasattr(root, "open_playlist"):
-                    root.open_playlist(alb_id)
+                s = weak_self()
+                if s:
+                    root = s.get_root()
+                    if root and hasattr(root, "open_playlist"):
+                        root.open_playlist(alb_id)
             act = Gio.SimpleAction.new("album", None)
             act.connect("activate", _do_album)
             group.add_action(act)
@@ -475,9 +495,11 @@ class HistoryPage(Adw.Bin):
         def _do_copy(a, p):
             url = f"https://music.youtube.com/watch?v={vid}"
             Gdk.Display.get_default().get_clipboard().set(url)
-            root = self.get_root()
-            if root and hasattr(root, "add_toast"):
-                root.add_toast("Link copied")
+            s = weak_self()
+            if s:
+                root = s.get_root()
+                if root and hasattr(root, "add_toast"):
+                    root.add_toast("Link copied")
         act = Gio.SimpleAction.new("copy_link", None)
         act.connect("activate", _do_copy)
         group.add_action(act)
@@ -499,7 +521,9 @@ class HistoryPage(Adw.Bin):
             )
 
             def _do_remove(a, p):
-                self._remove_track_optimistic(vid, tokens)
+                s = weak_self()
+                if s:
+                    s._remove_track_optimistic(vid, tokens)
             act = Gio.SimpleAction.new("remove_history", None)
             act.connect("activate", _do_remove)
             group.add_action(act)
@@ -563,9 +587,11 @@ class HistoryPage(Adw.Bin):
             self.empty_label.set_visible(True)
 
         # 4. Fire the API call.
+        client = self.client
         def _th():
             try:
-                self.client.remove_history_items(tokens)
+                if client:
+                    client.remove_history_items(tokens)
             except Exception as e:
                 print(f"[HISTORY] remove failed: {e}")
 
@@ -592,3 +618,4 @@ class HistoryPage(Adw.Bin):
             self.remove_css_class("compact")
             self.content_box.set_margin_start(24)
             self.content_box.set_margin_end(24)
+

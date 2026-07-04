@@ -1,3 +1,4 @@
+import weakref
 import os
 import json as _json
 from gi.repository import Gtk, Adw, GObject, GLib, Gdk, Gio, Pango
@@ -205,7 +206,8 @@ class LibraryPage(Adw.Bin):
         self.all_songs_btn.add_css_class("circular")
         self.all_songs_btn.set_valign(Gtk.Align.CENTER)
         self.all_songs_btn.set_tooltip_text("All Uploaded Songs")
-        self.all_songs_btn.connect("clicked", lambda b: self.uploads_page._open_all_songs())
+        weak_self = weakref.ref(self)
+        self.all_songs_btn.connect("clicked", lambda b: weak_self().uploads_page._open_all_songs() if weak_self() else None)
         self.uploads_actions_box.append(self.all_songs_btn)
 
         tab_row.append(self.uploads_actions_box)
@@ -1067,7 +1069,7 @@ class LibraryPage(Adw.Bin):
                 lp = Gtk.GestureLongPress()
                 lp.connect(
                     "pressed",
-                    lambda g, x, y, r=row: self.on_row_right_click(g, 1, x, y, r),
+                    lambda g, x, y, ws=weakref.ref(self): ws().on_row_right_click(g, 1, x, y, g.get_widget()) if ws() else None,
                 )
                 row.add_controller(lp)
 
@@ -1185,7 +1187,7 @@ class LibraryPage(Adw.Bin):
                 lp = Gtk.GestureLongPress()
                 lp.connect(
                     "pressed",
-                    lambda g, x, y, r=row: self.on_album_right_click(g, 1, x, y, r),
+                    lambda g, x, y, ws=weakref.ref(self): ws().on_album_right_click(g, 1, x, y, g.get_widget()) if ws() else None,
                 )
                 row.add_controller(lp)
 
@@ -2130,7 +2132,7 @@ class UploadsPage(Gtk.Box):
             row.add_controller(gesture)
 
             lp = Gtk.GestureLongPress()
-            lp.connect("pressed", lambda g, x, y, r=row: self._on_album_right_click(g, 1, x, y, r))
+            lp.connect("pressed", lambda g, x, y, ws=weakref.ref(self): ws()._on_album_right_click(g, 1, x, y, g.get_widget()) if ws() else None)
             row.add_controller(lp)
 
             self.albums_list.append(row)
@@ -2265,7 +2267,7 @@ class UploadsPage(Gtk.Box):
             title = album.get("title", "this album")
             action_section.append("Delete Album", "upl.delete")
             a_del = Gio.SimpleAction.new("delete", None)
-            a_del.connect("activate", lambda a, p, eid=entity_id, t=title: self._confirm_delete_upload(eid, t))
+            a_del.connect("activate", lambda a, p, eid=entity_id, t=title, ws=weakref.ref(self): ws()._confirm_delete_upload(eid, t) if ws() else None)
             group.add_action(a_del)
 
         if action_section.get_n_items() > 0:

@@ -1,7 +1,9 @@
 import threading
+import weakref
 import os
 import shutil
 import tempfile
+import re
 from gi.repository import Gtk, Adw, GObject, GLib, Pango, Gdk, Gio, GdkPixbuf
 from api.client import MusicClient
 from ui.utils import AsyncImage, LikeButton, get_yt_music_link, show_toast
@@ -37,8 +39,10 @@ class PlaylistPage(Adw.Bin):
     def __init__(self, player, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.player = player
-        self.connect("map", self._on_map)
-        self.connect("unmap", self._on_unmap)
+        weak_self = weakref.ref(self)
+        self.connect("map", lambda w: weak_self()._on_map(w) if weak_self() else None)
+        self.connect("unmap", lambda w: weak_self()._on_unmap(w) if weak_self() else None)
+        self.connect("destroy", lambda w: weak_self()._on_page_destroy(w) if weak_self() else None)
         self.client = MusicClient()
         self.playlist_id = None
         self.playlist_title_text = ""
@@ -70,12 +74,16 @@ class PlaylistPage(Adw.Bin):
 
         cover_gesture = Gtk.GestureClick()
         cover_gesture.set_button(3)
-        cover_gesture.connect("pressed", self.on_cover_right_click)
+        cover_gesture.connect(
+            "pressed", lambda g, n, x, y: weak_self().on_cover_right_click(g, n, x, y) if weak_self() else None
+        )
         self.cover_wrapper.add_controller(cover_gesture)
 
         # Long Press for touch
         lp = Gtk.GestureLongPress()
-        lp.connect("pressed", lambda g, x, y: self.on_cover_right_click(g, 1, x, y))
+        lp.connect(
+            "pressed", lambda g, x, y: weak_self().on_cover_right_click(g, 1, x, y) if weak_self() else None
+        )
         self.cover_wrapper.add_controller(lp)
 
         self.details_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -111,7 +119,9 @@ class PlaylistPage(Adw.Bin):
         self.read_more_btn.add_css_class("caption")
         self.read_more_btn.set_halign(Gtk.Align.START)
         self.read_more_btn.set_visible(False)
-        self.read_more_btn.connect("activate-link", self._on_read_more_clicked)
+        self.read_more_btn.connect(
+            "activate-link", lambda label, uri: weak_self()._on_read_more_clicked(label, uri) if weak_self() else None
+        )
 
         # Group description + read more tightly without extra spacing
         self.desc_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -128,7 +138,9 @@ class PlaylistPage(Adw.Bin):
         self.meta_label.set_halign(Gtk.Align.START)
         self.meta_label.set_hexpand(True)
         self.meta_label.set_use_markup(True)
-        self.meta_label.connect("activate-link", self.on_meta_link_activated)
+        self.meta_label.connect(
+            "activate-link", lambda label, uri: weak_self().on_meta_link_activated(label, uri) if weak_self() else None
+        )
         self.details_col.append(self.meta_label)
 
         self.stats_label = Gtk.Label(label="")
@@ -147,7 +159,7 @@ class PlaylistPage(Adw.Bin):
         play_btn = Gtk.Button(label="Play")
         play_btn.add_css_class("suggested-action")
         play_btn.add_css_class("pill")
-        play_btn.connect("clicked", self.on_play_clicked)
+        play_btn.connect("clicked", lambda btn: weak_self().on_play_clicked(btn) if weak_self() else None)
         actions_box.append(play_btn)
 
         shuffle_btn = Gtk.Button()
@@ -156,7 +168,7 @@ class PlaylistPage(Adw.Bin):
         shuffle_btn.set_valign(Gtk.Align.CENTER)
         shuffle_btn.set_halign(Gtk.Align.CENTER)
         shuffle_btn.set_size_request(48, 48)
-        shuffle_btn.connect("clicked", self.on_shuffle_clicked)
+        shuffle_btn.connect("clicked", lambda btn: weak_self().on_shuffle_clicked(btn) if weak_self() else None)
         actions_box.append(shuffle_btn)
 
         # Simplified Actions (Play/Shuffle only)
@@ -178,7 +190,9 @@ class PlaylistPage(Adw.Bin):
         # popover is actually about to appear.
         self._more_menu_dirty = True
         self._more_menu_pending_is_owned = False
-        self.more_btn.connect("notify::active", self._on_more_btn_active)
+        self.more_btn.connect(
+            "notify::active", lambda mb, spec: weak_self()._on_more_btn_active(mb, spec) if weak_self() else None
+        )
         actions_box.append(self.more_btn)
 
         # Actions Row
@@ -188,61 +202,89 @@ class PlaylistPage(Adw.Bin):
         action_add = Gio.SimpleAction.new(
             "add_all_to_playlist", GLib.VariantType.new("s")
         )
-        action_add.connect("activate", self._on_add_all_to_playlist)
+        action_add.connect(
+            "activate", lambda a, p: weak_self()._on_add_all_to_playlist(a, p) if weak_self() else None
+        )
         self.action_group.add_action(action_add)
 
         action_show_add = Gio.SimpleAction.new("show_add_all_to_playlist", None)
-        action_show_add.connect("activate", self._on_show_add_all_to_playlist)
+        action_show_add.connect(
+            "activate", lambda a, p: weak_self()._on_show_add_all_to_playlist(a, p) if weak_self() else None
+        )
         self.action_group.add_action(action_show_add)
 
         action_sel_all = Gio.SimpleAction.new("sel_all", None)
-        action_sel_all.connect("activate", lambda a, p: self._select_all())
+        action_sel_all.connect(
+            "activate", lambda a, p: weak_self()._select_all() if weak_self() else None
+        )
         self.action_group.add_action(action_sel_all)
 
         action_sel_none = Gio.SimpleAction.new("sel_none", None)
-        action_sel_none.connect("activate", lambda a, p: self._deselect_all())
+        action_sel_none.connect(
+            "activate", lambda a, p: weak_self()._deselect_all() if weak_self() else None
+        )
         self.action_group.add_action(action_sel_none)
 
         action_copy = Gio.SimpleAction.new("copy_link", None)
-        action_copy.connect("activate", self.on_copy_link_clicked)
+        action_copy.connect(
+            "activate", lambda a, p: weak_self().on_copy_link_clicked(a, p) if weak_self() else None
+        )
         self.action_group.add_action(action_copy)
 
         action_edit = Gio.SimpleAction.new("edit", None)
-        action_edit.connect("activate", self.on_edit_clicked)
+        action_edit.connect(
+            "activate", lambda a, p: weak_self().on_edit_clicked(a, p) if weak_self() else None
+        )
         self.action_group.add_action(action_edit)
 
         action_delete = Gio.SimpleAction.new("delete", None)
-        action_delete.connect("activate", self.on_delete_clicked)
+        action_delete.connect(
+            "activate", lambda a, p: weak_self().on_delete_clicked(a, p) if weak_self() else None
+        )
 
         action_sel_add = Gio.SimpleAction.new(
             "sel_add_to_playlist", GLib.VariantType.new("s")
         )
-        action_sel_add.connect("activate", self._on_sel_add_to_playlist)
+        action_sel_add.connect(
+            "activate", lambda a, p: weak_self()._on_sel_add_to_playlist(a, p) if weak_self() else None
+        )
         self.action_group.add_action(action_sel_add)
         self.action_group.add_action(action_delete)
 
         action_save = Gio.SimpleAction.new("save_to_library", None)
-        action_save.connect("activate", self._on_save_to_library)
+        action_save.connect(
+            "activate", lambda a, p: weak_self()._on_save_to_library(a, p) if weak_self() else None
+        )
         self.action_group.add_action(action_save)
 
         action_unsave = Gio.SimpleAction.new("remove_from_library", None)
-        action_unsave.connect("activate", self._on_remove_from_library)
+        action_unsave.connect(
+            "activate", lambda a, p: weak_self()._on_remove_from_library(a, p) if weak_self() else None
+        )
         self.action_group.add_action(action_unsave)
 
         action_dl_all = Gio.SimpleAction.new("download_all", None)
-        action_dl_all.connect("activate", self._on_download_all)
+        action_dl_all.connect(
+            "activate", lambda a, p: weak_self()._on_download_all(a, p) if weak_self() else None
+        )
         self.action_group.add_action(action_dl_all)
 
         action_start_radio = Gio.SimpleAction.new("start_radio", None)
-        action_start_radio.connect("activate", self._on_start_radio)
+        action_start_radio.connect(
+            "activate", lambda a, p: weak_self()._on_start_radio(a, p) if weak_self() else None
+        )
         self.action_group.add_action(action_start_radio)
 
         a_play_next = Gio.SimpleAction.new("play_all_next", None)
-        a_play_next.connect("activate", self._on_play_all_next)
+        a_play_next.connect(
+            "activate", lambda a, p: weak_self()._on_play_all_next(a, p) if weak_self() else None
+        )
         self.action_group.add_action(a_play_next)
 
         a_add_queue = Gio.SimpleAction.new("add_all_to_queue", None)
-        a_add_queue.connect("activate", self._on_add_all_to_queue)
+        a_add_queue.connect(
+            "activate", lambda a, p: weak_self()._on_add_all_to_queue(a, p) if weak_self() else None
+        )
         self.action_group.add_action(a_add_queue)
 
         self._is_saved_to_library = False
@@ -256,7 +298,9 @@ class PlaylistPage(Adw.Bin):
         self.sort_dropdown.set_valign(Gtk.Align.CENTER)
         self.sort_dropdown.add_css_class("pill")
         self.sort_dropdown.add_css_class("sort-dropdown")
-        self.sort_dropdown.connect("notify::selected", self.on_sort_changed)
+        self.sort_dropdown.connect(
+            "notify::selected", lambda dd, spec: weak_self().on_sort_changed(dd, spec) if weak_self() else None
+        )
 
         self.details_col.append(actions_box)
         self.header_info_box.append(self.details_col)
@@ -267,7 +311,9 @@ class PlaylistPage(Adw.Bin):
         self.sort_dir_btn.add_css_class("flat")
         self.sort_dir_btn.add_css_class("circular")
         self.sort_dir_btn.set_tooltip_text("Toggle sort direction")
-        self.sort_dir_btn.connect("clicked", self._on_sort_dir_clicked)
+        self.sort_dir_btn.connect(
+            "clicked", lambda btn: weak_self()._on_sort_dir_clicked(btn) if weak_self() else None
+        )
 
         self.sort_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.sort_row.set_margin_top(12)
@@ -279,7 +325,9 @@ class PlaylistPage(Adw.Bin):
         self.select_btn.add_css_class("flat")
         self.select_btn.add_css_class("circular")
         self.select_btn.set_tooltip_text("Select multiple songs")
-        self.select_btn.connect("toggled", self._on_select_toggled)
+        self.select_btn.connect(
+            "toggled", lambda btn: weak_self()._on_select_toggled(btn) if weak_self() else None
+        )
 
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
@@ -315,20 +363,26 @@ class PlaylistPage(Adw.Bin):
         sel_play_btn = Gtk.Button(icon_name="media-playback-start-symbolic")
         sel_play_btn.add_css_class("flat")
         sel_play_btn.set_tooltip_text("Play selected")
-        sel_play_btn.connect("clicked", self._on_sel_play)
+        sel_play_btn.connect(
+            "clicked", lambda btn: weak_self()._on_sel_play(btn) if weak_self() else None
+        )
         self.selection_bar.append(sel_play_btn)
 
         self.sel_add_btn = Gtk.Button(icon_name="list-add-symbolic")
         self.sel_add_btn.add_css_class("flat")
         self.sel_add_btn.set_tooltip_text("Add selected to playlist")
-        self.sel_add_btn.connect("clicked", self._on_sel_add_btn_clicked)
+        self.sel_add_btn.connect(
+            "clicked", lambda btn: weak_self()._on_sel_add_btn_clicked(btn) if weak_self() else None
+        )
         self.selection_bar.append(self.sel_add_btn)
 
         self.sel_remove_btn = Gtk.Button(icon_name="user-trash-symbolic")
         self.sel_remove_btn.add_css_class("flat")
         self.sel_remove_btn.add_css_class("destructive-action")
         self.sel_remove_btn.set_tooltip_text("Remove selected from playlist")
-        self.sel_remove_btn.connect("clicked", self._on_sel_remove)
+        self.sel_remove_btn.connect(
+            "clicked", lambda btn: weak_self()._on_sel_remove(btn) if weak_self() else None
+        )
         self.sel_remove_btn.set_visible(False)
         self.selection_bar.append(self.sel_remove_btn)
 
@@ -349,7 +403,9 @@ class PlaylistPage(Adw.Bin):
         sel_cancel_btn = Gtk.Button(icon_name="window-close-symbolic")
         sel_cancel_btn.add_css_class("flat")
         sel_cancel_btn.set_tooltip_text("Cancel selection")
-        sel_cancel_btn.connect("clicked", lambda b: self.select_btn.set_active(False))
+        sel_cancel_btn.connect(
+            "clicked", lambda b: weak_self().select_btn.set_active(False) if weak_self() else None
+        )
         self.selection_bar.append(sel_cancel_btn)
 
         self.header_container.append(self.selection_bar)
@@ -366,7 +422,9 @@ class PlaylistPage(Adw.Bin):
         self.header_store.append(HeaderItem())
 
         self.track_store = Gio.ListStore(item_type=TrackItem)
-        self.track_filter = Gtk.CustomFilter.new(self._track_filter_func, None)
+        self.track_filter = Gtk.CustomFilter.new(
+            lambda item, user_data: weak_self()._track_filter_func(item, user_data) if weak_self() else False, None
+        )
         # Start with no filter attached — Gtk.FilterListModel calls its filter
         # callback (Python!) for every item on every items-changed, which for
         # 989-track playlists meant ~1000 Python↔C crossings *per splice* even
@@ -384,23 +442,35 @@ class PlaylistPage(Adw.Bin):
 
         # ── 3. List & ScrolledWindow ──────────────────────────────────────────
         factory = Gtk.SignalListItemFactory()
-        factory.connect("setup", self._setup_list_item)
-        factory.connect("bind", self._bind_list_item)
-        factory.connect("unbind", self._unbind_list_item)
-        factory.connect("teardown", self._teardown_list_item)
+        factory.connect(
+            "setup", lambda f, li: weak_self()._setup_list_item(f, li) if weak_self() else None
+        )
+        factory.connect(
+            "bind", lambda f, li: weak_self()._bind_list_item(f, li) if weak_self() else None
+        )
+        factory.connect(
+            "unbind", lambda f, li: weak_self()._unbind_list_item(f, li) if weak_self() else None
+        )
+        factory.connect(
+            "teardown", lambda f, li: weak_self()._teardown_list_item(f, li) if weak_self() else None
+        )
 
         self.songs_list = Gtk.ListView.new(self.selection_model, factory)
         self.songs_list.add_css_class("playlist-view")
         # Keyboard activation: Enter/Space on the focused row plays it. Mouse
         # clicks go through the per-row gesture (see _setup_list_item); the
         # ListView "activate" signal covers keyboard (and double-click).
-        self.songs_list.connect("activate", self._on_list_activate)
+        self.songs_list.connect(
+            "activate", lambda lv, pos: weak_self()._on_list_activate(lv, pos) if weak_self() else None
+        )
 
         scrolled = ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scrolled.set_vexpand(True)
         self.vadjust = scrolled.get_vadjustment()
-        self.vadjust.connect("value-changed", self._on_scroll)
+        self._scroll_handler_id = self.vadjust.connect(
+            "value-changed", lambda adj: weak_self()._on_scroll(adj) if weak_self() else None
+        )
 
         clamp = (
             Adw.ClampScrollable() if hasattr(Adw, "ClampScrollable") else Adw.Clamp()
@@ -540,21 +610,28 @@ class PlaylistPage(Adw.Bin):
 
         gesture = Gtk.GestureClick()
         gesture.set_button(3)
-        gesture.connect("released", self._on_row_right_click_gesture)
+        gesture.connect(
+            "released", lambda g, n, x, y: weak_self()._on_row_right_click_gesture(g, n, x, y) if weak_self() else None
+        )
         row.add_controller(gesture)
 
         # Long Press for touch
         lp = Gtk.GestureLongPress()
         lp.connect(
-            "pressed", lambda g, x, y: self._on_row_right_click_gesture(g, 1, x, y)
+            "pressed", lambda g, x, y: weak_self()._on_row_right_click_gesture(g, 1, x, y) if weak_self() else None
         )
         row.add_controller(lp)
 
         # Left Click Gesture instead of list_view activate
         left_click = Gtk.GestureClick()
         left_click.set_button(1)
-        left_click.connect("pressed", self._on_row_left_pressed, row)
-        left_click.connect("released", self._on_row_left_click, list_item)
+        weak_self = weakref.ref(self)
+        left_click.connect(
+            "pressed", lambda g, n, x, y: weak_self()._on_row_left_pressed(g, n, x, y, g.get_widget()) if weak_self() and g.get_widget() is not None else None
+        )
+        left_click.connect(
+            "released", lambda g, n, x, y, li=list_item: weak_self()._on_row_left_click(g, n, x, y, li) if weak_self() else None
+        )
         row.add_controller(left_click)
 
         row._lv_video_data = None
@@ -639,9 +716,10 @@ class PlaylistPage(Adw.Bin):
             if hasattr(row, "_lv_check_handler") and row._lv_check_handler:
                 check.disconnect(row._lv_check_handler)
             check.set_active(is_selected)
+            weak_self = weakref.ref(self)
             row._lv_check_handler = check.connect(
                 "toggled",
-                lambda cb, vid=video_id, r=row: self._toggle_track_selection(vid, r),
+                lambda cb, vid=video_id, r=weakref.ref(row): weak_self()._toggle_track_selection(vid, r()) if weak_self() else None,
             )
         elif row._lv_check is not None:
             row._lv_check.set_visible(False)
@@ -772,11 +850,15 @@ class PlaylistPage(Adw.Bin):
             row.remove_css_class("playing")
 
         # Connect to player metadata changes
-        def on_meta_changed(player, *args, _row=row, _vid=video_id):
+        weak_row = weakref.ref(row)
+        def on_meta_changed(player, *args, _vid=video_id):
+            r = weak_row()
+            if not r:
+                return
             if bool(_vid and _vid == player.current_video_id):
-                _row.add_css_class("playing")
+                r.add_css_class("playing")
             else:
-                _row.remove_css_class("playing")
+                r.remove_css_class("playing")
 
         if getattr(row, "_lv_player_handler", None):
             self.player.disconnect(row._lv_player_handler)
@@ -795,6 +877,7 @@ class PlaylistPage(Adw.Bin):
             return
 
         row = bin_widget._lv_track_ui
+        row.insert_action_group("ctx", None)
         # Disconnect player signal
         if row._lv_player_handler is not None:
             try:
@@ -1013,7 +1096,6 @@ class PlaylistPage(Adw.Bin):
         # chunker from a previous render so its scheduled appends get
         # dropped instead of mutating the freshly-cleared store.
         self._track_populate_token = getattr(self, "_track_populate_token", 0) + 1
-
     def _populate_tracks_chunked(self, tracks, first_batch=40, batch=80):
         """Fill the track store without blocking the main thread.
 
@@ -1135,8 +1217,12 @@ class PlaylistPage(Adw.Bin):
         self._refresh_more_menu()
         # Connect download signals for live indicator updates
         dm = self.player.download_manager
-        self._dl_queued_id = dm.connect("item-queued", self._on_dl_indicator_update)
-        self._dl_done_id = dm.connect("item-done", self._on_dl_item_done)
+        self._dl_queued_id = dm.connect(
+            "item-queued", lambda dm, *args: weak_self()._on_dl_indicator_update(dm, *args) if weak_self() else None
+        )
+        self._dl_done_id = dm.connect(
+            "item-done", lambda dm, *args: weak_self()._on_dl_item_done(dm, *args) if weak_self() else None
+        )
 
     def _refresh_more_menu(self, is_owned=False):
         """Mark the more-menu as needing a rebuild; defer the actual work
@@ -1376,12 +1462,51 @@ class PlaylistPage(Adw.Bin):
     def _on_unmap(self, widget):
         self.emit("header-title-changed", "")
         # Disconnect download signals
+        if not hasattr(self, 'player') or self.player is None:
+            return
         dm = self.player.download_manager
         if hasattr(self, "_dl_queued_id") and self._dl_queued_id:
-            dm.disconnect(self._dl_queued_id)
+            try:
+                dm.disconnect(self._dl_queued_id)
+            except Exception:
+                pass
             self._dl_queued_id = None
         if hasattr(self, "_dl_done_id") and self._dl_done_id:
-            dm.disconnect(self._dl_done_id)
+            try:
+                dm.disconnect(self._dl_done_id)
+            except Exception:
+                pass
+            self._dl_done_id = None
+
+    def _on_page_destroy(self, widget):
+        self.cleanup()
+
+    def cleanup(self):
+        """Perform resource cleanup when the page is popped/destroyed."""
+        self._cleaned_up = True
+
+        # Disconnect scroll handler
+        if getattr(self, "_scroll_handler_id", None) is not None:
+            if hasattr(self, "vadjust") and self.vadjust:
+                try:
+                    self.vadjust.disconnect(self._scroll_handler_id)
+                except Exception:
+                    pass
+            self._scroll_handler_id = None
+
+        # Disconnect download signals
+        dm = self.player.download_manager
+        if hasattr(self, "_dl_queued_id") and self._dl_queued_id:
+            try:
+                dm.disconnect(self._dl_queued_id)
+            except Exception:
+                pass
+            self._dl_queued_id = None
+        if hasattr(self, "_dl_done_id") and self._dl_done_id:
+            try:
+                dm.disconnect(self._dl_done_id)
+            except Exception:
+                pass
             self._dl_done_id = None
 
     # ── Load playlist ─────────────────────────────────────────────────────────
@@ -1477,7 +1602,9 @@ class PlaylistPage(Adw.Bin):
 
     def _schedule_details_fetch(self, playlist_id, delay=False):
         def start():
-            if self.playlist_id != playlist_id:
+            if getattr(self, "playlist_id", None) != playlist_id:
+                return False
+            if not getattr(self, "content_spinner", None):
                 return False
             self.content_spinner.set_visible(True)
             thread = threading.Thread(
@@ -2459,17 +2586,19 @@ class PlaylistPage(Adw.Bin):
             return
         print(f"Starting background fetch for full playlist: {self.playlist_id}")
 
+        client = self.client
+        pid = self.playlist_id
         def fetch_job():
             try:
                 # get_playlist_full handles the full fetch and (via
                 # MusicClient.get_playlist_full) owns the disk-cache
                 # write once ytmusicapi / raw-continuation / yt_dlp have
                 # done their best. No cache logic here.
-                data = self.client.get_playlist_full(self.playlist_id, limit=None)
+                data = client.get_playlist_full(pid, limit=None)
                 tracks = data.get("tracks", []) if data else []
                 if tracks:
                     print(f"Background fetch complete. Fetched {len(tracks)} tracks.")
-                    self.client.set_cached_playlist_tracks(self.playlist_id, tracks)
+                    client.set_cached_playlist_tracks(pid, tracks)
                     GObject.idle_add(self._on_background_fetch_complete, tracks)
             except Exception as e:
                 print(f"Error in background fetch: {e}")
@@ -2657,9 +2786,10 @@ class PlaylistPage(Adw.Bin):
                 else None
             )
             if vid:
+                weak_self = weakref.ref(self)
                 row._lv_check_handler = check.connect(
                     "toggled",
-                    lambda cb, v=vid, r=row: self._toggle_track_selection(v, r),
+                    lambda cb, v=vid, r=weakref.ref(row): weak_self()._toggle_track_selection(v, r()) if weak_self() else None,
                 )
 
     def _refresh_all_row_visuals(self):
@@ -2776,14 +2906,16 @@ class PlaylistPage(Adw.Bin):
         from ui.widgets.add_to_playlist import mark_playlist_used
         mark_playlist_used(target_pid)
 
+        weak_self = weakref.ref(self)
+        client = self.client
         def thread_func():
-            success = self.client.add_playlist_items(target_pid, video_ids)
+            success = client.add_playlist_items(target_pid, video_ids)
             msg = (
                 f"Added {len(video_ids)} tracks to playlist"
                 if success
                 else "Failed to add tracks"
             )
-            GLib.idle_add(self._show_toast, msg)
+            GLib.idle_add(lambda: weak_self()._show_toast(msg) if weak_self() else None)
 
         threading.Thread(target=thread_func, daemon=True).start()
 
@@ -3080,12 +3212,13 @@ class PlaylistPage(Adw.Bin):
                 # The OMV→ATV swap is handled inside add_playlist_items;
                 # it auto-enables for single-item adds (this is the
                 # right-click case) and stays off for bulk.
+                weak_self = weakref.ref(self)
+                client = self.client
                 threading.Thread(
                     target=lambda: (
-                        self.client.add_playlist_items(target_pid, vids),
+                        client.add_playlist_items(target_pid, vids),
                         GLib.idle_add(
-                            self._show_toast,
-                            f"Added {n} track{'s' if n > 1 else ''} to playlist",
+                            lambda: weak_self()._show_toast(f"Added {n} track{'s' if n > 1 else ''} to playlist") if weak_self() else None
                         ),
                     ),
                     daemon=True,
@@ -3259,18 +3392,19 @@ class PlaylistPage(Adw.Bin):
             sel_section.append("Deselect All", "ctx.deselect_all")
 
             a_toggle = Gio.SimpleAction.new("toggle_sel", None)
+            weak_self = weakref.ref(self)
             a_toggle.connect(
                 "activate",
-                lambda act, p, v=vid, r=row: self._toggle_track_selection(v, r),
+                lambda act, p, v=vid, r=weakref.ref(row): weak_self()._toggle_track_selection(v, r()) if weak_self() else None,
             )
             group.add_action(a_toggle)
 
             a_sel_all = Gio.SimpleAction.new("select_all", None)
-            a_sel_all.connect("activate", lambda act, p: self._select_all())
+            a_sel_all.connect("activate", lambda act, p: weak_self()._select_all() if weak_self() else None)
             group.add_action(a_sel_all)
 
             a_desel = Gio.SimpleAction.new("deselect_all", None)
-            a_desel.connect("activate", lambda act, p: self._deselect_all())
+            a_desel.connect("activate", lambda act, p: weak_self()._deselect_all() if weak_self() else None)
             group.add_action(a_desel)
 
             menu_model.append_section(None, sel_section)
@@ -3293,7 +3427,8 @@ class PlaylistPage(Adw.Bin):
         if self._multi_select_mode and self._selected_video_ids:
             clip_section.append("Copy Selection Data (Debug)", "ctx.copy_debug")
             a_debug = Gio.SimpleAction.new("copy_debug", None)
-            a_debug.connect("activate", lambda act, p: self._copy_selection_debug())
+            weak_self = weakref.ref(self)
+            a_debug.connect("activate", lambda act, p: weak_self()._copy_selection_debug() if weak_self() else None)
             group.add_action(a_debug)
 
         if clip_section.get_n_items() > 0:
@@ -3335,7 +3470,8 @@ class PlaylistPage(Adw.Bin):
         self.read_more_btn.set_markup(f"<a href='toggle'>{text}</a>")
         self.read_more_btn.add_css_class("caption")
         self.read_more_btn.set_halign(Gtk.Align.START)
-        self.read_more_btn.connect("activate-link", self._on_read_more_clicked)
+        weak_self = weakref.ref(self)
+        self.read_more_btn.connect("activate-link", lambda label, uri: weak_self()._on_read_more_clicked(label, uri) if weak_self() else False)
         parent.append(self.read_more_btn)
         return False
 
@@ -3609,7 +3745,8 @@ class PlaylistPage(Adw.Bin):
         if can_edit:
             action = Gio.SimpleAction.new("edit_playlist", None)
             action.set_enabled(True)
-            action.connect("activate", lambda *_: self._show_edit_dialog())
+            weak_self = weakref.ref(self)
+            action.connect("activate", lambda *_: weak_self()._show_edit_dialog() if weak_self() else None)
             group.add_action(action)
 
         self.cover_wrapper.insert_action_group("cover", group)

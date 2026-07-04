@@ -38,9 +38,13 @@ class MixPage(BasePlaylistPage):
         thread.start()
 
     def _fetch_details(self, is_incremental=False):
+        client = self.client
+        pid = self.playlist_id
+        if not client or not pid:
+            return
         try:
             # ytmusicapi get_playlist with limit=25 initially
-            data = self.client.get_playlist(self.playlist_id, limit=100)
+            data = client.get_playlist(pid, limit=100)
 
             title = data.get("title", "Unknown Mix")
             description = data.get("description", "")
@@ -78,3 +82,4 @@ class MixPage(BasePlaylistPage):
         # self.sort_row.set_visible(False)
         self.load_more_spinner.set_visible(False)
         self.is_loading_more = False
+
