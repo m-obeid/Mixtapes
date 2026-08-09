@@ -2657,14 +2657,20 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Manually trigger search mode and insert the character
         # This avoids the "ignored first character" bug during tab switches
+        # A flag is used to ignore the intermediate search-changed emitted by set_text()
+        # since replacing non-empty text emits search-changed twice
         self.search_bar.set_search_mode(True)
         self.search_entry.grab_focus()
+        self._replacing_search_text = True
         self.search_entry.set_text(char)
+        self._replacing_search_text = False
         self.search_entry.set_position(-1)  # Move cursor to end
         return True
 
     def on_global_search_changed(self, entry):
         text = entry.get_text()
+        if not text and getattr(self, "_replacing_search_text", False):
+            return
 
         # Context-Aware Search Logic (Double check redirection here too)
         filterable_child = self._get_active_filterable_child()
