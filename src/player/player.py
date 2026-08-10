@@ -799,7 +799,6 @@ class Player(GObject.Object):
             self.current_queue_index = index
             self._play_current_index()
             self._maybe_extend_infinite()
-            self.emit("state-changed", "queue-updated")
 
     def next(self):
         if self.current_queue_index + 1 < len(self.queue):
@@ -826,8 +825,6 @@ class Player(GObject.Object):
             else:
                 self.stop()  # End of queue
                 self.current_queue_index = -1
-
-        self.emit("state-changed", "queue-updated")
 
     # ── Gapless handlers ──────────────────────────────────────────────────────
 
@@ -958,7 +955,6 @@ class Player(GObject.Object):
                 self.mpris_events.on_player_all()
             except Exception as e:
                 print(f"mpris ERROR: {e}")
-        self.emit("state-changed", "queue-updated")
 
         # Top up the cache for whatever comes after this newly-current track.
         threading.Thread(
