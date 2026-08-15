@@ -885,6 +885,13 @@ class PlaylistPage(Adw.Bin):
         if not is_online() and not self.player.download_manager.is_downloaded(video_id):
             return
 
+        # If playlist is currently queued, jump to track
+        if self.player.queue_source_id == self.playlist_id:
+            for i, t in enumerate(self.player.queue):
+                if t.get("videoId") == video_id:
+                    self.player.play_queue_index(i)
+            return
+
         # Use the same queue the big Play button uses so playing a track
         # respects the user's chosen sort + direction. Falling back to
         # `original_tracks` unconditionally would always queue the
