@@ -110,6 +110,8 @@ class DiscordRPCAdapter:
         self._pid = os.getpid()
         self.status = "Disconnected"
         self._enabled = get_rpc_enabled()
+        self._reconnect_lock = threading.Lock()
+        self._reconnect_timer = None
 
         if self._enabled:
             self._worker = threading.Thread(target=self._run, daemon=True)
@@ -212,6 +214,10 @@ class DiscordRPCAdapter:
     def _do_connect(self):
         if self.connected or self._stopping:
             return
+        # Ignore if a reconnect timer is pending
+        with self._reconnect_lock:
+            if self._reconnect_timer:
+                return
         for path in _candidate_ipc_paths():
             # On Windows the named pipe doesn't appear in os.path.exists for
             # all client variants, so we just try to open it and let the
@@ -234,6 +240,7 @@ class DiscordRPCAdapter:
                 self.connected = True
                 self.status = "Connected"
                 self._connect_attempt = 0
+                self._cancel_reconnect()
                 self._do_update()
                 return
             except Exception as e:
@@ -247,16 +254,30 @@ class DiscordRPCAdapter:
     def _schedule_reconnect(self):
         if self._stopping:
             return
-        idx = min(self._connect_attempt, len(RECONNECT_BACKOFF) - 1)
-        delay = RECONNECT_BACKOFF[idx]
-        self._connect_attempt += 1
+        with self._reconnect_lock:
+            if self._reconnect_timer:
+                return
+            idx = min(self._connect_attempt, len(RECONNECT_BACKOFF) - 1)
+            delay = RECONNECT_BACKOFF[idx]
+            self._connect_attempt += 1
 
-        def _later():
-            time.sleep(delay)
-            if not self._stopping:
-                self._queue.put(("connect", None))
+            def _later():
+                with self._reconnect_lock:
+                    self._reconnect_timer = None
+                if not self._stopping:
+                    self._queue.put(("connect", None))
 
-        threading.Thread(target=_later, daemon=True).start()
+            timer = threading.Timer(delay, _later)
+            timer.daemon = True
+            self._reconnect_timer = timer
+            timer.start()
+
+    def _cancel_reconnect(self):
+        with self._reconnect_lock:
+            timer = self._reconnect_timer
+            self._reconnect_timer = None
+        if timer:
+            timer.cancel()
 
     # ── Frame I/O ─────────────────────────────────────────────────────────
 
@@ -319,6 +340,7 @@ class DiscordRPCAdapter:
             self._schedule_reconnect()
 
     def _do_stop(self):
+        self._cancel_reconnect()
         try:
             if self.connected and self.transport:
                 frame = {
