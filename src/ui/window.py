@@ -386,7 +386,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.root_content_view.add_top_bar(self.header_bar)
 
         self.search_bar = Gtk.SearchBar()
-        self.search_bar.set_key_capture_widget(self)  # Capture keys
         self.search_bar.connect(
             "notify::search-mode-enabled", self.on_search_mode_changed
         )
@@ -2656,19 +2655,22 @@ class MainWindow(Adw.ApplicationWindow):
                 if root_page and nav.get_previous_page(root_page):
                     nav.pop_to_tag("root")
 
-            # Manually trigger search mode and insert the character
-            # This avoids the "ignored first character" bug during tab switches
-            self.search_bar.set_search_mode(True)
-            self.search_entry.grab_focus()
-            self.search_entry.set_text(char)
-            self.search_entry.set_position(-1)  # Move cursor to end
-            return True
-
-        # Let the event propagate so GtkSearchBar can capture it
-        return False
+        # Manually trigger search mode and insert the character
+        # This avoids the "ignored first character" bug during tab switches
+        # A flag is used to ignore the intermediate search-changed emitted by set_text()
+        # since replacing non-empty text emits search-changed twice
+        self.search_bar.set_search_mode(True)
+        self.search_entry.grab_focus()
+        self._replacing_search_text = True
+        self.search_entry.set_text(char)
+        self._replacing_search_text = False
+        self.search_entry.set_position(-1)  # Move cursor to end
+        return True
 
     def on_global_search_changed(self, entry):
         text = entry.get_text()
+        if not text and getattr(self, "_replacing_search_text", False):
+            return
 
         # Context-Aware Search Logic (Double check redirection here too)
         filterable_child = self._get_active_filterable_child()
