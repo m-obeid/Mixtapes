@@ -146,6 +146,11 @@ sudo dnf install git python3 python3-pip nodejs gtk4-devel adwaita-gtk4-devel we
 sudo apt install git python3 python3-pip nodejs libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
 ```
 
+**macOS**
+```bash
+brew install python git gtk4 libadwaita pygobject3 adwaita-icon-theme libsoup@3 gst-python gstreamer dbus
+```
+
 > [!NOTE]
 > On Debian/Ubuntu, consider using the Flatpak install to avoid outdated packages.
 

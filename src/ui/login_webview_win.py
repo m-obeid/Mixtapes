@@ -1,12 +1,13 @@
 """
 Windows login helper integration.
-Launches the standalone MixtapesLogin.exe (Edge WebView2) and watches
+Launches a standalone login helper and watches
 for the resulting credentials file.
 """
 
 import os
 import subprocess
 import threading
+import sys
 
 
 def get_login_output_path():
@@ -17,10 +18,16 @@ def get_login_output_path():
 def find_login_helper():
     """Find MixtapesLogin.exe relative to the app."""
     base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    candidates = [
-        os.path.join(base, "windows", "MixtapesLogin.exe"),
-        os.path.join(base, "MixtapesLogin.exe"),
-    ]
+    if sys.platform == "win32":
+        candidates = [
+            os.path.join(base, "windows", "MixtapesLogin.exe"),
+            os.path.join(base, "MixtapesLogin.exe"),
+        ]
+    else:
+        candidates = [
+            os.path.join(base, "windows", "login_helper.py"),
+            os.path.join(base, "MixtapesLogin.exe"),
+        ]
     for c in candidates:
         if os.path.exists(c):
             return c
@@ -35,7 +42,7 @@ def launch_login(on_complete):
     """
     helper = find_login_helper()
     if not helper:
-        on_complete(None, "MixtapesLogin.exe not found")
+        on_complete(None, "Login helper not found")
         return
 
     output_path = get_login_output_path()
@@ -46,8 +53,13 @@ def launch_login(on_complete):
 
     def _run():
         try:
+            if helper.endswith(".py"):
+                cmd = [sys.executable, helper, "--output", output_path]
+            else:
+                cmd = [helper, "--output", output_path]
+            
             subprocess.run(
-                [helper, "--output", output_path],
+                cmd,
                 timeout=300,
             )
             if os.path.exists(output_path):

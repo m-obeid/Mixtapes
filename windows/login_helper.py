@@ -55,10 +55,18 @@ def check_cookies(window):
             has_sapisid = False
 
             for cookie in cookies:
-                # pywebview returns http.cookies.SimpleCookie objects
-                # each SimpleCookie is a dict of {name: Morsel}
-                for name, morsel in cookie.items():
-                    value = morsel.value  # .value gives unquoted, .coded_value keeps quotes
+                # pywebview 4.x returns SimpleCookie dicts, 5.x returns Cookie objects
+                if hasattr(cookie, "items"):
+                    items = cookie.items()
+                elif hasattr(cookie, "name") and hasattr(cookie, "value"):
+                    items = [(cookie.name, cookie)]
+                else:
+                    continue
+
+                for name, morsel in items:
+                    value = getattr(morsel, "value", morsel)
+                    if not isinstance(value, str):
+                        value = str(value)
                     if name and value:
                         cookie_strs.append(f"{name}={value}")
                         if name in ("SAPISID", "__Secure-3PAPISID"):

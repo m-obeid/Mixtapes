@@ -1797,20 +1797,30 @@ class MainWindow(Adw.ApplicationWindow):
         sidebar_hdr = self.queue_panel.header_bar
         content_hdr = self.header_bar
 
-        if sidebar_owns_trailing:
-            content_hdr.set_show_start_title_buttons(True)
-            content_hdr.set_show_end_title_buttons(False)
-            sidebar_hdr.set_show_start_title_buttons(False)
-            sidebar_hdr.set_show_end_title_buttons(True)
+        is_mac = sys.platform == "darwin"
+        
+        # Reset everything first
+        content_hdr.set_show_start_title_buttons(False)
+        content_hdr.set_show_end_title_buttons(False)
+        sidebar_hdr.set_show_start_title_buttons(False)
+        sidebar_hdr.set_show_end_title_buttons(False)
+
+        if is_mac:
+            # macOS: Buttons on the left (START)
+            if not is_right and sidebar_visible and not collapsed:
+                # Sidebar is on the left
+                sidebar_hdr.set_show_start_title_buttons(True)
+            else:
+                # Content is on the left (or spans everything)
+                content_hdr.set_show_start_title_buttons(True)
         else:
-            content_hdr.set_show_start_title_buttons(False)
-            content_hdr.set_show_end_title_buttons(True)
-            # Only show start-side buttons on the sidebar when it's visibly
-            # hugging the outer left edge (rare close-on-left layouts).
-            sidebar_hdr.set_show_start_title_buttons(
-                not is_right and sidebar_visible and not collapsed
-            )
-            sidebar_hdr.set_show_end_title_buttons(False)
+            # Windows/Linux: Buttons on the right (END)
+            if is_right and sidebar_visible and not collapsed:
+                # Sidebar is on the right
+                sidebar_hdr.set_show_end_title_buttons(True)
+            else:
+                # Content is on the right (or spans everything)
+                content_hdr.set_show_end_title_buttons(True)
 
     def _on_show_stream_info(self, row):
         try:
@@ -3092,7 +3102,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def show_login(self, dialog_cls):
         dialog = dialog_cls(self)
-        dialog.connect("close-request", self.on_login_close)  # Handle close if needed
+        dialog.connect("close-request", self.on_login_close)
         dialog.present()
         return False
 
