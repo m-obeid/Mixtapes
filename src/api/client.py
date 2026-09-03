@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from ytmusicapi import YTMusic
 import ytmusicapi.navigation
 from gi.repository import GLib
@@ -523,6 +524,7 @@ class MusicClient:
         self.auth_path = os.path.join(data_dir, "headers_auth.json")
         self._is_authed = False
         self._playlist_cache = {}  # Cache fully-fetched playlists
+        self._sort_metric_cache = {}  # (metric, browseId) -> {videoId: number}
         self._download_db = None  # Lazy-loaded DownloadDB for offline cache
         self._user_info = None  # Cache for account info
         self._subscribed_artists = set()  # Set of channel IDs
@@ -2648,6 +2650,278 @@ class MusicClient:
             except Exception as e:
                 print(f"[PLAYLIST] re-cache after augment failed: {e}")
         return data
+
+    # ── Playlist sort metrics (views / date added) ────────────────────────────
+    #
+    # A YTM playlist track carries neither a view count nor the date it was
+    # added, so the two extra sort orders need a side fetch:
+    #
+    #   views  — the same playlist on the youtube.com side lists "36M views"
+    #            per entry (lockupViewModel), 100 per browse call.
+    #   added  — `playlistItemData.voteSortValue` on the YTM response is the
+    #            add timestamp (epoch seconds); it's what YTM's own "Newest
+    #            first" sorts on. ytmusicapi's parser drops it, so we walk
+    #            the raw response ourselves.
+    #
+    # Both are fetched only when the user picks the matching sort, and
+    # memoized per playlist for the session.
+
+    _MAX_METRIC_PAGES = 60  # 100 rows per page
+    _YT_WEB_BROWSE_URL = "https://www.youtube.com/youtubei/v1/browse?prettyPrint=false"
+
+    @staticmethod
+    def _normalize_browse_playlist_id(playlist_id):
+        pid = (playlist_id or "").strip()
+        if not pid:
+            return None
+        return pid if pid.startswith("VL") else f"VL{pid}"
+
+    @staticmethod
+    def _walk_renderers(response, key):
+        """Yield every value stored under `key` anywhere in a response.
+
+        Iterative rather than recursive — a full playlist page nests
+        deeply enough for that to matter."""
+        stack = [response]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                found = node.get(key)
+                if found is not None:
+                    yield found
+                stack.extend(node.values())
+            elif isinstance(node, list):
+                stack.extend(node)
+
+    @classmethod
+    def _continuation_token(cls, response, row_keys):
+        """Continuation token of the shelf whose rows use one of `row_keys`.
+
+        A playlist response carries more than one continuation: the row
+        list has its own, and the section list wrapping it has another
+        that only pulls in the trailing "related playlists" shelf.
+        Following the wrong one silently truncates the fetch after the
+        first page, so match on the shelf that holds the rows."""
+        stack = [response]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                stack.extend(node.values())
+            elif isinstance(node, list):
+                token = None
+                has_rows = False
+                for entry in node:
+                    if not isinstance(entry, dict):
+                        continue
+                    if any(key in entry for key in row_keys):
+                        has_rows = True
+                    renderer = entry.get("continuationItemRenderer")
+                    if isinstance(renderer, dict):
+                        # The endpoint is sometimes a commandExecutorCommand
+                        # wrapping the real continuation, so search the
+                        # subtree rather than assuming a fixed path.
+                        for command in cls._walk_renderers(
+                            renderer, "continuationCommand"
+                        ):
+                            if isinstance(command, dict) and command.get("token"):
+                                token = command["token"]
+                                break
+                if token and has_rows:
+                    return token
+                stack.extend(node)
+        return None
+
+    def get_playlist_added_dates(self, playlist_id):
+        """Map videoId -> epoch seconds the track was added to the playlist.
+
+        Returns {} when the playlist has no such data (albums, radios,
+        the local DOWNLOADS/HISTORY lists) or the fetch fails."""
+        browse_id = self._normalize_browse_playlist_id(playlist_id)
+        if not self.api or not browse_id:
+            return {}
+        key = ("added", browse_id)
+        if key in self._sort_metric_cache:
+            return self._sort_metric_cache[key]
+
+        dates = {}
+        try:
+            response = self.api._send_request("browse", {"browseId": browse_id})
+            for _ in range(self._MAX_METRIC_PAGES):
+                for item in self._walk_renderers(response, "playlistItemData"):
+                    if not isinstance(item, dict):
+                        continue
+                    vid = item.get("videoId")
+                    added = item.get("voteSortValue")
+                    if vid and isinstance(added, int):
+                        dates.setdefault(vid, added)
+                token = self._continuation_token(
+                    response, ("musicResponsiveListItemRenderer",)
+                )
+                if not token:
+                    break
+                response = self.api._send_request("browse", {"continuation": token})
+        except Exception as e:
+            print(f"[PLAYLIST] added-date fetch failed for {browse_id}: {e}")
+            if not dates:
+                return {}
+
+        print(f"[PLAYLIST] added dates: {len(dates)} tracks for {browse_id}")
+        self._sort_metric_cache[key] = dates
+        return dates
+
+    # "36M views", "1.8B views", "1,234 views", "1 view", "No views"
+    _VIEWS_RE = re.compile(r"^([\d.,]+)\s*([KMB])?\s+views?$", re.IGNORECASE)
+    _VIEW_MULTIPLIERS = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}
+
+    @classmethod
+    def _parse_view_count(cls, text):
+        if not isinstance(text, str):
+            return None
+        text = text.strip()
+        if text.lower().startswith("no view"):
+            return 0
+        match = cls._VIEWS_RE.match(text)
+        if not match:
+            return None
+        number, suffix = match.groups()
+        try:
+            value = float(number.replace(",", ""))
+        except ValueError:
+            return None
+        return int(value * cls._VIEW_MULTIPLIERS.get((suffix or "").upper(), 1))
+
+    def get_playlist_view_counts(self, playlist_id):
+        """Map videoId -> view count for every video on the playlist.
+
+        Reads youtube.com's copy of the playlist, which — unlike the
+        YouTube Music one — puts a view count on each row. Returns {} if
+        the playlist isn't reachable there (private playlists need the
+        session cookie; DOWNLOADS/HISTORY have no YouTube counterpart)."""
+        browse_id = self._normalize_browse_playlist_id(playlist_id)
+        if not browse_id:
+            return {}
+        key = ("views", browse_id)
+        if key in self._sort_metric_cache:
+            return self._sort_metric_cache[key]
+
+        import requests
+
+        # hl/gl pin the response to English so "36M views" stays parseable
+        # regardless of the user's locale.
+        body = {
+            "context": {
+                "client": {
+                    "clientName": "WEB",
+                    "clientVersion": "2.20240101.00.00",
+                    "hl": "en",
+                    "gl": "US",
+                }
+            },
+            "browseId": browse_id,
+        }
+        views = {}
+        try:
+            session = requests.Session()
+            session.headers.update(self._yt_web_headers())
+            response = session.post(
+                self._YT_WEB_BROWSE_URL, json=body, timeout=20
+            ).json()
+            for _ in range(self._MAX_METRIC_PAGES):
+                self._harvest_view_counts(response, views)
+                token = self._continuation_token(response, self._VIEW_ROW_KEYS)
+                if not token:
+                    break
+                body.pop("browseId", None)
+                body["continuation"] = token
+                response = session.post(
+                    self._YT_WEB_BROWSE_URL, json=body, timeout=20
+                ).json()
+        except Exception as e:
+            print(f"[PLAYLIST] view-count fetch failed for {browse_id}: {e}")
+            if not views:
+                return {}
+
+        print(f"[PLAYLIST] view counts: {len(views)} tracks for {browse_id}")
+        self._sort_metric_cache[key] = views
+        return views
+
+    def _yt_web_headers(self):
+        """Browser-ish headers for www.youtube.com. Carries the signed-in
+        session when we have one so private playlists resolve too — the
+        SAPISIDHASH is origin-bound, so YTM's own Authorization header
+        can't be reused as-is."""
+        headers = {
+            "Content-Type": "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Origin": "https://www.youtube.com",
+            "Referer": "https://www.youtube.com/",
+        }
+        cookie = None
+        try:
+            cookie = self.api.headers.get("Cookie") if self.api else None
+        except Exception:
+            cookie = None
+        if not cookie:
+            return headers
+        try:
+            from ytmusicapi.helpers import get_authorization, sapisid_from_cookie
+
+            sapisid = sapisid_from_cookie(cookie)
+            headers["Cookie"] = cookie
+            headers["Authorization"] = get_authorization(
+                sapisid + " " + "https://www.youtube.com"
+            )
+            headers["X-Origin"] = "https://www.youtube.com"
+        except Exception:
+            pass
+        return headers
+
+    # youtube.com renders a playlist two ways: the read-only lockup grid, and
+    # the classic editable list for playlists the signed-in user owns. Both
+    # carry the view count, in different places.
+    _VIEW_ROW_KEYS = ("lockupViewModel", "playlistVideoRenderer")
+
+    @classmethod
+    def _harvest_view_counts(cls, response, out):
+        for lockup in cls._walk_renderers(response, "lockupViewModel"):
+            if not isinstance(lockup, dict):
+                continue
+            if lockup.get("contentType") != "LOCKUP_CONTENT_TYPE_VIDEO":
+                continue
+            vid = lockup.get("contentId")
+            if not vid or vid in out:
+                continue
+            rows = (
+                lockup.get("metadata", {})
+                .get("lockupMetadataViewModel", {})
+                .get("metadata", {})
+                .get("contentMetadataViewModel", {})
+                .get("metadataRows", [])
+            )
+            for row in rows:
+                for part in row.get("metadataParts", []):
+                    count = cls._parse_view_count(part.get("text", {}).get("content"))
+                    if count is not None:
+                        out[vid] = count
+                        break
+                if vid in out:
+                    break
+
+        for item in cls._walk_renderers(response, "playlistVideoRenderer"):
+            if not isinstance(item, dict):
+                continue
+            vid = item.get("videoId")
+            if not vid or vid in out:
+                continue
+            for run in item.get("videoInfo", {}).get("runs", []):
+                count = cls._parse_view_count(run.get("text"))
+                if count is not None:
+                    out[vid] = count
+                    break
 
     def _yt_dlp_flat_playlist(self, playlist_id):
         """Use yt_dlp's flat-playlist extraction to enumerate every
