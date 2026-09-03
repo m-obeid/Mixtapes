@@ -8,6 +8,13 @@ from ui.utils import AsyncImage, LikeButton, get_yt_music_link, show_toast
 from ui.crop_dialog import ImageCropDialog
 from ui.util_classes import ScrolledWindow
 
+# Sort dropdown positions. The first five come straight off the track data;
+# the last two need a side fetch (see MusicClient.get_playlist_view_counts /
+# get_playlist_added_dates), so they're appended rather than slotted in.
+SORT_DEFAULT = 0
+SORT_VIEWS = 5
+SORT_ADDED = 6
+
 # ── GObject Models ────────────────────────────────────────────────────────────
 
 
@@ -43,6 +50,8 @@ class PlaylistPage(Adw.Bin):
         self.playlist_id = None
         self.playlist_title_text = ""
         self.playlist_description_text = ""
+        # (playlist_id, sort_type) -> {videoId: number}; see _sort_metric
+        self._sort_metrics = {}
         self._is_previewing_cover = False
         self.is_owned = False
         self.is_editable = False
@@ -251,7 +260,15 @@ class PlaylistPage(Adw.Bin):
         # Gio.MenuItem doesn't have set_visible, so we might need to refresh the menu
 
         self.sort_dropdown = Gtk.DropDown.new_from_strings(
-            ["Default", "Title (A-Z)", "Artist (A-Z)", "Album (A-Z)", "Duration"]
+            [
+                "Default",
+                "Title (A-Z)",
+                "Artist (A-Z)",
+                "Album (A-Z)",
+                "Duration",
+                "Most viewed",
+                "Recently added",
+            ]
         )
         self.sort_dropdown.set_valign(Gtk.Align.CENTER)
         self.sort_dropdown.add_css_class("pill")
@@ -2860,22 +2877,147 @@ class PlaylistPage(Adw.Bin):
 
     def _on_sort_dir_clicked(self, btn):
         self._sort_descending = not self._sort_descending
-        btn.set_icon_name(
-            "view-sort-descending-symbolic"
-            if self._sort_descending
-            else "view-sort-ascending-symbolic"
-        )
+        self._refresh_sort_dir_icon()
         self.reorder_playlist(self.sort_dropdown.get_selected())
 
-    def on_sort_changed(self, dropdown, pspec):
-        self.reorder_playlist(dropdown.get_selected())
+    def _refresh_sort_dir_icon(self):
+        """Point the arrow at the order actually on screen. Most-viewed and
+        recently-added run biggest-first untoggled, so their icon is the
+        flip of the toggle."""
+        descending = getattr(self, "_sort_descending", False)
+        if self.sort_dropdown.get_selected() in (SORT_VIEWS, SORT_ADDED):
+            descending = not descending
+        self.sort_dir_btn.set_icon_name(
+            "view-sort-descending-symbolic"
+            if descending
+            else "view-sort-ascending-symbolic"
+        )
 
-    def _sort_tracks(self, tracks):
+    def on_sort_changed(self, dropdown, pspec):
+        sort_type = dropdown.get_selected()
+        self._refresh_sort_dir_icon()
+        if sort_type in (SORT_VIEWS, SORT_ADDED) and not self._has_sort_metric(
+            sort_type
+        ):
+            self._fetch_sort_metric(sort_type)
+            return
+        self.reorder_playlist(sort_type)
+
+    # ── Sort metrics (view count / date added) ────────────────────────────────
+    #
+    # Neither number rides along on a playlist track, so the first time the
+    # user picks one of those orders we fetch it in the background and
+    # reorder once it lands. Keyed by playlist so switching pages can't
+    # sort one playlist by another's numbers.
+
+    def _sort_metric(self, sort_type):
+        """The {videoId: number} map backing a metric sort, or {}."""
+        return self._sort_metrics.get((self.playlist_id, sort_type)) or {}
+
+    def _has_sort_metric(self, sort_type):
+        return (self.playlist_id, sort_type) in self._sort_metrics
+
+    def _drop_sort_metrics(self, playlist_id):
+        for sort_type in (SORT_VIEWS, SORT_ADDED):
+            self._sort_metrics.pop((playlist_id, sort_type), None)
+        browse_id = self.client._normalize_browse_playlist_id(playlist_id)
+        for metric in ("views", "added"):
+            self.client._sort_metric_cache.pop((metric, browse_id), None)
+
+    def _fetch_sort_metric(self, sort_type):
+        playlist_id = self.playlist_id
+        if not playlist_id or playlist_id in ("DOWNLOADS", "HISTORY"):
+            self._sort_metric_unavailable(sort_type)
+            return
+
+        from ui.utils import is_online
+
+        if not is_online():
+            self._sort_metric_unavailable(sort_type, offline=True)
+            return
+
+        self.content_spinner.set_visible(True)
+        self.sort_dropdown.set_sensitive(False)
+
+        def worker():
+            try:
+                if sort_type == SORT_VIEWS:
+                    metric = self.client.get_playlist_view_counts(playlist_id)
+                else:
+                    metric = self.client.get_playlist_added_dates(playlist_id)
+            except Exception as e:
+                print(f"[PLAYLIST] sort metric {sort_type} failed: {e}")
+                metric = {}
+            GLib.idle_add(self._apply_sort_metric, playlist_id, sort_type, metric)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_sort_metric(self, playlist_id, sort_type, metric):
+        self.sort_dropdown.set_sensitive(True)
+        if self.playlist_id != playlist_id:
+            return False  # user navigated away mid-fetch
+        self.content_spinner.set_visible(False)
+
+        if not metric:
+            # Not cached: a later attempt should retry rather than
+            # silently leaving the list in its current order.
+            self._sort_metric_unavailable(sort_type)
+            return False
+
+        self._sort_metrics[(playlist_id, sort_type)] = metric
+        self.reorder_playlist(sort_type)
+        self._warn_partial_sort_metric(sort_type, metric)
+        return False
+
+    def _warn_partial_sort_metric(self, sort_type, metric):
+        """Say so when the fetch only covered part of the playlist.
+
+        YouTube caps some lists — Liked Music stops at 200 — and deleted
+        or private videos never resolve. Those tracks sort to the bottom,
+        which looks like a broken sort unless we mention it."""
+        tracks = getattr(self, "original_tracks", None) or self.current_tracks or []
+        total = len({t.get("videoId") for t in tracks if t.get("videoId")})
+        ranked = len({t.get("videoId") for t in tracks if t.get("videoId") in metric})
+        if not total or ranked >= total * 0.9:
+            return
+        label = "view counts" if sort_type == SORT_VIEWS else "add dates"
+        self._show_toast(
+            f"Only {ranked} of {total} songs have {label} — the rest stay at the end"
+        )
+
+    def _sort_metric_unavailable(self, sort_type, offline=False):
+        """Fall back to the default order and say why."""
+        label = "View counts" if sort_type == SORT_VIEWS else "Add dates"
+        if offline:
+            self._show_toast(f"{label} need an internet connection")
+        else:
+            self._show_toast(f"{label} aren't available for this list")
+        self.content_spinner.set_visible(False)
+        self.sort_dropdown.set_sensitive(True)
+        if self.sort_dropdown.get_selected() != SORT_DEFAULT:
+            self.sort_dropdown.set_selected(SORT_DEFAULT)
+
+    def _sort_by_metric(self, tracks, sort_type, reverse):
+        """Order by a fetched number, biggest (or newest) first by default.
+
+        Tracks the fetch didn't cover — private/blocked videos, mostly —
+        keep their relative order and stay at the bottom either way, so
+        flipping the direction never buries the ranked songs under them."""
+        metric = self._sort_metric(sort_type)
+        ranked, unranked = [], []
+        for track in tracks:
+            value = metric.get(track.get("videoId"))
+            (unranked if value is None else ranked).append(track)
+        ranked.sort(key=lambda t: metric[t["videoId"]], reverse=not reverse)
+        return ranked + unranked
+
+    def _sort_tracks(self, tracks, sort_type=None):
         """Sort a list of track dicts according to current sort dropdown and direction."""
-        sort_type = self.sort_dropdown.get_selected()
+        if sort_type is None:
+            sort_type = self.sort_dropdown.get_selected()
         reverse = getattr(self, "_sort_descending", False)
         result = list(tracks)
-        if sort_type == 0:
+        if sort_type == SORT_DEFAULT:
             if reverse:
                 result.reverse()
         elif sort_type == 1:
@@ -2900,8 +3042,10 @@ class PlaylistPage(Adw.Bin):
                 ),
                 reverse=reverse,
             )
-        elif sort_type == 4:
+        elif sort_type == 4:  # Duration
             result.sort(key=lambda x: x.get("duration_seconds", 0), reverse=reverse)
+        elif sort_type in (SORT_VIEWS, SORT_ADDED):
+            result = self._sort_by_metric(result, sort_type, reverse)
         return result
 
     def reorder_playlist(self, sort_type):
@@ -2914,48 +3058,7 @@ class PlaylistPage(Adw.Bin):
         if not source:
             return
 
-        reverse = getattr(self, "_sort_descending", False)
-
-        if sort_type == 0:
-            if not reverse:
-                # Default order: restore original
-                source = (
-                    list(self.original_tracks)
-                    if hasattr(self, "original_tracks") and self.original_tracks
-                    else source
-                )
-            else:
-                source = (
-                    list(reversed(self.original_tracks))
-                    if hasattr(self, "original_tracks") and self.original_tracks
-                    else source
-                )
-        elif sort_type == 1:
-            source.sort(key=lambda x: x.get("title", "").lower(), reverse=reverse)
-        elif sort_type == 2:
-            source.sort(
-                key=lambda x: (
-                    x.get("artists", [{}])[0].get("name", "").lower()
-                    if x.get("artists")
-                    else "",
-                    x.get("title", "").lower(),
-                ),
-                reverse=reverse,
-            )
-        elif sort_type == 3:
-            source.sort(
-                key=lambda x: (
-                    x.get("album", {}).get("name", "").lower()
-                    if isinstance(x.get("album"), dict)
-                    else str(x.get("album") or "").lower(),
-                    x.get("title", "").lower(),
-                ),
-                reverse=reverse,
-            )
-        elif sort_type == 4:  # Duration
-            source.sort(key=lambda x: x.get("duration_seconds", 0), reverse=reverse)
-
-        self.current_tracks = source
+        self.current_tracks = self._sort_tracks(source, sort_type)
         # Re-apply active filter if any, otherwise show all
         if self.current_filter_text:
             self.filter_content(self.current_filter_text)
@@ -3507,6 +3610,10 @@ class PlaylistPage(Adw.Bin):
             self.client._playlist_cache.pop(pid, None)
         except Exception:
             pass
+        # Same for the view-count / date-added maps: a refresh is how the
+        # user picks up songs added since the page opened, and a stale map
+        # would leave those unranked at the bottom.
+        self._drop_sort_metrics(pid)
         self._clear_track_store()
         self.current_limit = 200
         self.stack.set_visible_child_name("loading")
