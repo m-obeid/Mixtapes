@@ -2837,6 +2837,8 @@ class MainWindow(Adw.ApplicationWindow):
         small_icon_row.connect("notify::active", on_small_icon_toggled)
         rpc_group.add(small_icon_row)
 
+        page.add(self._build_scrobbler_group(prefs))
+
         # Account group was moved to the top of this page; see the
         # _build_account_group call right after `page.add(page)`.
 
@@ -3067,6 +3069,308 @@ class MainWindow(Adw.ApplicationWindow):
             threading.Thread(target=_fetch, daemon=True).start()
 
         group.add(row)
+        return group
+
+    def _build_scrobbler_group(self, prefs):
+        """Build the 'Scrobbling' Adw.PreferencesGroup: a master switch plus
+        a connect/disconnect row per service."""
+        import json as _json
+        from player.scrobbler import SERVICE_LABELS
+
+        group = Adw.PreferencesGroup()
+        group.set_title("Scrobbling")
+        group.set_description(
+            "Submit the tracks you play to Last.fm and ListenBrainz"
+        )
+
+        adapter = getattr(self.player, "scrobbler", None)
+        if adapter is None:
+            unavailable = Adw.ActionRow()
+            unavailable.set_title("Unavailable")
+            unavailable.set_subtitle("The scrobbler failed to start")
+            group.add(unavailable)
+            return group
+
+        prefs_path = self._prefs_path()
+
+        def _read_pref(key, default):
+            try:
+                if os.path.exists(prefs_path):
+                    with open(prefs_path) as f:
+                        return _json.load(f).get(key, default)
+            except Exception:
+                pass
+            return default
+
+        def _save_pref(key, value):
+            data = {}
+            try:
+                if os.path.exists(prefs_path):
+                    with open(prefs_path) as f:
+                        data = _json.load(f)
+            except Exception:
+                data = {}
+            data[key] = value
+            os.makedirs(os.path.dirname(prefs_path), exist_ok=True)
+            with open(prefs_path, "w") as f:
+                _json.dump(data, f)
+
+        def _toast(message):
+            prefs.add_toast(Adw.Toast.new(message))
+
+        enabled_row = Adw.SwitchRow()
+        enabled_row.set_title("Enable Scrobbling")
+        enabled_row.set_subtitle(
+            "Submit a play once you've heard half a track, or four minutes"
+        )
+        enabled_row.set_active(adapter.get_enabled())
+        enabled_row.connect(
+            "notify::active",
+            lambda switch, _p: (
+                _save_pref("scrobble_enabled", switch.get_active()),
+                adapter.set_enabled(switch.get_active()),
+            ),
+        )
+        group.add(enabled_row)
+
+        now_playing_row = Adw.SwitchRow()
+        now_playing_row.set_title('Send "Now Playing"')
+        now_playing_row.set_subtitle(
+            "Show the current track on your profile while it plays"
+        )
+        now_playing_row.set_active(
+            _read_pref("scrobble_now_playing", True)
+        )
+        now_playing_row.connect(
+            "notify::active",
+            lambda switch, _p: (
+                _save_pref("scrobble_now_playing", switch.get_active()),
+                adapter.set_now_playing_enabled(switch.get_active()),
+            ),
+        )
+        group.add(now_playing_row)
+
+        rows = {}
+        buttons = {}
+        for service in ("lastfm", "listenbrainz"):
+            row = Adw.ActionRow()
+            row.set_title(SERVICE_LABELS[service])
+            button = Gtk.Button()
+            button.set_valign(Gtk.Align.CENTER)
+            row.add_suffix(button)
+            group.add(row)
+            rows[service] = row
+            buttons[service] = button
+
+        pending_row = Adw.ActionRow()
+        pending_row.set_title("Queued Listens")
+        group.add(pending_row)
+
+        def _refresh():
+            for service, row in rows.items():
+                button = buttons[service]
+                connected = adapter.is_connected(service)
+                if service == "lastfm" and not adapter.lastfm_configured():
+                    row.set_subtitle(
+                        "This build ships without Last.fm API credentials"
+                    )
+                    button.set_label("Connect")
+                    button.set_sensitive(False)
+                    continue
+                button.set_sensitive(True)
+                if connected:
+                    name = adapter.username(service)
+                    row.set_subtitle(
+                        f"Connected as {name}" if name else "Connected"
+                    )
+                    button.set_label("Disconnect")
+                    button.remove_css_class("suggested-action")
+                    button.add_css_class("destructive-action")
+                else:
+                    # A revoked credential disconnects the service from the
+                    # worker thread, so say why rather than just "not connected".
+                    error = adapter.last_error or ""
+                    label = SERVICE_LABELS[service]
+                    row.set_subtitle(
+                        error if error.startswith(label) else "Not connected"
+                    )
+                    button.set_label("Connect")
+                    button.remove_css_class("destructive-action")
+                    button.add_css_class("suggested-action")
+            waiting = adapter.pending_count()
+            pending_row.set_visible(bool(waiting))
+            pending_row.set_subtitle(
+                f"{waiting} play saved while offline, retried automatically"
+                if waiting == 1
+                else f"{waiting} plays saved while offline, retried automatically"
+            )
+            return False
+
+        def _open_uri(uri):
+            def _done(launcher, result):
+                try:
+                    launcher.launch_finish(result)
+                except Exception as e:
+                    print(f"[SCROBBLE] could not open {uri}: {e}")
+                    _toast("Could not open your browser")
+
+            # Held on the window: the launcher has to outlive this call for
+            # the async portal request to complete.
+            self._scrobbler_uri_launcher = Gtk.UriLauncher(uri=uri)
+            self._scrobbler_uri_launcher.launch(self, None, _done)
+
+        # Last.fm's desktop flow: ask for a token, let the user approve it in
+        # a browser, then poll until Last.fm hands back a session key.
+        def _lastfm_connect():
+            # The token request is a round trip. Lock the button so a second
+            # click cannot start a competing authorization.
+            buttons["lastfm"].set_sensitive(False)
+
+            def _work():
+                try:
+                    token, url = adapter.lastfm_request_token()
+                except Exception as e:
+                    GLib.idle_add(_toast, f"Last.fm: {e}")
+                    GLib.idle_add(_refresh)
+                    return
+                GLib.idle_add(_refresh)
+                GLib.idle_add(_await_approval, token, url)
+
+            threading.Thread(target=_work, daemon=True).start()
+
+        def _await_approval(token, url):
+            dialog = Adw.AlertDialog(
+                heading="Authorize Mixtapes",
+                body=(
+                    "Approve access in the browser tab that just opened. "
+                    "This closes on its own once Last.fm confirms."
+                ),
+            )
+            dialog.add_response("cancel", "Cancel")
+            dialog.set_close_response("cancel")
+            spinner = Adw.Spinner() if hasattr(Adw, "Spinner") else Gtk.Spinner()
+            if isinstance(spinner, Gtk.Spinner):
+                spinner.start()
+            spinner.set_size_request(32, 32)
+            spinner.set_margin_top(6)
+            dialog.set_extra_child(spinner)
+
+            state = {"done": False}
+
+            def _on_response(_dialog, _response):
+                state["done"] = True
+
+            dialog.connect("response", _on_response)
+            dialog.present(self)
+            _open_uri(url)
+
+            def _poll():
+                try:
+                    _poll_until_authorized()
+                finally:
+                    adapter.close_thread_session()
+
+            def _poll_until_authorized():
+                # Last.fm keeps the token valid for an hour. Allow enough
+                # room to log in and clear 2FA before giving up.
+                deadline = time.time() + 300
+                while not state["done"] and time.time() < deadline:
+                    time.sleep(2.0)
+                    if state["done"]:
+                        return
+                    try:
+                        name = adapter.lastfm_finish_auth(token)
+                    except Exception:
+                        # Last.fm reports an unauthorized token until the
+                        # user presses Allow, so keep waiting.
+                        continue
+                    state["done"] = True
+                    GLib.idle_add(dialog.close)
+                    GLib.idle_add(_refresh)
+                    GLib.idle_add(
+                        _toast,
+                        f"Scrobbling to Last.fm as {name}" if name
+                        else "Connected to Last.fm",
+                    )
+                    return
+                if not state["done"]:
+                    state["done"] = True
+                    GLib.idle_add(dialog.close)
+                    GLib.idle_add(_toast, "Last.fm authorization timed out")
+
+            threading.Thread(target=_poll, daemon=True).start()
+            return False
+
+        def _listenbrainz_connect():
+            dialog = Adw.AlertDialog(
+                heading="Connect ListenBrainz",
+                body="Paste the user token from your ListenBrainz settings.",
+            )
+            entry = Adw.PasswordEntryRow(title="User Token")
+            listbox = Gtk.ListBox()
+            listbox.add_css_class("boxed-list")
+            listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+            listbox.append(entry)
+
+            link = Gtk.Button(label="Get Your Token")
+            link.set_halign(Gtk.Align.CENTER)
+            link.add_css_class("flat")
+            link.connect(
+                "clicked",
+                lambda _b: _open_uri("https://listenbrainz.org/settings/"),
+            )
+
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            box.set_margin_top(6)
+            box.append(listbox)
+            box.append(link)
+            dialog.set_extra_child(box)
+
+            dialog.add_response("cancel", "Cancel")
+            dialog.add_response("connect", "Connect")
+            dialog.set_response_appearance(
+                "connect", Adw.ResponseAppearance.SUGGESTED
+            )
+            dialog.set_default_response("connect")
+            dialog.set_close_response("cancel")
+
+            def _on_response(_dialog, response):
+                if response != "connect":
+                    return
+                token = entry.get_text().strip()
+
+                def _work():
+                    try:
+                        name = adapter.listenbrainz_connect(token)
+                    except Exception as e:
+                        GLib.idle_add(_toast, f"ListenBrainz: {e}")
+                        return
+                    GLib.idle_add(_refresh)
+                    GLib.idle_add(
+                        _toast,
+                        f"Scrobbling to ListenBrainz as {name}" if name
+                        else "Connected to ListenBrainz",
+                    )
+
+                threading.Thread(target=_work, daemon=True).start()
+
+            dialog.connect("response", _on_response)
+            dialog.present(self)
+
+        def _on_service_clicked(button, service):
+            if adapter.is_connected(service):
+                adapter.disconnect(service)
+                _refresh()
+                _toast(f"Disconnected from {SERVICE_LABELS[service]}")
+            elif service == "lastfm":
+                _lastfm_connect()
+            else:
+                _listenbrainz_connect()
+
+        for service, button in buttons.items():
+            button.connect("clicked", _on_service_clicked, service)
+
+        _refresh()
         return group
 
     def on_logout_clicked(self, btn, prefs_window=None):

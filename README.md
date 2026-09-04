@@ -54,6 +54,7 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 - **Search & Discovery** -- New releases, moods & moments, genres, trending, and charts
 - **Full Playback Control** -- Play/pause, seeking, queue management, shuffle, repeat modes
 - **Downloads** -- Download tracks for offline playback as local files
+- **Scrobbling** -- Submit your plays to Last.fm and ListenBrainz, with an offline backlog
 - **MPRIS Support** -- Control playback from system media controls (Linux)
 - **Windows SMTC** -- System media transport controls integration (Windows)
 - **Radio & Mixes** -- Start a radio station from any song or artist
@@ -269,6 +270,26 @@ flatpak run com.pocoguy.Muse
 | GStreamer plugins (base, good, bad, ugly) | Audio playback                                  | via MSYS2               |
 | ffmpeg                                    | Audio muxing for downloads                      | via MSYS2               |
 
+### Last.fm API Credentials
+
+Nothing to do here for a normal build. This section explains where the key comes from.
+
+Last.fm requires every client to ship its own API key. ListenBrainz needs no app credentials and works out of the box.
+
+The key and secret live in `_EMBEDDED_LASTFM_API_KEY` and `_EMBEDDED_LASTFM_API_SECRET` at the top of [src/player/scrobbler.py](src/player/scrobbler.py), and they are committed on purpose. The AUR package builds from a `git clone` on the user's own machine, and a Flathub build runs on Flathub's infrastructure, so neither one receives a secret from CI. A credential shipped inside a desktop client is extractable from the binary no matter how it got there, so injecting it at build time would protect nothing while leaving AUR and Flathub users without Last.fm.
+
+To build against your own Last.fm app, register one at [last.fm/api/account/create](https://www.last.fm/api/account/create), then either replace the two constants or set these before launching:
+
+```bash
+export MIXTAPES_LASTFM_API_KEY=your_key
+export MIXTAPES_LASTFM_API_SECRET=your_secret
+```
+
+> [!IMPORTANT]
+> The environment variables are read when the app starts, not when it is compiled. Exporting them during `makepkg` or `flatpak-builder` has no effect on the resulting package.
+
+With no credentials the Last.fm row in Preferences stays disabled and says so. ListenBrainz is unaffected.
+
 ## Authentication
 
 > [!TIP]
@@ -323,6 +344,7 @@ Without a `browser.json` file, the app falls back to the unauthenticated API, wh
 |   ☑️   | **Flatpak**                  | ✅️ Flatpak build<br>🔜 Flathub release<br>✅️ App icon                                                                                                                         |
 |   ☑️   | **Settings**                 | Configure app preferences (theme, audio quality, etc.).                                                                                                                       |
 |   ✅️   | **Cover Art Tint**           | Tint Libadwaita to match cover art, kinda like Material You                                                                                                                   |
+|   ✅️   | **Scrobbling**               | Submit plays to Last.fm and ListenBrainz<br>✅️ Now Playing<br>✅️ Offline backlog with retries                                               |
 |   ✅️   | **Discord RPC**              | Show your current track on Discord<br>✅️ Linux<br>✅️ Windows                                                                                                                  |
 |   ✅️   | **Lyrics**                   | Synchronized lyrics using a bunch of providers (Apple Music, BetterLyrics, BiniLyrics, NetEase, LRCLIB, native YT Music)                                                      |
 |   ✅️   | **Windows**                  | ✅️ GTK4/Libadwaita via MSYS2<br>✅️ GStreamer playback<br>✅️ SMTC media controls<br>✅️ System tray<br>✅️ Installer<br>✅️ Login helper (Edge WebView2)                          |

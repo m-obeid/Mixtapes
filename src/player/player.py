@@ -120,6 +120,7 @@ else:
         pass
 
 from player.discord_rpc import DiscordRPCAdapter
+from player.scrobbler import ScrobblerAdapter
 
 
 def _extract_spectrum_bands(structure):
@@ -451,6 +452,15 @@ class Player(GObject.Object):
             print(f"Discord RPC init failed: {e}")
             self.discord_rpc = None
 
+        # Scrobbling to Last.fm / ListenBrainz. Idle until the user connects
+        # a service in Preferences.
+        try:
+            self.scrobbler = ScrobblerAdapter(self)
+            self.connect("state-changed", self._on_scrobbler_state_changed)
+        except Exception as e:
+            print(f"Scrobbler init failed: {e}")
+            self.scrobbler = None
+
     def _load_media_api(self):
         "Starts MPRIS or SMTC for Linux or Windows, loads once only when _start_playback is called"
         if self.media_api_loaded:
@@ -494,6 +504,31 @@ class Player(GObject.Object):
     ):
         if getattr(self, "discord_rpc", None):
             self.discord_rpc.update()
+
+    def _on_scrobbler_state_changed(self, obj, state):
+        if getattr(self, "scrobbler", None):
+            self.scrobbler.on_state_changed(state)
+
+    def _notify_scrobbler(self, video_id, title, artist, track=None):
+        """Tell the scrobbler a new play started. Called from the same two
+        places that reset the history gate, so a mid-load metadata re-emit
+        (thumbnail fix, OMV to ATV swap) never restarts the clock."""
+        scrobbler = getattr(self, "scrobbler", None)
+        if not scrobbler:
+            return
+        album = ""
+        duration = 0.0
+        if track:
+            album = track.get("album", "")
+            if isinstance(album, dict):
+                album = album.get("name", "")
+            duration = float(_parse_track_duration(track) or 0)
+        try:
+            scrobbler.on_track_started(
+                video_id, title, artist, str(album or ""), duration
+            )
+        except Exception as e:
+            print(f"[SCROBBLE] track start failed: {e}")
 
     def _on_mpris_state_changed(self, obj, state):
         if hasattr(self, "mpris_events"):
@@ -921,6 +956,7 @@ class Player(GObject.Object):
         # Spectrum stream-times restart at 0 for the new uri, so the queue
         # would otherwise be polluted by the previous track's tail.
         self._viz_queue.clear()
+        self._notify_scrobbler(video_id, title, artist, track)
         # New track → fresh history-record gate.
         self._history_recorded_for = None
         if (
@@ -1220,6 +1256,14 @@ class Player(GObject.Object):
         self.current_video_id = video_id
         self.duration = -1
         self.emit("progression", 0.0, 0.0)
+        self._notify_scrobbler(
+            video_id,
+            title,
+            artist,
+            self.queue[self.current_queue_index]
+            if 0 <= self.current_queue_index < len(self.queue)
+            else None,
+        )
         # New track → fresh history-record gate.
         if self._history_recorded_for != video_id:
             self._history_recorded_for = None
@@ -1780,6 +1824,13 @@ class Player(GObject.Object):
                         artist_hint = new_artist_name
                 video_id = swapped
                 self.current_video_id = swapped
+                # Scrobble the audio version's title, not the music
+                # video's. This is the same play, so the clock keeps
+                # running.
+                if getattr(self, "scrobbler", None):
+                    self.scrobbler.refine_current_track(
+                        swapped, title_hint, artist_hint
+                    )
                 GObject.idle_add(
                     self.emit,
                     "metadata-changed",
@@ -2668,6 +2719,15 @@ class Player(GObject.Object):
                 # We use float(d) to ensure the UI progress bar has a max value
                 d = self.duration if self.duration > 0 else 0
                 self.emit("progression", float(current_time), float(d))
+
+                # Drive the scrobbler from here rather than the signal: this
+                # is the only place with the pipeline's true state, and the
+                # bus reports no transition when a queue plays straight
+                # through (set_state(NULL) flushes those messages).
+                if getattr(self, "scrobbler", None):
+                    self.scrobbler.on_progress(
+                        float(current_time), float(d), state == Gst.State.PLAYING
+                    )
 
                 # 5. Record a listen after the threshold, but only in
                 # `after_30s` mode. "immediate" is handled in
