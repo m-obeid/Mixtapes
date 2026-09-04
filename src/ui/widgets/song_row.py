@@ -2,9 +2,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-import threading
-from gi.repository import Gtk, Adw, GLib, Gdk, Gio, Pango
+from gi.repository import Gtk, Adw, GLib, Pango
 from ui.utils import AsyncPicture, LikeButton, show_toast
+from ui.context_menu import show_song_menu
 
 # AlbumPage is resolved lazily because ui.pages.album imports BasePlaylistPage,
 # which transitively imports this module — a top-level import would cycle.
@@ -369,248 +369,18 @@ class SongRowWidget(Gtk.Box):
             return
 
         item = self.model_item
-        group = Gio.SimpleActionGroup()
-        self.row.insert_action_group("row", group)
-
-        # Copy Link
-        def copy_link_action(action, param):
-            vid = item.video_id
-            if vid:
-                url = f"https://music.youtube.com/watch?v={vid}"
-                clipboard = Gdk.Display.get_default().get_clipboard()
-                clipboard.set(url)
-                self._show_toast("Link copied to clipboard")
-
-        def goto_artist_action(action, param):
-            # We need to find the artist ID. It's in item.track_data
-            artists = item.track_data.get("artists", [])
-            if artists:
-                artist = artists[0]
-                aid = artist.get("id")
-                name = artist.get("name")
-                if aid:
-                    root = self.get_root()
-                    if hasattr(root, "open_artist"):
-                        root.open_artist(aid, name)
-
-        def goto_album_action(action, param):
-            album = item.track_data.get("album")
-            if not isinstance(album, dict):
-                return
-            album_id = album.get("id")
-            if not album_id:
-                return
-            root = self.get_root()
-            if hasattr(root, "open_playlist"):
-                root.open_playlist(
-                    album_id, {"title": album.get("name", "Album")}
-                )
-
-        action_copy = Gio.SimpleAction.new("copy_link", None)
-        action_copy.connect("activate", copy_link_action)
-        group.add_action(action_copy)
-
-        action_goto = Gio.SimpleAction.new("goto_artist", None)
-        action_goto.connect("activate", goto_artist_action)
-        group.add_action(action_goto)
-
-        action_goto_album = Gio.SimpleAction.new("goto_album", None)
-        action_goto_album.connect("activate", goto_album_action)
-        group.add_action(action_goto_album)
-
-        # Add to Playlist — opens a custom popover with covers + search +
-        # recents-first ordering. The Gio.Menu can't host those affordances,
-        # so the menu item just triggers the popover instead of nesting a
-        # plain text submenu.
-        def add_to_playlist(target_pid):
-            target_vid = item.video_id
-            if not (target_pid and target_vid):
-                return
-
-            from ui.widgets.add_to_playlist import mark_playlist_used
-            mark_playlist_used(target_pid)
-
-            def thread_func():
-                # add_playlist_items handles the OMV→ATV swap itself
-                # (auto-enabled for single-item adds).
-                success = self.client.add_playlist_items(target_pid, [target_vid])
-                if success:
-                    GLib.idle_add(self._show_toast, "Added track to playlist")
-                else:
-                    GLib.idle_add(self._show_toast, "Failed to add track")
-
-            threading.Thread(target=thread_func, daemon=True).start()
-
-        def show_add_to_playlist_action(action, param):
-            from ui.widgets.add_to_playlist import AddToPlaylistPopover
-            pop = AddToPlaylistPopover(
-                self.player, on_select=add_to_playlist, parent=self.row
-            )
-            pop.popup()
-
-        action_add = Gio.SimpleAction.new("show_add_to_playlist", None)
-        action_add.connect("activate", show_add_to_playlist_action)
-        group.add_action(action_add)
-
-        # Start Radio
-        def start_radio_action(action, param):
-            vid = item.video_id
-            if vid:
-                self.player.start_radio(video_id=vid)
-                self._show_toast("Starting radio...")
-
-        action_radio = Gio.SimpleAction.new("start_radio", None)
-        action_radio.connect("activate", start_radio_action)
-        group.add_action(action_radio)
-
-        # Play Next / Add to Queue
-        def play_next_action(action, param):
-            self.player.add_to_queue(dict(item.track_data), next=True)
-            self._show_toast("Playing next")
-
-        def add_to_queue_action(action, param):
-            self.player.add_to_queue(dict(item.track_data), next=False)
-            self._show_toast("Added to queue")
-
-        a_play_next = Gio.SimpleAction.new("play_next", None)
-        a_play_next.connect("activate", play_next_action)
-        group.add_action(a_play_next)
-
-        a_add_queue = Gio.SimpleAction.new("add_to_queue", None)
-        a_add_queue.connect("activate", add_to_queue_action)
-        group.add_action(a_add_queue)
-
-        menu_model = Gio.Menu()
-
-        # Queue section
-        if item.video_id:
-            queue_section = Gio.Menu()
-            queue_section.append("Play Next", "row.play_next")
-            queue_section.append("Add to Queue", "row.add_to_queue")
-            menu_model.append_section(None, queue_section)
-
-        # Navigation section
-        nav_section = Gio.Menu()
-        artists = item.track_data.get("artists", [])
-        if artists and artists[0].get("id"):
-            nav_section.append("Go to Artist", "row.goto_artist")
-        album_data = item.track_data.get("album")
-        if isinstance(album_data, dict) and album_data.get("id"):
-            nav_section.append("Go to Album", "row.goto_album")
-        if nav_section.get_n_items() > 0:
-            menu_model.append_section(None, nav_section)
-
-        # Actions section
-        from ui.utils import is_online
-        _online = is_online()
-        action_section = Gio.Menu()
-        if item.video_id and _online:
-            action_section.append("Start Radio", "row.start_radio")
-            if self.client.get_editable_playlists():
-                action_section.append(
-                    "Add to Playlist…", "row.show_add_to_playlist"
-                )
-        # Download / Remove Download
-        if item.video_id:
-            root = self.get_root()
-            is_dl = root and hasattr(root, 'player') and root.player.download_manager.is_downloaded(item.video_id)
-            if is_dl:
-                action_section.append("Remove Download", "row.remove_download")
-                def remove_download_action(action, param):
-                    r = self.get_root()
-                    if not (r and hasattr(r, "player")):
-                        return
-                    r.player.download_manager.delete_download(item.video_id)
-                    self.dl_icon.set_visible(False)
-                a_rd = Gio.SimpleAction.new("remove_download", None)
-                a_rd.connect("activate", remove_download_action)
-                group.add_action(a_rd)
-            elif _online:
-                action_section.append("Download", "row.download")
-                def download_action(action, param):
-                    r = self.get_root()
-                    if r and hasattr(r, "download_track"):
-                        r.download_track(item.track_data)
-                a_dl = Gio.SimpleAction.new("download", None)
-                a_dl.connect("activate", download_action)
-                group.add_action(a_dl)
-
-        if action_section.get_n_items() > 0:
-            menu_model.append_section(None, action_section)
-
-        # Refresh metadata
-        if item.video_id and _online:
-            def refresh_metadata_action(action, param):
-                vid = item.video_id
-                if not vid:
-                    return
-                self._show_toast("Refreshing metadata...")
-
-                def _fetch():
-                    try:
-                        wp = self.client.get_watch_playlist(video_id=vid, limit=1)
-                        wp_tracks = wp.get("tracks", [])
-                        if wp_tracks:
-                            fresh = wp_tracks[0]
-                            td = item.track_data
-                            if fresh.get("title"):
-                                td["title"] = fresh["title"]
-                            if fresh.get("artists"):
-                                td["artists"] = fresh["artists"]
-                                td["artist"] = ", ".join(
-                                    a.get("name", "") for a in fresh["artists"] if a
-                                )
-                            if fresh.get("album"):
-                                td["album"] = fresh["album"]
-                            if fresh.get("thumbnail"):
-                                thumbs = fresh["thumbnail"]
-                                if isinstance(thumbs, list) and thumbs:
-                                    td["thumb"] = thumbs[-1].get("url", "")
-                                    td["thumbnails"] = thumbs
-                            # Update queue track if it matches
-                            for t in self.player.queue:
-                                if t.get("videoId") == vid:
-                                    t.update(td)
-                                    break
-                            if getattr(self.player, "discord_rpc", None):
-                                self.player.discord_rpc.update()
-                            GLib.idle_add(self._show_toast, "Metadata refreshed")
-                        else:
-                            GLib.idle_add(self._show_toast, "No metadata found")
-                    except Exception as e:
-                        print(f"Refresh metadata error: {e}")
-                        GLib.idle_add(self._show_toast, "Failed to refresh metadata")
-
-                threading.Thread(target=_fetch, daemon=True).start()
-
-            a_refresh = Gio.SimpleAction.new("refresh_metadata", None)
-            a_refresh.connect("activate", refresh_metadata_action)
-            group.add_action(a_refresh)
-            action_section.append("Refresh Metadata", "row.refresh_metadata")
-
-        if action_section.get_n_items() > 0:
-            menu_model.append_section(None, action_section)
-
-        # Clipboard section
-        clip_section = Gio.Menu()
-        if item.video_id and _online:
-            clip_section.append("Copy Link", "row.copy_link")
-        if clip_section.get_n_items() > 0:
-            menu_model.append_section(None, clip_section)
-
-        if menu_model.get_n_items() > 0:
-            popover = Gtk.PopoverMenu.new_from_model(menu_model)
-            popover.set_parent(self.row)
-            popover.set_has_arrow(False)
-
-            rect = Gdk.Rectangle()
-            rect.x = int(x)
-            rect.y = int(y)
-            rect.width = 1
-            rect.height = 1
-            popover.set_pointing_to(rect)
-
-            popover.popup()
+        show_song_menu(
+            self.row,
+            x,
+            y,
+            item.track_data,
+            player=self.player,
+            client=self.client,
+            prefix="row",
+            video_id=item.video_id,
+            album_title=getattr(self.page, "playlist_title_text", None),
+            album_id=getattr(self.page, "playlist_id", None),
+        )
 
     def _show_toast(self, message):
         show_toast(self, message)

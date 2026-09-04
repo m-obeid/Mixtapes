@@ -1,10 +1,11 @@
 import threading
 from typing import Callable
 
-from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GObject, Pango
+from gi.repository import Gtk, Adw, GLib, GObject, Pango
 
 from api.client import MusicClient
 from ui.utils import AsyncPicture, LikeButton
+from ui.context_menu import MenuAction, show_song_menu
 from ui.util_classes import ScrolledWindow
 
 
@@ -422,72 +423,17 @@ class HistoryPage(Adw.Bin):
         if not vid:
             return
 
-        group = Gio.SimpleActionGroup()
-        row.insert_action_group("row", group)
-        menu = Gio.Menu()
+        extras = [
+            MenuAction(
+                "Play",
+                lambda r=row: self._on_row_activated(None, r),
+                section="queue",
+                first=True,
+            )
+        ]
 
-        # Play
-        def _do_play(a, p):
-            self._on_row_activated(None, row)
-        act = Gio.SimpleAction.new("play", None)
-        act.connect("activate", _do_play)
-        group.add_action(act)
-        menu.append("Play", "row.play")
-
-        # Add to queue (append without taking over playback)
-        def _do_queue(a, p):
-            self.player.add_to_queue(track)
-        act = Gio.SimpleAction.new("queue", None)
-        act.connect("activate", _do_queue)
-        group.add_action(act)
-        menu.append("Add to Queue", "row.queue")
-
-        # Go to artist
-        artists = track.get("artists") or []
-        if artists and isinstance(artists[0], dict) and artists[0].get("id"):
-            aid = artists[0]["id"]
-            aname = artists[0].get("name", "")
-
-            def _do_artist(a, p):
-                root = self.get_root()
-                if root and hasattr(root, "open_artist"):
-                    root.open_artist(aid, aname)
-            act = Gio.SimpleAction.new("artist", None)
-            act.connect("activate", _do_artist)
-            group.add_action(act)
-            menu.append("Go to Artist", "row.artist")
-
-        # Go to album
-        album = track.get("album") or {}
-        if isinstance(album, dict) and album.get("id"):
-            alb_id = album["id"]
-
-            def _do_album(a, p):
-                root = self.get_root()
-                if root and hasattr(root, "open_playlist"):
-                    root.open_playlist(alb_id)
-            act = Gio.SimpleAction.new("album", None)
-            act.connect("activate", _do_album)
-            group.add_action(act)
-            menu.append("Go to Album", "row.album")
-
-        # Copy link
-        def _do_copy(a, p):
-            url = f"https://music.youtube.com/watch?v={vid}"
-            Gdk.Display.get_default().get_clipboard().set(url)
-            root = self.get_root()
-            if root and hasattr(root, "add_toast"):
-                root.add_toast("Link copied")
-        act = Gio.SimpleAction.new("copy_link", None)
-        act.connect("activate", _do_copy)
-        group.add_action(act)
-        menu.append("Copy Link", "row.copy_link")
-
-        # Remove from history — optimistic: the row disappears instantly
-        # and the cache is patched up front; the API call is fire-and-
-        # forget. If the server rejects it we re-sync from the next
-        # refresh rather than rolling back, which would be jarring for
-        # something this low-stakes.
+        # Remove from history is optimistic: the row disappears instantly
+        # and the cache is patched up front, the API call is fire-and-forget.
         fb_token = track.get("feedbackToken") or track.get("feedbackTokens")
         if fb_token:
             tokens = (
@@ -497,24 +443,24 @@ class HistoryPage(Adw.Bin):
                 if isinstance(fb_token, dict)
                 else list(fb_token)
             )
+            extras.append(
+                MenuAction(
+                    "Remove from History",
+                    lambda v=vid, t=tokens: self._remove_track_optimistic(v, t),
+                    section="remove",
+                )
+            )
 
-            def _do_remove(a, p):
-                self._remove_track_optimistic(vid, tokens)
-            act = Gio.SimpleAction.new("remove_history", None)
-            act.connect("activate", _do_remove)
-            group.add_action(act)
-            menu.append("Remove from History", "row.remove_history")
-
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(row)
-        popover.set_has_arrow(False)
-        rect = Gdk.Rectangle()
-        rect.x = int(x)
-        rect.y = int(y)
-        rect.width = 1
-        rect.height = 1
-        popover.set_pointing_to(rect)
-        popover.popup()
+        show_song_menu(
+            row,
+            x,
+            y,
+            track,
+            player=self.player,
+            client=self.client,
+            prefix="row",
+            extras=extras,
+        )
 
     def _remove_track_optimistic(self, video_id, tokens):
         """Delete a track row in-place without a full re-render: drop it

@@ -6,6 +6,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GObject, Pango, Gdk, Gio, GLib
 
 from ui.utils import show_toast
+from ui.context_menu import MenuAction, show_song_menu
 from ui.util_classes import ScrolledWindow
 
 
@@ -418,104 +419,28 @@ class QueuePanel(Gtk.Box):
         if not item:
             return
 
-        track = item.track
-        vid = track.get("videoId")
-        idx = item.index
         widget = list_item.get_child()
+        idx = item.index
 
-        group = Gio.SimpleActionGroup()
-        widget.insert_action_group("q", group)
-
-        menu = Gio.Menu()
-
-        from ui.utils import is_online
-
-        _online = is_online()
-
-        # Actions section
-        action_section = Gio.Menu()
-
-        # Start Radio (online only)
-        if vid and _online:
-            action_section.append("Start Radio", "q.start_radio")
-            a_radio = Gio.SimpleAction.new("start_radio", None)
-            a_radio.connect(
-                "activate", lambda a, p, v=vid: self.player.start_radio(video_id=v)
-            )
-            group.add_action(a_radio)
-
-        # Add to Playlist (online only) via the custom popover
-        if vid and _online and self.player.client.get_editable_playlists():
-            action_section.append("Add to Playlist…", "q.show_add_to_playlist")
-
-            def _show_popover(act, param, v=vid, w=widget):
-                from ui.widgets.add_to_playlist import (
-                    AddToPlaylistPopover, mark_playlist_used,
+        show_song_menu(
+            widget,
+            x,
+            y,
+            item.track,
+            player=self.player,
+            client=self.player.client,
+            prefix="q",
+            # The track is already queued, so offering to queue it again
+            # would just duplicate it.
+            hide=("play_next", "add_to_queue"),
+            extras=[
+                MenuAction(
+                    "Remove from Queue",
+                    lambda i=idx: self.player.remove_from_queue(i),
+                    section="remove",
                 )
-
-                def _on_select(target_pid):
-                    if not target_pid:
-                        return
-                    mark_playlist_used(target_pid)
-
-                    def _thread():
-                        # add_playlist_items auto-swaps OMV→ATV for
-                        # single-item adds.
-                        success = self.player.client.add_playlist_items(
-                            target_pid, [v]
-                        )
-                        if success:
-                            GLib.idle_add(self._show_toast, "Added to playlist")
-                        else:
-                            GLib.idle_add(self._show_toast, "Failed to add")
-
-                    threading.Thread(target=_thread, daemon=True).start()
-
-                pop = AddToPlaylistPopover(
-                    self.player, on_select=_on_select, parent=w
-                )
-                pop.popup()
-
-            a_show = Gio.SimpleAction.new("show_add_to_playlist", None)
-            a_show.connect("activate", _show_popover)
-            group.add_action(a_show)
-
-        # Remove from Queue
-        action_section.append("Remove from Queue", "q.remove")
-        a_remove = Gio.SimpleAction.new("remove", None)
-        a_remove.connect(
-            "activate", lambda a, p, i=idx: self.player.remove_from_queue(i)
+            ],
         )
-        group.add_action(a_remove)
-
-        menu.append_section(None, action_section)
-
-        # Clipboard section (online only)
-        if vid and _online:
-            clip_section = Gio.Menu()
-            clip_section.append("Copy Link", "q.copy_link")
-            a_copy = Gio.SimpleAction.new("copy_link", None)
-
-            def _copy_link(a, p, v=vid):
-                Gdk.Display.get_default().get_clipboard().set(
-                    f"https://music.youtube.com/watch?v={v}"
-                )
-                self._show_toast("Link copied")
-
-            a_copy.connect("activate", _copy_link)
-            group.add_action(a_copy)
-            menu.append_section(None, clip_section)
-
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(widget)
-        popover.set_has_arrow(False)
-        rect = Gdk.Rectangle()
-        rect.x = int(x)
-        rect.y = int(y)
-        rect.width = 1
-        rect.height = 1
-        popover.set_pointing_to(rect)
-        popover.popup()
 
     def _on_row_move(self, old_index, new_index):
         if self.player.move_queue_item(old_index, new_index):

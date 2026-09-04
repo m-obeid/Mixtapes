@@ -172,6 +172,22 @@ class BasePlaylistPage(Adw.Bin):
         action_copy.connect("activate", self.on_copy_link_clicked)
         self.action_group.add_action(action_copy)
 
+        action_play_next = Gio.SimpleAction.new("play_all_next", None)
+        action_play_next.connect("activate", self._on_play_all_next)
+        self.action_group.add_action(action_play_next)
+
+        action_add_queue = Gio.SimpleAction.new("add_all_to_queue", None)
+        action_add_queue.connect("activate", self._on_add_all_to_queue)
+        self.action_group.add_action(action_add_queue)
+
+        action_radio = Gio.SimpleAction.new("start_radio", None)
+        action_radio.connect("activate", self._on_start_radio)
+        self.action_group.add_action(action_radio)
+
+        action_download = Gio.SimpleAction.new("download_all", None)
+        action_download.connect("activate", self._on_download_all)
+        self.action_group.add_action(action_download)
+
         self.sort_dropdown = Gtk.DropDown.new_from_strings(
             [
                 "Default",
@@ -373,15 +389,70 @@ class BasePlaylistPage(Adw.Bin):
         self._refresh_more_menu()
 
     def _refresh_more_menu(self):
+        """Same layout as the playlist page menu, so an album and a
+        playlist offer the same actions in the same order."""
+        from ui.utils import is_online
+
         self.more_menu_model.remove_all()
-        # 1. Add All to Playlist — opens the custom popover
-        if self.client.get_editable_playlists():
+
+        queue_section = Gio.Menu()
+        queue_section.append("Play Next", "page.play_all_next")
+        queue_section.append("Add to Queue", "page.add_all_to_queue")
+        self.more_menu_model.append_section(None, queue_section)
+
+        if self.client.is_authenticated():
             self.more_menu_model.append(
                 "Add all to Playlist…", "page.show_add_all_to_playlist"
             )
 
-        # 2. Copy Link (Always shown)
+        if is_online() and self._radio_playlist_id():
+            self.more_menu_model.append("Start Radio", "page.start_radio")
+
         self.more_menu_model.append("Copy Link", "page.copy_link")
+        self.more_menu_model.append("Download All", "page.download_all")
+
+    def _get_all_tracks(self):
+        tracks = self.original_tracks or self.current_tracks
+        return [dict(t) for t in tracks if t.get("videoId")]
+
+    def _on_play_all_next(self, action, param):
+        tracks = self._get_all_tracks()
+        if tracks:
+            self.player.add_tracks_to_queue(tracks, next=True)
+            self._show_toast(f"Playing {len(tracks)} tracks next")
+
+    def _on_add_all_to_queue(self, action, param):
+        tracks = self._get_all_tracks()
+        if tracks:
+            self.player.add_tracks_to_queue(tracks, next=False)
+            self._show_toast(f"Added {len(tracks)} tracks to queue")
+
+    def _radio_playlist_id(self):
+        """Radio needs a playlist id. An MPRE browse id is not one."""
+        pid = getattr(self, "_audio_playlist_id", None)
+        if pid:
+            return pid
+        pid = self.playlist_id or ""
+        return None if pid.startswith("MPRE") else pid or None
+
+    def _on_start_radio(self, action, param):
+        pid = self._radio_playlist_id()
+        if not pid:
+            return
+        radio_id = pid if pid.startswith("RDAMPL") else f"RDAMPL{pid}"
+        self.player.start_radio(playlist_id=radio_id)
+        self._show_toast("Starting radio...")
+
+    def _on_download_all(self, action, param):
+        tracks = self.original_tracks or self.current_tracks
+        if not tracks:
+            return
+        root = self.get_root()
+        if root and hasattr(root, "download_tracks"):
+            thumb = self.cover_img.url if hasattr(self, "cover_img") else None
+            root.download_tracks(
+                tracks, self.playlist_title_text, self.playlist_id, thumb
+            )
 
     def _on_add_all_to_playlist(self, action, param):
         self._do_add_all_to_playlist(param.get_string())
@@ -558,7 +629,11 @@ class BasePlaylistPage(Adw.Bin):
         is_album = self.playlist_id.startswith("MPRE") or self.playlist_id.startswith(
             "OLAK"
         )
-        link = get_yt_music_link(self.playlist_id, is_album=is_album)
+        link = get_yt_music_link(
+            self.playlist_id,
+            is_album=is_album,
+            audio_playlist_id=getattr(self, "_audio_playlist_id", None),
+        )
         if link:
             clipboard = Gdk.Display.get_default().get_clipboard()
             clipboard.set(link)

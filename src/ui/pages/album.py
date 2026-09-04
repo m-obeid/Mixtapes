@@ -41,6 +41,9 @@ class AlbumPage(BasePlaylistPage):
     def _fetch_details(self):
         try:
             data = self.client.get_album(self.playlist_id)
+            # MPRE browse ids are internal. The audio playlist id is what
+            # radio and shareable links need.
+            self._audio_playlist_id = data.get("audioPlaylistId")
             title = data.get("title", "Unknown Album")
             description = data.get("description", "")
             tracks = data.get("tracks", [])

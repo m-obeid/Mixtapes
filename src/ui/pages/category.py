@@ -1,8 +1,9 @@
 import json
-from gi.repository import Gtk, Adw, GObject, GLib, Pango, Gio, Gdk
+from gi.repository import Gtk, Adw, GObject, GLib, Pango
 import threading
 from api.client import MusicClient
-from ui.utils import AsyncImage, parse_item_metadata
+from ui.utils import AsyncImage, parse_item_metadata, copy_to_clipboard
+from ui.context_menu import MenuAction, show_item_menu, show_song_menu
 from ui.widgets.scroll_box import HorizontalScrollBox
 from ui.util_classes import ScrolledWindow
 
@@ -393,158 +394,35 @@ class CategoryPage(Adw.Bin):
         if not hasattr(item_box, "item_data"):
             return
         data = item_box.item_data
-        group = Gio.SimpleActionGroup()
-        item_box.insert_action_group("item", group)
-
-        url = None
-        if "videoId" in data:
-            url = f"https://music.youtube.com/watch?v={data['videoId']}"
-        elif "audioPlaylistId" in data:
-            url = f"https://music.youtube.com/playlist?list={data['audioPlaylistId']}"
-        elif "browseId" in data:
-            bid = data["browseId"]
-            if bid.startswith("MPRE") or bid.startswith("OLAK"):
-                url = f"https://music.youtube.com/playlist?list={bid}"
-            else:
-                url = f"https://music.youtube.com/browse/{bid}"
-
-        def copy_link_action(action, param):
-            if url:
-                try:
-                    clipboard = Gdk.Display.get_default().get_clipboard()
-                    clipboard.set(url)
-                    root = self.get_root()
-                    if root and hasattr(root, "add_toast"):
-                        root.add_toast("Link copied")
-                except Exception:
-                    pass
-
-        def add_to_playlist(target_pid):
-            target_vid = data.get("videoId")
-            if not (target_pid and target_vid):
-                return
-            from ui.widgets.add_to_playlist import mark_playlist_used
-            mark_playlist_used(target_pid)
-
-            def thread_func():
-                self.client.add_playlist_items(target_pid, [target_vid])
-
-            threading.Thread(target=thread_func, daemon=True).start()
-
-        def show_add_to_playlist_action(action, param):
-            from ui.widgets.add_to_playlist import AddToPlaylistPopover
-            pop = AddToPlaylistPopover(
-                self.player, on_select=add_to_playlist, parent=item_box
-            )
-            pop.popup()
-
-        action_add = Gio.SimpleAction.new("show_add_to_playlist", None)
-        action_add.connect("activate", show_add_to_playlist_action)
-        group.add_action(action_add)
-
-        action_copy = Gio.SimpleAction.new("copy_link", None)
-        action_copy.connect("activate", copy_link_action)
-        group.add_action(action_copy)
-
-        def copy_json_action(action, param):
-            try:
-                json_str = json.dumps(data, indent=2)
-                clipboard = Gdk.Display.get_default().get_clipboard()
-                clipboard.set(json_str)
-            except Exception:
-                pass
-
-        action_json = Gio.SimpleAction.new("copy_json", None)
-        action_json.connect("activate", copy_json_action)
-        group.add_action(action_json)
-
-        menu = Gio.Menu()
-        if url:
-            menu.append("Copy Link", "item.copy_link")
-        menu.append("Copy JSON (Debug)", "item.copy_json")
-
-        if "videoId" in data and self.client.get_editable_playlists():
-            menu.append("Add to Playlist…", "item.show_add_to_playlist")
-
-        if menu.get_n_items() > 0:
-            popover = Gtk.PopoverMenu.new_from_model(menu)
-            popover.set_parent(item_box)
-            popover.set_has_arrow(False)
-            rect = Gdk.Rectangle()
-            rect.x = int(x)
-            rect.y = int(y)
-            rect.width = 1
-            rect.height = 1
-            popover.set_pointing_to(rect)
-            popover.popup()
+        show_item_menu(
+            item_box,
+            x,
+            y,
+            data,
+            player=self.player,
+            client=self.client,
+            prefix="item",
+            extras=[
+                MenuAction(
+                    "Copy JSON (Debug)",
+                    lambda d=data: copy_to_clipboard(json.dumps(d, indent=2)),
+                    section="debug",
+                )
+            ],
+        )
 
     def on_song_right_click(self, gesture, n_press, x, y, row):
         if not hasattr(row, "item_data"):
             return
-        data = row.item_data
-        group = Gio.SimpleActionGroup()
-        row.insert_action_group("row", group)
-
-        url = None
-        if "videoId" in data:
-            url = f"https://music.youtube.com/watch?v={data['videoId']}"
-
-        def copy_link_action(action, param):
-            if url:
-                try:
-                    clipboard = Gdk.Display.get_default().get_clipboard()
-                    clipboard.set(url)
-                    root = self.get_root()
-                    if root and hasattr(root, "add_toast"):
-                        root.add_toast("Link copied")
-                except Exception:
-                    pass
-
-        def add_to_playlist(target_pid):
-            target_vid = data.get("videoId")
-            if not (target_pid and target_vid):
-                return
-            from ui.widgets.add_to_playlist import mark_playlist_used
-            mark_playlist_used(target_pid)
-
-            def thread_func():
-                self.client.add_playlist_items(target_pid, [target_vid])
-
-            threading.Thread(target=thread_func, daemon=True).start()
-
-        def show_add_to_playlist_action(action, param):
-            from ui.widgets.add_to_playlist import AddToPlaylistPopover
-            pop = AddToPlaylistPopover(
-                self.player, on_select=add_to_playlist, parent=row
-            )
-            pop.popup()
-
-        action_add = Gio.SimpleAction.new("show_add_to_playlist", None)
-        action_add.connect("activate", show_add_to_playlist_action)
-        group.add_action(action_add)
-
-        action_copy = Gio.SimpleAction.new("copy_link", None)
-        action_copy.connect("activate", copy_link_action)
-        group.add_action(action_copy)
-
-        menu = Gio.Menu()
-        if url:
-            menu.append("Copy Link", "row.copy_link")
-
-        if "videoId" in data and self.client.get_editable_playlists():
-            menu.append("Add to Playlist…", "row.show_add_to_playlist")
-
-        if menu.get_n_items() > 0:
-            popover = Gtk.PopoverMenu.new_from_model(menu)
-            popover.set_parent(row)
-            popover.set_has_arrow(False)
-            rect = Gdk.Rectangle()
-            rect.x = int(x)
-            rect.y = int(y)
-            rect.width = 1
-            rect.height = 1
-            popover.set_pointing_to(rect)
-            popover.popup()
+        show_song_menu(
+            row,
+            x,
+            y,
+            row.item_data,
+            player=self.player,
+            client=self.client,
+            prefix="row",
+        )
 
     def _on_item_clicked(self, gesture, n_press, x, y, item):
         video_id = item.get("videoId")

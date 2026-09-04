@@ -4,6 +4,7 @@ from gi.repository import Gtk, Adw, GObject, GLib, Gdk, Gio, Pango
 import threading
 from api.client import MusicClient
 from ui.utils import show_toast
+from ui.context_menu import MenuAction, show_item_menu
 from ui.util_classes import ScrolledWindow
 
 
@@ -1208,50 +1209,28 @@ class LibraryPage(Adw.Bin):
         if not hasattr(row, "album_id"):
             return
 
-        browse_id = row.album_id
-        album = getattr(row, "album_data", {})
-        audio_pid = album.get("audioPlaylistId", "")
+        album = dict(getattr(row, "album_data", {}) or {})
+        album.setdefault("browseId", row.album_id)
 
-        group = Gio.SimpleActionGroup()
-        row.insert_action_group("row", group)
-
-        menu = Gio.Menu()
-
-        # Copy Link
-        if audio_pid:
-            link = f"https://music.youtube.com/playlist?list={audio_pid}"
-        else:
-            link = f"https://music.youtube.com/browse/{browse_id}"
-
-        action_copy = Gio.SimpleAction.new("copy_link", None)
-        action_copy.connect("activate", lambda a, p, u=link: (
-            Gdk.Display.get_default().get_clipboard().set(u)
-        ))
-        group.add_action(action_copy)
-        menu.append("Copy Link", "row.copy_link")
-
-        # Remove from Library
-        action_unsave = Gio.SimpleAction.new("unsave", None)
-        def _unsave(a, p, pid=audio_pid or browse_id):
-            def _thread():
-                success = self.client.rate_playlist(pid, "INDIFFERENT")
-                if success:
-                    GLib.idle_add(self.load_library)
-            threading.Thread(target=_thread, daemon=True).start()
-        action_unsave.connect("activate", _unsave)
-        group.add_action(action_unsave)
-        menu.append("Remove from Library", "row.unsave")
-
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(row)
-        popover.set_has_arrow(False)
-        rect = Gdk.Rectangle()
-        rect.x = int(x)
-        rect.y = int(y)
-        rect.width = 1
-        rect.height = 1
-        popover.set_pointing_to(rect)
-        popover.popup()
+        show_item_menu(
+            row,
+            x,
+            y,
+            album,
+            "album",
+            player=self.player,
+            client=self.client,
+            prefix="row",
+            extras=[
+                MenuAction(
+                    "Remove from Library",
+                    lambda p=album.get("audioPlaylistId") or row.album_id: (
+                        self._unsave_playlist(p)
+                    ),
+                    section="remove",
+                )
+            ],
+        )
 
     def _open_downloads_page(self):
         """Open a pseudo-playlist with all downloaded songs."""
@@ -1382,66 +1361,46 @@ class LibraryPage(Adw.Bin):
             return
 
         pid = row.playlist_id
-        # Determine URL
-        url = f"https://music.youtube.com/playlist?list={pid}"
+        item = {
+            "playlistId": pid,
+            "title": getattr(row, "playlist_title", ""),
+        }
 
-        group = Gio.SimpleActionGroup()
-        row.insert_action_group("row", group)
-
-        def copy_link_action(action, param):
-            try:
-                clipboard = Gdk.Display.get_default().get_clipboard()
-                clipboard.set(url)
-                root = self.get_root()
-                if root and hasattr(root, "add_toast"):
-                    root.add_toast("Link copied")
-            except Exception:
-                pass
-
-        action_copy = Gio.SimpleAction.new("copy_link", None)
-        action_copy.connect("activate", copy_link_action)
-        group.add_action(action_copy)
-
-        menu = Gio.Menu()
-        menu.append("Copy Link", "row.copy_link")
-
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(row)
-        popover.set_has_arrow(False)
-
-        rect = Gdk.Rectangle()
-        rect.x = int(x)
-        rect.y = int(y)
-        rect.width = 1
-        rect.height = 1
-        popover.set_pointing_to(rect)
-
-        is_owned = getattr(row, "is_owned", False)
-        if is_owned:
-            menu.append("Delete Playlist", "row.delete_playlist")
-
-            def delete_action(action, param):
-                self._confirm_delete_playlist(row)
-
-            action_delete = Gio.SimpleAction.new("delete_playlist", None)
-            action_delete.connect("activate", delete_action)
-            group.add_action(action_delete)
+        if getattr(row, "is_owned", False):
+            extras = [
+                MenuAction(
+                    "Delete Playlist",
+                    lambda r=row: self._confirm_delete_playlist(r),
+                    section="remove",
+                )
+            ]
         else:
-            # Non-owned playlists can be removed from library
-            menu.append("Remove from Library", "row.unsave")
+            extras = [
+                MenuAction(
+                    "Remove from Library",
+                    lambda p=pid: self._unsave_playlist(p),
+                    section="remove",
+                )
+            ]
 
-            def unsave_action(action, param):
-                def _thread():
-                    success = self.client.rate_playlist(pid, "INDIFFERENT")
-                    if success:
-                        GLib.idle_add(self.load_library)
-                threading.Thread(target=_thread, daemon=True).start()
+        show_item_menu(
+            row,
+            x,
+            y,
+            item,
+            "playlist",
+            player=self.player,
+            client=self.client,
+            prefix="row",
+            extras=extras,
+        )
 
-            action_unsave = Gio.SimpleAction.new("unsave", None)
-            action_unsave.connect("activate", unsave_action)
-            group.add_action(action_unsave)
+    def _unsave_playlist(self, playlist_id):
+        def _thread():
+            if self.client.rate_playlist(playlist_id, "INDIFFERENT"):
+                GLib.idle_add(self.load_library)
 
-        popover.popup()
+        threading.Thread(target=_thread, daemon=True).start()
 
     def _confirm_delete_playlist(self, row):
         dialog = Adw.MessageDialog(

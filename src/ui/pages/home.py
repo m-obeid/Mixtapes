@@ -1,13 +1,14 @@
 import re
 import threading
 
-from gi.repository import Gtk, Adw, GObject, GLib, Pango, Gdk, Gio
+from gi.repository import Gtk, Adw, GObject, GLib, Pango, Gdk
 
 from api.client import MusicClient
 from ui.utils import (
     AsyncImage, AsyncPicture, parse_item_metadata, is_online,
     attach_playing_highlight,
 )
+from ui.context_menu import show_item_menu
 from ui.widgets.scroll_box import HorizontalScrollBox
 from ui.util_classes import ScrolledWindow
 
@@ -1083,117 +1084,13 @@ class HomePage(Adw.Bin):
         self._show_context_menu(card, x, y, card.item_data, card.item_kind)
 
     def _show_context_menu(self, anchor, x, y, item, kind):
-        group = Gio.SimpleActionGroup()
-        anchor.insert_action_group("row", group)
-
-        menu = Gio.Menu()
-
-        if kind in ("song", "video") and item.get("videoId"):
-            def play_next_action(action, param):
-                self.player.add_to_queue(dict(item), next=True)
-                root = self.get_root()
-                if root and hasattr(root, "add_toast"):
-                    root.add_toast("Playing next")
-
-            def add_to_queue_action(action, param):
-                self.player.add_to_queue(dict(item), next=False)
-                root = self.get_root()
-                if root and hasattr(root, "add_toast"):
-                    root.add_toast("Added to queue")
-
-            a_pn = Gio.SimpleAction.new("play_next", None)
-            a_pn.connect("activate", play_next_action)
-            group.add_action(a_pn)
-            a_aq = Gio.SimpleAction.new("add_to_queue", None)
-            a_aq.connect("activate", add_to_queue_action)
-            group.add_action(a_aq)
-
-            queue_section = Gio.Menu()
-            queue_section.append("Play Next", "row.play_next")
-            queue_section.append("Add to Queue", "row.add_to_queue")
-            menu.append_section(None, queue_section)
-
-        # Start Radio (any playable seed).
-        if item.get("videoId") or item.get("playlistId"):
-            def start_radio_action(action, param):
-                vid = item.get("videoId")
-                pid = item.get("playlistId")
-                self.player.start_radio(video_id=vid, playlist_id=pid)
-                root = self.get_root()
-                if root and hasattr(root, "add_toast"):
-                    root.add_toast("Starting radio…")
-            a_rd = Gio.SimpleAction.new("start_radio", None)
-            a_rd.connect("activate", start_radio_action)
-            group.add_action(a_rd)
-            menu.append("Start Radio", "row.start_radio")
-
-        # Go to Artist.
-        artist_id = None
-        artist_name = None
-        artists = item.get("artists")
-        if isinstance(artists, list) and artists and isinstance(artists[0], dict):
-            artist_id = artists[0].get("id")
-            artist_name = artists[0].get("name")
-        if not artist_id and kind == "artist":
-            artist_id = item.get("browseId")
-            artist_name = item.get("title")
-
-        if artist_id:
-            def goto_artist_action(action, param):
-                root = self.get_root()
-                if root and hasattr(root, "open_artist"):
-                    root.open_artist(artist_id, artist_name)
-
-            a_ga = Gio.SimpleAction.new("goto_artist", None)
-            a_ga.connect("activate", goto_artist_action)
-            group.add_action(a_ga)
-            nav_section = Gio.Menu()
-            nav_section.append("Go to Artist", "row.goto_artist")
-            menu.append_section(None, nav_section)
-
-        url = self._build_link(item, kind)
-        if url:
-            def copy_link_action(action, param):
-                clipboard = Gdk.Display.get_default().get_clipboard()
-                clipboard.set(url)
-                root = self.get_root()
-                if root and hasattr(root, "add_toast"):
-                    root.add_toast("Link copied")
-
-            a_cl = Gio.SimpleAction.new("copy_link", None)
-            a_cl.connect("activate", copy_link_action)
-            group.add_action(a_cl)
-            clip_section = Gio.Menu()
-            clip_section.append("Copy Link", "row.copy_link")
-            menu.append_section(None, clip_section)
-
-        if menu.get_n_items() == 0:
-            return
-
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(anchor)
-        popover.set_has_arrow(False)
-        rect = Gdk.Rectangle()
-        rect.x = int(x)
-        rect.y = int(y)
-        rect.width = 1
-        rect.height = 1
-        popover.set_pointing_to(rect)
-        popover.popup()
-
-    @staticmethod
-    def _build_link(item, kind):
-        if kind in ("song", "video") and item.get("videoId"):
-            return f"https://music.youtube.com/watch?v={item['videoId']}"
-        if kind == "playlist" and item.get("playlistId"):
-            return f"https://music.youtube.com/playlist?list={item['playlistId']}"
-        if kind == "album":
-            audio_pid = item.get("audioPlaylistId")
-            if audio_pid:
-                return f"https://music.youtube.com/playlist?list={audio_pid}"
-            browse_id = item.get("browseId")
-            if browse_id:
-                return f"https://music.youtube.com/playlist?list={browse_id}"
-        if kind == "artist" and item.get("browseId"):
-            return f"https://music.youtube.com/channel/{item['browseId']}"
-        return None
+        show_item_menu(
+            anchor,
+            x,
+            y,
+            item,
+            kind,
+            player=self.player,
+            client=self.client,
+            prefix="row",
+        )

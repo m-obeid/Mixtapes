@@ -1,8 +1,9 @@
-from gi.repository import Gtk, Adw, GObject, GLib, Gio, Pango, Gdk
+from gi.repository import Gtk, Adw, GObject, GLib, Pango
 import threading
 import json
 from api.client import MusicClient
-from ui.utils import AsyncImage, parse_item_metadata
+from ui.utils import AsyncImage, parse_item_metadata, copy_to_clipboard
+from ui.context_menu import MenuAction, show_item_menu
 from ui.util_classes import ScrolledWindow
 
 
@@ -317,90 +318,19 @@ class DiscographyPage(Adw.Bin):
         if not hasattr(item_box, "item_data"):
             return
         data = item_box.item_data
-        group = Gio.SimpleActionGroup()
-        item_box.insert_action_group("item", group)
-
-        # Play Action
-        play_action = Gio.SimpleAction.new("play", None)
-        play_action.connect("activate", self._on_play_item, data)
-        group.add_action(play_action)
-
-        # Queue Action
-        queue_action = Gio.SimpleAction.new("queue", None)
-        queue_action.connect("activate", self._on_queue_item, data)
-        group.add_action(queue_action)
-
-        def copy_json_action(action, param):
-            try:
-                json_str = json.dumps(data, indent=2)
-                clipboard = Gdk.Display.get_default().get_clipboard()
-                clipboard.set(json_str)
-            except Exception:
-                pass
-
-        action_json = Gio.SimpleAction.new("copy_json", None)
-        action_json.connect("activate", copy_json_action)
-        group.add_action(action_json)
-
-        menu = Gio.Menu()
-        menu.append("Play", "item.play")
-        menu.append("Add to queue", "item.queue")
-        menu.append("Copy JSON (Debug)", "item.copy_json")
-
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(item_box)
-        popover.set_has_arrow(False)
-        rect = Gdk.Rectangle()
-        rect.x = int(x)
-        rect.y = int(y)
-        rect.width = 1
-        rect.height = 1
-        popover.set_pointing_to(rect)
-        popover.popup()
-
-    def _on_play_item(self, action, param, data):
-        app = Gtk.Application.get_default()
-        window = app.get_active_window()
-        if not window or not hasattr(window, "player"):
-            return
-
-        video_id = data.get("videoId")
-        if video_id:
-            GLib.idle_add(window.player.play_tracks, [data])
-            return
-
-        browse_id = data.get("browseId")
-        if not browse_id:
-            return
-
-        # Play the album/single
-        def thread_func():
-            playlist_data = self.client.get_playlist(browse_id)
-            tracks = playlist_data.get("tracks", [])
-            if tracks:
-                GLib.idle_add(window.player.play_tracks, tracks)
-
-        threading.Thread(target=thread_func, daemon=True).start()
-
-    def _on_queue_item(self, action, param, data):
-        app = Gtk.Application.get_default()
-        window = app.get_active_window()
-        if not window or not hasattr(window, "player"):
-            return
-
-        video_id = data.get("videoId")
-        if video_id:
-            GLib.idle_add(window.player.extend_queue, [data])
-            return
-
-        browse_id = data.get("browseId")
-        if not browse_id:
-            return
-
-        def thread_func():
-            playlist_data = self.client.get_playlist(browse_id)
-            tracks = playlist_data.get("tracks", [])
-            if tracks:
-                GLib.idle_add(window.player.extend_queue, tracks)
-
-        threading.Thread(target=thread_func, daemon=True).start()
+        show_item_menu(
+            item_box,
+            x,
+            y,
+            data,
+            player=self.player,
+            client=self.client,
+            prefix="item",
+            extras=[
+                MenuAction(
+                    "Copy JSON (Debug)",
+                    lambda d=data: copy_to_clipboard(json.dumps(d, indent=2)),
+                    section="debug",
+                )
+            ],
+        )

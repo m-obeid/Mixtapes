@@ -5,6 +5,7 @@ import tempfile
 from gi.repository import Gtk, Adw, GObject, GLib, Pango, Gdk, Gio, GdkPixbuf
 from api.client import MusicClient
 from ui.utils import AsyncImage, LikeButton, get_yt_music_link, show_toast
+from ui.context_menu import MenuAction, show_song_menu
 from ui.crop_dialog import ImageCropDialog
 from ui.util_classes import ScrolledWindow
 
@@ -1185,8 +1186,9 @@ class PlaylistPage(Adw.Bin):
         self.more_menu_model.append_section(None, queue_section)
 
         # 1. Add All to Playlist — opens the custom popover (covers + search
-        # + recents-first) instead of a plain Gio.Menu submenu.
-        if self.client.get_editable_playlists():
+        # + recents-first) instead of a plain Gio.Menu submenu. The popover
+        # loads the list itself, so don't block the menu on that fetch.
+        if self.client.is_authenticated():
             self.more_menu_model.append(
                 "Add all to Playlist…", "page.show_add_all_to_playlist"
             )
@@ -3073,365 +3075,142 @@ class PlaylistPage(Adw.Bin):
             return
 
         data = row._lv_video_data
-        full_track_data = row._lv_full_track
         vid = data.get("id") or data.get("videoId")
+        # The lazy row data uses "id"; anything downstream expects "videoId".
+        track = row._lv_full_track or dict(data, videoId=vid)
+        has_selection = bool(self._multi_select_mode and self._selected_video_ids)
+        selection = self._get_selected_tracks() if has_selection else None
 
-        group = Gio.SimpleActionGroup()
-        row.insert_action_group("ctx", group)
+        extras = []
 
-        menu_model = Gio.Menu()
-
-        # ── Section: Navigation ──
-        nav_section = Gio.Menu()
-        if full_track_data and full_track_data.get("artists"):
-            artist = full_track_data["artists"][0]
-            if artist.get("id"):
-                nav_section.append("Go to Artist", "ctx.goto_artist")
-                a = Gio.SimpleAction.new("goto_artist", None)
-                a.connect(
-                    "activate",
-                    lambda act, p: (
-                        self.get_root().open_artist(artist["id"], artist.get("name"))
-                        if hasattr(self.get_root(), "open_artist")
-                        else None
-                    ),
-                )
-                group.add_action(a)
-
-        if nav_section.get_n_items() > 0:
-            menu_model.append_section(None, nav_section)
-
-        # ── Section: Queue ──
-        queue_section = Gio.Menu()
-        has_selection = self._multi_select_mode and self._selected_video_ids
-
-        if has_selection:
-            sel_tracks = self._get_selected_tracks()
-            n = len(sel_tracks)
-
-            a_pn = Gio.SimpleAction.new("play_next", None)
-            a_pn.connect(
-                "activate",
-                lambda act, p, ts=list(sel_tracks): (
-                    self.player.add_tracks_to_queue([dict(t) for t in ts], next=True),
-                    self._show_toast(f"Playing {len(ts)} tracks next"),
-                ),
-            )
-            group.add_action(a_pn)
-            queue_section.append(f"Play {n} Next", "ctx.play_next")
-
-            a_aq = Gio.SimpleAction.new("add_to_queue", None)
-            a_aq.connect(
-                "activate",
-                lambda act, p, ts=list(sel_tracks): (
-                    self.player.add_tracks_to_queue([dict(t) for t in ts], next=False),
-                    self._show_toast(f"Added {len(ts)} tracks to queue"),
-                ),
-            )
-            group.add_action(a_aq)
-            queue_section.append(f"Add {n} to Queue", "ctx.add_to_queue")
-        elif full_track_data:
-            a_pn = Gio.SimpleAction.new("play_next", None)
-            a_pn.connect(
-                "activate",
-                lambda act, p, t=full_track_data: (
-                    self.player.add_to_queue(dict(t), next=True),
-                    self._show_toast("Playing next"),
-                ),
-            )
-            group.add_action(a_pn)
-            queue_section.append("Play Next", "ctx.play_next")
-
-            a_aq = Gio.SimpleAction.new("add_to_queue", None)
-            a_aq.connect(
-                "activate",
-                lambda act, p, t=full_track_data: (
-                    self.player.add_to_queue(dict(t), next=False),
-                    self._show_toast("Added to queue"),
-                ),
-            )
-            group.add_action(a_aq)
-            queue_section.append("Add to Queue", "ctx.add_to_queue")
-
-        if queue_section.get_n_items() > 0:
-            menu_model.append_section(None, queue_section)
-
-        # ── Section: Actions ──
-        action_section = Gio.Menu()
-
-        # Start Radio (single song only, not for multi-select, online only)
-        from ui.utils import is_online
-
-        _online = is_online()
-        if vid and not has_selection and _online:
-            action_section.append("Start Radio", "ctx.start_radio")
-            a_radio = Gio.SimpleAction.new("start_radio", None)
-            a_radio.connect(
-                "activate",
-                lambda act, p, v=vid: (
-                    self.player.start_radio(video_id=v),
-                    self._show_toast("Starting radio..."),
-                ),
-            )
-            group.add_action(a_radio)
-
-        if (has_selection or vid) and self.client.get_editable_playlists():
-            label = (
-                f"Add {len(self._selected_video_ids)} to Playlist…"
-                if has_selection
-                else "Add to Playlist…"
-            )
-            action_section.append(label, "ctx.show_add_to_playlist")
-
-            def _do_add(target_pid):
-                if not target_pid:
-                    return
-                if has_selection:
-                    vids = [
-                        t.get("videoId")
-                        for t in self._get_selected_tracks()
-                        if t.get("videoId")
-                    ]
-                else:
-                    vids = [vid] if vid else []
-                if not vids:
-                    return
-                from ui.widgets.add_to_playlist import mark_playlist_used
-                mark_playlist_used(target_pid)
-                n = len(vids)
-                # The OMV→ATV swap is handled inside add_playlist_items;
-                # it auto-enables for single-item adds (this is the
-                # right-click case) and stays off for bulk.
-                threading.Thread(
-                    target=lambda: (
-                        self.client.add_playlist_items(target_pid, vids),
-                        GLib.idle_add(
-                            self._show_toast,
-                            f"Added {n} track{'s' if n > 1 else ''} to playlist",
-                        ),
-                    ),
-                    daemon=True,
-                ).start()
-
-            def _show_popover(act, param, r=row):
-                from ui.widgets.add_to_playlist import AddToPlaylistPopover
-                pop = AddToPlaylistPopover(
-                    self.player, on_select=_do_add, parent=r
-                )
-                pop.popup()
-
-            a_show = Gio.SimpleAction.new("show_add_to_playlist", None)
-            a_show.connect("activate", _show_popover)
-            group.add_action(a_show)
-
+        # Remove from playlist (owner only)
         if self.is_owned:
             if has_selection:
-                action_section.append(
-                    f"Remove {len(self._selected_video_ids)} from Playlist",
-                    "ctx.remove",
-                )
-                a_rm = Gio.SimpleAction.new("remove", None)
-
-                def _do_remove_sel(act, p):
-                    tracks = self._get_selected_tracks()
-                    to_remove = [
-                        {"videoId": t.get("videoId"), "setVideoId": t.get("setVideoId")}
-                        for t in tracks
-                        if t.get("videoId") and t.get("setVideoId")
-                    ]
-                    if to_remove:
-                        n = len(to_remove)
-                        threading.Thread(
-                            target=lambda: (
-                                self.client.remove_playlist_items(
-                                    self.playlist_id, to_remove
-                                ),
-                                self._invalidate_disk_cache(),
-                                GLib.idle_add(self._show_toast, f"Removed {n} tracks"),
-                                GLib.idle_add(self.load_playlist, self.playlist_id),
-                            ),
-                            daemon=True,
-                        ).start()
-
-                a_rm.connect("activate", _do_remove_sel)
-                group.add_action(a_rm)
-            elif data.get("setVideoId") and vid:
-                action_section.append("Remove from Playlist", "ctx.remove")
-                a_rm = Gio.SimpleAction.new("remove", None)
-                a_rm.connect(
-                    "activate",
-                    lambda act, p, v=vid, sv=data["setVideoId"]: threading.Thread(
-                        target=lambda: (
-                            self.client.remove_playlist_items(
-                                self.playlist_id, [{"videoId": v, "setVideoId": sv}]
-                            ),
-                            self._invalidate_disk_cache(),
-                            GLib.idle_add(self.load_playlist, self.playlist_id),
-                        ),
-                        daemon=True,
-                    ).start(),
-                )
-                group.add_action(a_rm)
-
-        # Delete uploaded song (for UPLOAD pseudo-playlists)
-        is_upload_playlist = self.playlist_id and self.playlist_id.startswith("UPLOAD")
-        if is_upload_playlist and full_track_data and full_track_data.get("entityId"):
-            entity_id = full_track_data["entityId"]
-            track_title = full_track_data.get("title", "this song")
-            action_section.append("Delete Upload", "ctx.delete_upload")
-            a_del = Gio.SimpleAction.new("delete_upload", None)
-
-            def _do_delete_upload(act, p, eid=entity_id, t=track_title):
-                dialog = Adw.MessageDialog(
-                    transient_for=self.get_root(),
-                    heading="Delete Upload?",
-                    body=f'Are you sure you want to delete "{t}"?\nThis cannot be undone.',
-                )
-                dialog.add_response("cancel", "Cancel")
-                dialog.add_response("delete", "Delete")
-                dialog.set_response_appearance(
-                    "delete", Adw.ResponseAppearance.DESTRUCTIVE
-                )
-                dialog.set_default_response("cancel")
-                dialog.set_close_response("cancel")
-
-                def on_resp(dg, resp):
-                    if resp == "delete":
-
-                        def _thread():
-                            self.client.delete_upload_entity(eid)
-                            GLib.idle_add(self._show_toast, f"Deleted {t}")
-                            # Remove from local data
-                            GLib.idle_add(self._remove_track_by_entity_id, eid)
-
-                        threading.Thread(target=_thread, daemon=True).start()
-                    dg.destroy()
-
-                dialog.connect("response", on_resp)
-                dialog.present()
-
-            a_del.connect("activate", _do_delete_upload)
-            group.add_action(a_del)
-
-        # Download / Remove Download
-        if vid and full_track_data:
-            root = self.get_root()
-            is_dl = (
-                root
-                and hasattr(root, "player")
-                and root.player.download_manager.is_downloaded(vid)
-            )
-            if has_selection:
-                # Selection actions: operate on the selected set. We only offer
-                # a download action here; per-song removal is still one-at-a-time.
-                if not is_dl:
-                    action_section.append(
-                        f"Download {len(self._selected_video_ids)} Songs",
-                        "ctx.download",
+                extras.append(
+                    MenuAction(
+                        f"Remove {len(self._selected_video_ids)} from Playlist",
+                        self._remove_selected_from_playlist,
+                        section="remove",
                     )
-                    a_dl = Gio.SimpleAction.new("download", None)
+                )
+            elif data.get("setVideoId") and vid:
+                extras.append(
+                    MenuAction(
+                        "Remove from Playlist",
+                        lambda v=vid, sv=data["setVideoId"]: (
+                            self._remove_track_from_playlist(v, sv)
+                        ),
+                        section="remove",
+                    )
+                )
 
-                    def _do_download_sel(act, p):
-                        tracks = self._get_selected_tracks()
-                        r = self.get_root()
-                        if r and hasattr(r, "download_tracks"):
-                            r.download_tracks(
-                                tracks, self.playlist_title_text, self.playlist_id
-                            )
+        # Delete uploaded song (UPLOAD pseudo-playlists)
+        is_upload = self.playlist_id and self.playlist_id.startswith("UPLOAD")
+        entity_id = track.get("entityId") if isinstance(track, dict) else None
+        if is_upload and entity_id:
+            extras.append(
+                MenuAction(
+                    "Delete Upload",
+                    lambda eid=entity_id, t=track.get("title", "this song"): (
+                        self._confirm_delete_upload_track(eid, t)
+                    ),
+                    section="remove",
+                )
+            )
 
-                    a_dl.connect("activate", _do_download_sel)
-                    group.add_action(a_dl)
-            elif is_dl:
-                action_section.append("Remove Download", "ctx.remove_download")
-                a_rd = Gio.SimpleAction.new("remove_download", None)
-
-                def _do_remove_download(act, p, v=vid):
-                    r = self.get_root()
-                    if r and hasattr(r, "player"):
-                        r.player.download_manager.delete_download(v)
-
-                a_rd.connect("activate", _do_remove_download)
-                group.add_action(a_rd)
-            else:
-                action_section.append("Download", "ctx.download")
-                a_dl = Gio.SimpleAction.new("download", None)
-
-                def _do_download(act, p, t=full_track_data):
-                    r = self.get_root()
-                    if r and hasattr(r, "download_track"):
-                        r.download_track(
-                            t, self.playlist_title_text, self.playlist_id
-                        )
-
-                a_dl.connect("activate", _do_download)
-                group.add_action(a_dl)
-
-        if action_section.get_n_items() > 0:
-            menu_model.append_section(None, action_section)
-
-        # ── Section: Selection (only in multi-select mode) ──
+        # Selection helpers
         if self._multi_select_mode:
-            sel_section = Gio.Menu()
-            is_selected = vid in self._selected_video_ids if vid else False
-            if is_selected:
-                sel_section.append("Deselect This", "ctx.toggle_sel")
-            else:
-                sel_section.append("Select This", "ctx.toggle_sel")
-            sel_section.append("Select All", "ctx.select_all")
-            sel_section.append("Deselect All", "ctx.deselect_all")
-
-            a_toggle = Gio.SimpleAction.new("toggle_sel", None)
-            a_toggle.connect(
-                "activate",
-                lambda act, p, v=vid, r=row: self._toggle_track_selection(v, r),
+            is_selected = bool(vid and vid in self._selected_video_ids)
+            extras.append(
+                MenuAction(
+                    "Deselect This" if is_selected else "Select This",
+                    lambda v=vid, r=row: self._toggle_track_selection(v, r),
+                    section="remove",
+                )
             )
-            group.add_action(a_toggle)
-
-            a_sel_all = Gio.SimpleAction.new("select_all", None)
-            a_sel_all.connect("activate", lambda act, p: self._select_all())
-            group.add_action(a_sel_all)
-
-            a_desel = Gio.SimpleAction.new("deselect_all", None)
-            a_desel.connect("activate", lambda act, p: self._deselect_all())
-            group.add_action(a_desel)
-
-            menu_model.append_section(None, sel_section)
-
-        # ── Section: Clipboard / Debug ──
-        clip_section = Gio.Menu()
-        if vid and _online:
-            clip_section.append("Copy Song Link", "ctx.copy_link")
-            a_copy = Gio.SimpleAction.new("copy_link", None)
-            a_copy.connect(
-                "activate",
-                lambda act, p, v=vid: (
-                    Gdk.Display.get_default()
-                    .get_clipboard()
-                    .set(f"https://music.youtube.com/watch?v={v}")
-                ),
+            extras.append(
+                MenuAction("Select All", self._select_all, section="remove")
             )
-            group.add_action(a_copy)
+            extras.append(
+                MenuAction("Deselect All", self._deselect_all, section="remove")
+            )
+            if self._selected_video_ids:
+                extras.append(
+                    MenuAction(
+                        "Copy Selection Data (Debug)",
+                        self._copy_selection_debug,
+                        section="debug",
+                    )
+                )
 
-        if self._multi_select_mode and self._selected_video_ids:
-            clip_section.append("Copy Selection Data (Debug)", "ctx.copy_debug")
-            a_debug = Gio.SimpleAction.new("copy_debug", None)
-            a_debug.connect("activate", lambda act, p: self._copy_selection_debug())
-            group.add_action(a_debug)
+        show_song_menu(
+            row,
+            x,
+            y,
+            track,
+            player=self.player,
+            client=self.client,
+            prefix="ctx",
+            video_id=vid,
+            selection=selection,
+            extras=extras,
+            album_title=self.playlist_title_text,
+            album_id=self.playlist_id,
+        )
 
-        if clip_section.get_n_items() > 0:
-            menu_model.append_section(None, clip_section)
+    def _remove_track_from_playlist(self, video_id, set_video_id):
+        def _run():
+            self.client.remove_playlist_items(
+                self.playlist_id, [{"videoId": video_id, "setVideoId": set_video_id}]
+            )
+            self._invalidate_disk_cache()
+            GLib.idle_add(self.load_playlist, self.playlist_id)
 
-        if menu_model.get_n_items() > 0:
-            popover = Gtk.PopoverMenu.new_from_model(menu_model)
-            popover.set_parent(row)
-            popover.set_has_arrow(False)
-            rect = Gdk.Rectangle()
-            rect.x = int(x)
-            rect.y = int(y)
-            rect.width = 1
-            rect.height = 1
-            popover.set_pointing_to(rect)
-            popover.popup()
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _remove_selected_from_playlist(self):
+        to_remove = [
+            {"videoId": t.get("videoId"), "setVideoId": t.get("setVideoId")}
+            for t in self._get_selected_tracks()
+            if t.get("videoId") and t.get("setVideoId")
+        ]
+        if not to_remove:
+            return
+        count = len(to_remove)
+
+        def _run():
+            self.client.remove_playlist_items(self.playlist_id, to_remove)
+            self._invalidate_disk_cache()
+            GLib.idle_add(self._show_toast, f"Removed {count} tracks")
+            GLib.idle_add(self.load_playlist, self.playlist_id)
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _confirm_delete_upload_track(self, entity_id, title):
+        dialog = Adw.MessageDialog(
+            transient_for=self.get_root(),
+            heading="Delete Upload?",
+            body=f'Are you sure you want to delete "{title}"?\nThis cannot be undone.',
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def _on_resp(dg, resp):
+            if resp == "delete":
+
+                def _run():
+                    self.client.delete_upload_entity(entity_id)
+                    GLib.idle_add(self._show_toast, f"Deleted {title}")
+                    GLib.idle_add(self._remove_track_by_entity_id, entity_id)
+
+                threading.Thread(target=_run, daemon=True).start()
+            dg.destroy()
+
+        dialog.connect("response", _on_resp)
+        dialog.present()
 
     # ── Meta link ─────────────────────────────────────────────────────────────
 

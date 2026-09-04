@@ -1,6 +1,6 @@
-import threading
 from gi.repository import Gtk, Adw, GObject, GLib, Pango, Gdk, Gio
 from ui.utils import AsyncPicture, LikeButton, MarqueeLabel, show_toast
+from ui.context_menu import MenuAction, build_song_menu
 from ui.queue_panel import QueuePanel
 from ui.widgets.lyrics_view import LyricsView
 from ui.util_classes import ScrolledWindow
@@ -171,37 +171,9 @@ class ExpandedPlayer(Gtk.Box):
         self.more_btn.set_valign(Gtk.Align.CENTER)
         self.more_btn.set_menu_model(self.more_menu_model)
 
-        # Action group for the more menu
-        self.ep_action_group = Gio.SimpleActionGroup()
-        self.insert_action_group("ep", self.ep_action_group)
-
-        a_add = Gio.SimpleAction.new("add_to_playlist", GLib.VariantType.new("s"))
-        a_add.connect("activate", self._on_add_to_playlist)
-        self.ep_action_group.add_action(a_add)
-
-        a_show_add = Gio.SimpleAction.new("show_add_to_playlist", None)
-        a_show_add.connect("activate", self._on_show_add_to_playlist)
-        self.ep_action_group.add_action(a_show_add)
-
-        a_radio = Gio.SimpleAction.new("start_radio", None)
-        a_radio.connect("activate", self._on_start_radio)
-        self.ep_action_group.add_action(a_radio)
-
-        a_copy = Gio.SimpleAction.new("copy_link", None)
-        a_copy.connect("activate", self._on_copy_link)
-        self.ep_action_group.add_action(a_copy)
-
-        a_dl = Gio.SimpleAction.new("download", None)
-        a_dl.connect("activate", self._on_download)
-        self.ep_action_group.add_action(a_dl)
-
-        a_refresh = Gio.SimpleAction.new("refresh_metadata", None)
-        a_refresh.connect("activate", self._on_refresh_metadata)
-        self.ep_action_group.add_action(a_refresh)
-
-        a_stream_info = Gio.SimpleAction.new("stream_info", None)
-        a_stream_info.connect("activate", self._on_stream_info)
-        self.ep_action_group.add_action(a_stream_info)
+        # The more menu itself is built by ui.context_menu so it matches
+        # the right-click menus everywhere else.
+        self._refresh_more_menu()
 
         meta_row.append(text_box)
         meta_row.append(self.like_btn)
@@ -660,103 +632,36 @@ class ExpandedPlayer(Gtk.Box):
     # ── More menu (3-dot) handlers ──────────────────────────────────────────
 
     def _refresh_more_menu(self):
-        # Rebuild the menu model from scratch and re-hand it to the button.
-        # Mutating the existing model in place causes GtkPopoverMenu's
-        # internal GtkStack to accumulate stale submenu pages, producing
-        # "duplicate child name in GtkStack" warnings.
-        self.more_menu_model = Gio.Menu()
+        # Rebuild the model from scratch. Mutating it in place makes
+        # GtkPopoverMenu accumulate stale submenu pages.
+        vid = self.player.current_video_id
+        idx = self.player.current_queue_index
+        queue = self.player.queue or []
+        track = queue[idx] if 0 <= idx < len(queue) else {"videoId": vid}
+
+        extras = []
+        if vid:
+            extras.append(
+                MenuAction(
+                    "Stream Info (Debug)", self._show_stream_info, section="debug"
+                )
+            )
+
+        self.more_menu_model = build_song_menu(
+            self.more_btn,
+            track,
+            player=self.player,
+            client=self.player.client,
+            prefix="ep",
+            video_id=vid,
+            # The queue entries would only duplicate the playing track, and
+            # the artist / cover buttons already handle navigation.
+            hide=("play_next", "add_to_queue", "goto_artist", "goto_album"),
+            extras=extras,
+        )
         self.more_btn.set_menu_model(self.more_menu_model)
 
-        vid = self.player.current_video_id
-
-        action_section = Gio.Menu()
-
-        from ui.utils import is_online
-
-        _online = is_online()
-
-        # Start Radio (online only)
-        if vid and _online:
-            action_section.append("Start Radio", "ep.start_radio")
-
-        # Add to Playlist (online only) — opens the custom popover
-        if vid and _online and self.player.client.get_editable_playlists():
-            action_section.append("Add to Playlist…", "ep.show_add_to_playlist")
-
-        # Download (online only)
-        if vid and _online and not self.player.download_manager.is_downloaded(vid):
-            action_section.append("Download", "ep.download")
-
-        # Refresh metadata (online only)
-        if vid and _online:
-            action_section.append("Refresh Metadata", "ep.refresh_metadata")
-
-        if action_section.get_n_items() > 0:
-            self.more_menu_model.append_section(None, action_section)
-
-        # Clipboard (online only)
-        if vid and _online:
-            clip_section = Gio.Menu()
-            clip_section.append("Copy Song Link", "ep.copy_link")
-            self.more_menu_model.append_section(None, clip_section)
-
-        # Diagnostics — always available when something is loaded so the
-        # user can inspect why a stream won't seek (format/protocol/range).
-        if vid:
-            debug_section = Gio.Menu()
-            debug_section.append("Stream Info (Debug)", "ep.stream_info")
-            self.more_menu_model.append_section(None, debug_section)
-
-    def _on_add_to_playlist(self, action, param):
-        self._do_add_to_playlist(param.get_string())
-
-    def _on_show_add_to_playlist(self, action, param):
-        from ui.widgets.add_to_playlist import AddToPlaylistPopover
-        pop = AddToPlaylistPopover(
-            self.player, on_select=self._do_add_to_playlist, parent=self.more_btn
-        )
-        pop.popup()
-
-    def _do_add_to_playlist(self, target_pid):
-        vid = self.player.current_video_id
-        if not target_pid or not vid:
-            return
-
-        from ui.widgets.add_to_playlist import mark_playlist_used
-        mark_playlist_used(target_pid)
-
-        def _thread():
-            # add_playlist_items auto-swaps OMV→ATV for single-item
-            # adds, so even if the player's own swap hasn't run yet,
-            # the audio version still ends up in the playlist.
-            success = self.player.client.add_playlist_items(target_pid, [vid])
-            msg = "Added to playlist" if success else "Failed to add"
-            GLib.idle_add(self._show_toast, msg)
-
-        threading.Thread(target=_thread, daemon=True).start()
-
-    def _on_start_radio(self, action, param):
-        vid = self.player.current_video_id
-        if vid:
-            self.player.start_radio(video_id=vid)
-
-    def _on_download(self, action, param):
-        idx = self.player.current_queue_index
-        if 0 <= idx < len(self.player.queue):
-            track = self.player.queue[idx]
-            root = self.get_root()
-            if root and hasattr(root, "download_track"):
-                root.download_track(track)
-
-    def _on_copy_link(self, action, param):
-        vid = self.player.current_video_id
-        if vid:
-            Gdk.Display.get_default().get_clipboard().set(
-                f"https://music.youtube.com/watch?v={vid}"
-            )
-            self._show_toast("Link copied")
-
-    def _on_stream_info(self, action, param):
+    def _show_stream_info(self):
         try:
             info = self.player.get_stream_debug()
         except Exception as e:
@@ -793,47 +698,6 @@ class ExpandedPlayer(Gtk.Box):
 
         dialog.connect("response", on_response)
         dialog.present()
-
-    def _on_refresh_metadata(self, action, param):
-        vid = self.player.current_video_id
-        idx = self.player.current_queue_index
-        if not vid or idx < 0 or idx >= len(self.player.queue):
-            return
-        self._show_toast("Refreshing metadata...")
-
-        def _fetch():
-            try:
-                wp = self.player.client.get_watch_playlist(video_id=vid, limit=1)
-                wp_tracks = wp.get("tracks", [])
-                if wp_tracks:
-                    fresh = wp_tracks[0]
-                    track = self.player.queue[idx]
-                    if track.get("videoId") != vid:
-                        return
-                    if fresh.get("title"):
-                        track["title"] = fresh["title"]
-                    if fresh.get("artists"):
-                        track["artists"] = fresh["artists"]
-                        track["artist"] = ", ".join(
-                            a.get("name", "") for a in fresh["artists"] if a
-                        )
-                    if fresh.get("album"):
-                        track["album"] = fresh["album"]
-                    if fresh.get("thumbnail"):
-                        thumbs = fresh["thumbnail"]
-                        if isinstance(thumbs, list) and thumbs:
-                            track["thumb"] = thumbs[-1].get("url", "")
-                            track["thumbnails"] = thumbs
-                    if getattr(self.player, "discord_rpc", None):
-                        self.player.discord_rpc.update()
-                    GLib.idle_add(self._show_toast, "Metadata refreshed")
-                else:
-                    GLib.idle_add(self._show_toast, "No metadata found")
-            except Exception as e:
-                print(f"Refresh metadata error: {e}")
-                GLib.idle_add(self._show_toast, "Failed to refresh metadata")
-
-        threading.Thread(target=_fetch, daemon=True).start()
 
     def _show_toast(self, message):
         show_toast(self, message)
