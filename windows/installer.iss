@@ -2,7 +2,7 @@
 ; Build with: iscc installer.iss
 
 #define MyAppName "Mixtapes"
-#define MyAppVersion "2026.26.05.0"
+#define MyAppVersion "2026.04.09.0"
 #define MyAppPublisher "pocoguy"
 #define MyAppURL "https://github.com/m-obeid/Mixtapes"
 #define MyAppExeName "Mixtapes.exe"

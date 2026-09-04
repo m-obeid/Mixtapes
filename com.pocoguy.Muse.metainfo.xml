@@ -83,7 +83,47 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
-    <release version="2026-26-05.0" date="2026-05-26">
+
+    <release version="2026-09-04.0" date="2026-09-04">
+      <description>
+        <p>A ground-up rework of lyrics: pick which providers to search and in what order, read a romanization or translation under each line, follow word by word timing, and step in yourself when a track matches the wrong song. Plus scrobbling to Last.fm and ListenBrainz, a GNOME HIG primary menu, and a long run of memory and performance work.</p>
+        <ul>
+          <li>Scrobbling to Last.fm and ListenBrainz, with Now Playing updates and an offline backlog that retries failed submissions</li>
+          <li>Lyrics search queue: reorder the providers, switch any of them off, and choose whether the search stops at the first result or keeps looking for one with real timing. Under Preferences, Lyrics</li>
+          <li>Second line under each lyric: a romanization, a translation, or the backing vocals. Auto picks a romanization for non-Latin scripts and backing vocals otherwise</li>
+          <li>Romanization is generated on your machine for Korean and Cyrillic, needing no network and no data files. Japanese and Chinese use a provider's own reading, or an installed dictionary when one is available</li>
+          <li>Apple Music lyrics are now read from the original TTML rather than a flattened copy: word by word timing, official transliterations and translations, backing vocals on their own line, and correct spacing for Japanese and Chinese</li>
+          <li>Duets are laid out the way Apple credits them, with the second voice against the opposite edge</li>
+          <li>Instrumental breaks show a marker that fills across the gap as a countdown to the next line, instead of leaving the last sung line lit for twenty seconds</li>
+          <li>Sources with no word timing get a highlight that travels across the line rather than the whole line lighting at once. Can be switched off</li>
+          <li>Lyrics effects: each word fades in over the time it is actually held, the line being sung grows, and Full adds a glow and blurs the lines furthest away. Resting and active text sizes are both adjustable</li>
+          <li>Rebuilt lyrics source picker: see what every provider returned, browse all of one provider's matches when the automatic pick is wrong, search by name for titles that defeat matching, and undo any choice with Use automatic choice</li>
+          <li>The lyrics button stays reachable when a track has no lyrics, which is when switching source or searching by name actually matters</li>
+          <li>Fix: Apple Music had been silently unavailable. The developer token it needs is scraped from Apple's web player, and a change there had broken the scrape, so the best word by word source returned nothing for every track. Its catalog is now looked up through the public iTunes search first, with the old path kept as a fallback</li>
+          <li>Fix: artist matching ignored non-Latin names entirely. A Japanese, Korean, Chinese or Cyrillic artist did not match even itself, which disqualified results for exactly the tracks that most need a romanization</li>
+          <li>Fix: a search hit now has to agree with the track before it is used. Duration, live and remix and karaoke markers, and the artist are all checked, so a cover, a different take, or a same-title song by someone else can no longer be served as your track</li>
+          <li>Fix: titles that carry their credits inline, common on Vocaloid and doujin uploads, now resolve. Bracketed credits are stripped and a name written twice in two scripts is tried each way</li>
+          <li>Fix: store watermarks that Apple prepends to some tracks no longer appear as the opening lyric</li>
+          <li>The lyrics cache is versioned, so matching and parsing fixes reach tracks you have already played without clearing anything by hand. Sources you picked yourself are kept</li>
+          <li>Primary menu rebuilt to follow the GNOME Human Interface Guidelines, and context menus are now consistent across the app</li>
+          <li>Dynamic cover color, the blurred background and overall contrast reworked. Controls that float over album art use the standard overlay treatment so they stay legible against any cover</li>
+          <li>Sort playlists by view count and by recently added</li>
+          <li>Memory: capped glibc malloc arenas, which stops resident memory climbing with every track change, and bounded the memory the UI holds</li>
+          <li>Navigation is faster: duplicate pages are no longer pushed onto the stack, and page content loads after the push animation rather than during it. History loads asynchronously</li>
+          <li>Fix: YouTube streams that refused to seek are now seekable, and PO-token handling is more robust</li>
+          <li>Fix: offline status checks no longer freeze the interface</li>
+          <li>Fix: Discord Rich Presence leaked a thread indefinitely. There is also a new option to hide it while paused</li>
+          <li>Fix: playlist caching corrections around Liked Music, mixes, and track counts taken from the real track list</li>
+          <li>Fix: songs with long names failed to download</li>
+          <li>Fix: search bar inconsistency, a double-loading delay, and unnecessary queue rebuilds. Clicking a song in a playlist that is already queued now skips to it instead of rebuilding the queue</li>
+          <li>Visualizer detects whether the spectrum is linear or dB and normalizes accordingly</li>
+          <li>New Stream Info panel under Preferences for diagnosing playback problems</li>
+          <li>Flatpak now builds with Nuitka, and AUR packaging ships the PO-token plugins</li>
+        </ul>
+      </description>
+    </release>
+
+    <release version="2026-05-26.0" date="2026-05-26">
       <description>
         <p>Gapless playback, a rewritten visualizer that syncs to the audio automatically, and a wave of fixes targeting the freezes and hangs that made big playlists feel sluggish.</p>
         <ul>
@@ -104,7 +144,7 @@
         </ul>
       </description>
     </release>
-    <release version="2026-24-05.0" date="2026-05-24">
+    <release version="2026-05-24.0" date="2026-05-24">
       <description>
         <p>New home feed, built-in visualizer, smarter Add to Playlist, and a wave of visual polish around blurred cover backgrounds and the dynamic accent color. And of course bug fixes.</p>
         <ul>
@@ -127,7 +167,7 @@
         </ul>
       </description>
     </release>
-    <release version="2026-23-04.0" date="2026-04-23">
+    <release version="2026-04-23.0" date="2026-04-23">
       <description>
         <p>Major feature update with UI changes, history, and more.</p>
         <ul>
@@ -149,7 +189,7 @@
         </ul>
       </description>
     </release>
-    <release version="2026-18-04.0" date="2026-04-18">
+    <release version="2026-04-18.0" date="2026-04-18">
       <description>
         <p>New app icon, Discord RPC improvements, queue management, and bug fixes.</p>
         <ul>
@@ -167,7 +207,7 @@
         </ul>
       </description>
     </release>
-    <release version="2026-11-04.0" date="2026-11-04">
+    <release version="2026-04-11.0" date="2026-04-11">
       <description>
         <p>Discord Rich Presence support and a stack of stability fixes around fast skipping, the queue, and the explore page.</p>
         <ul>
@@ -183,7 +223,7 @@
         </ul>
       </description>
     </release>
-    <release version="2026-05-04.0" date="2026-05-04">
+    <release version="2026-04-05.0" date="2026-04-05">
       <description>
         <p>This update adds the ability to download songs as local files with all the metadata and offline listening, as well as Charts in the Explore page.</p>
       </description>

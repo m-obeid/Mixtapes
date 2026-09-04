@@ -2293,7 +2293,7 @@ class MainWindow(Adw.ApplicationWindow):
         about.set_application_icon("com.pocoguy.Muse")
         about.set_application_name("Mixtapes")
         about.set_developer_name("POCOGuy")
-        about.set_version("2026.26.05-0")
+        about.set_version("2026.04.09-0")
         about.set_website("https://www.pocoguy.com/#!/mixtapes")
         about.set_copyright("© 2026 POCOGuy")
         about.set_license_type(Gtk.License.GPL_3_0)
@@ -2384,7 +2384,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         page = Adw.PreferencesPage()
         page.set_title("General")
-        page.set_icon_name("settings-symbolic")
+        # "settings-symbolic" isn't in Adwaita — the page icon silently fell
+        # back to a missing-image box. It only became visible once a second
+        # page gave the dialog a view switcher to draw.
+        page.set_icon_name("preferences-system-symbolic")
         prefs.add(page)
 
         # Account group first — profile header + Sign In/Sign Out.
@@ -2963,7 +2966,307 @@ class MainWindow(Adw.ApplicationWindow):
         songs_subdir_row.connect("notify::active", on_songs_subdir_toggled)
         dl_group.add(songs_subdir_row)
 
+        prefs.add(self._build_lyrics_page())
+
         prefs.present(self)
+
+    # ── Lyrics preferences ────────────────────────────────────────────
+    # One line each on what a provider is actually good at, so ordering
+    # the queue is an informed choice rather than trial and error.
+    _LYRICS_PROVIDER_BLURBS = {
+        "Apple Music": "Word-level timing. Best coverage for Western pop",
+        "BetterLyrics": "Word-level timing. Mirrors Apple's database",
+        "BiniLyrics": "Word-level timing. Strong on Japanese tracks",
+        "NetEase": "Line-synced. Romanization and translation for CJK",
+        "LRCLIB": "Line-synced. Large community LRC database",
+        "YouTube Music": "Plain text, no timing. Always available when signed in",
+    }
+
+    def _build_lyrics_page(self):
+        from player import lyrics_prefs
+
+        page = Adw.PreferencesPage()
+        page.set_title("Lyrics")
+        page.set_icon_name("format-justify-fill-symbolic")
+
+        # ── Search queue ──────────────────────────────────────────────
+        queue_group = Adw.PreferencesGroup()
+        queue_group.set_title("Search Queue")
+        queue_group.set_description(
+            "Tried from the top down. Switch one off to skip it."
+        )
+        page.add(queue_group)
+
+        queue_rows = []
+
+        def rebuild_queue():
+            for row in queue_rows:
+                queue_group.remove(row)
+            queue_rows.clear()
+            order = lyrics_prefs.full_provider_order()
+            disabled = lyrics_prefs.disabled_providers()
+            for i, name in enumerate(order):
+                row = Adw.ActionRow()
+                row.set_title(f"{i + 1}. {name}")
+                row.set_subtitle(self._LYRICS_PROVIDER_BLURBS.get(name, ""))
+
+                up = Gtk.Button(icon_name="go-up-symbolic")
+                up.set_valign(Gtk.Align.CENTER)
+                up.add_css_class("flat")
+                up.set_tooltip_text("Move up")
+                up.set_sensitive(i > 0)
+                up.connect("clicked", lambda _b, n=name: move(n, -1))
+                row.add_suffix(up)
+
+                down = Gtk.Button(icon_name="go-down-symbolic")
+                down.set_valign(Gtk.Align.CENTER)
+                down.add_css_class("flat")
+                down.set_tooltip_text("Move down")
+                down.set_sensitive(i < len(order) - 1)
+                down.connect("clicked", lambda _b, n=name: move(n, 1))
+                row.add_suffix(down)
+
+                switch = Gtk.Switch()
+                switch.set_valign(Gtk.Align.CENTER)
+                switch.set_active(name not in disabled)
+                switch.connect(
+                    "notify::active",
+                    lambda sw, _p, n=name: toggle(n, sw.get_active()),
+                )
+                row.add_suffix(switch)
+                row.set_activatable_widget(switch)
+
+                queue_group.add(row)
+                queue_rows.append(row)
+
+        def move(name, delta):
+            order = lyrics_prefs.full_provider_order()
+            try:
+                i = order.index(name)
+            except ValueError:
+                return
+            j = i + delta
+            if not (0 <= j < len(order)):
+                return
+            order[i], order[j] = order[j], order[i]
+            lyrics_prefs.set_provider_order(order)
+            rebuild_queue()
+
+        def toggle(name, enabled):
+            # Refuse to switch off the last enabled provider — an empty
+            # queue silently means "no lyrics, ever", with nothing on
+            # screen to explain why.
+            if not enabled and len(lyrics_prefs.provider_order()) <= 1:
+                self.add_toast("Keep at least one lyrics provider enabled")
+                rebuild_queue()
+                return
+            lyrics_prefs.set_provider_enabled(name, enabled)
+            rebuild_queue()
+
+        rebuild_queue()
+
+        # ── Matching ──────────────────────────────────────────────────
+        match_group = Adw.PreferencesGroup()
+        match_group.set_title("Matching")
+        # The explanations live on the group rather than as row subtitles:
+        # a wrapped subtitle claims the row's whole natural width and
+        # squeezes the combo's value down to an ellipsis.
+        match_group.set_description(
+            "Quality-aware keeps looking for synced lyrics before settling "
+            "for plain text. Strict takes the first hit of any kind."
+        )
+        page.add(match_group)
+
+        match_keys = [lyrics_prefs.MATCH_QUALITY, lyrics_prefs.MATCH_STRICT]
+        match_row = Adw.ComboRow()
+        match_row.set_title("When to Stop Searching")
+        match_row.set_model(Gtk.StringList.new(["Quality-aware", "Strict"]))
+        match_row.set_selected(match_keys.index(lyrics_prefs.match_mode()))
+
+        def on_match_changed(row, _pspec):
+            idx = row.get_selected()
+            if 0 <= idx < len(match_keys):
+                lyrics_prefs.set_match_mode(match_keys[idx])
+
+        match_row.connect("notify::selected", on_match_changed)
+        match_group.add(match_row)
+
+        cache_row = Adw.ActionRow()
+        cache_row.set_title("Clear Cached Lyrics")
+        cache_row.set_subtitle(
+            "Queue changes only apply to tracks that aren't cached yet"
+        )
+        clear_btn = Gtk.Button(label="Clear")
+        clear_btn.set_valign(Gtk.Align.CENTER)
+        clear_btn.add_css_class("destructive-action")
+        clear_btn.connect("clicked", self._on_clear_lyrics_cache)
+        cache_row.add_suffix(clear_btn)
+        cache_row.set_activatable_widget(clear_btn)
+        match_group.add(cache_row)
+
+        # ── Display ───────────────────────────────────────────────────
+        display_group = Adw.PreferencesGroup()
+        display_group.set_title("Second Line")
+        display_group.set_description(
+            "An extra line under each lyric. Auto picks a romanization for "
+            "non-Latin scripts and background vocals otherwise. What's "
+            "available depends on the provider."
+        )
+        page.add(display_group)
+
+        second_keys = ["off", "auto", "romanization", "translation", "background"]
+        second_row = Adw.ComboRow()
+        second_row.set_title("Show")
+        second_row.set_model(Gtk.StringList.new([
+            "Off", "Auto", "Romanization", "Translation", "Background",
+        ]))
+        second_row.set_selected(
+            second_keys.index(lyrics_prefs.second_line_mode())
+        )
+
+        def on_second_changed(row, _pspec):
+            idx = row.get_selected()
+            if 0 <= idx < len(second_keys):
+                lyrics_prefs.set_second_line_mode(second_keys[idx])
+                self._apply_lyrics_display_prefs()
+
+        second_row.connect("notify::selected", on_second_changed)
+        display_group.add(second_row)
+
+        effects_group = Adw.PreferencesGroup()
+        effects_group.set_title("Effects")
+        effects_group.set_description(
+            "Subtle fades each word in over the time it's actually held "
+            "and grows the active line. Full adds a glow on the active "
+            "line and blurs the lines furthest from it."
+        )
+        page.add(effects_group)
+
+        effect_keys = ["off", "subtle", "full"]
+        effect_row = Adw.ComboRow()
+        effect_row.set_title("Level")
+        effect_row.set_model(Gtk.StringList.new(["Off", "Subtle", "Full"]))
+        effect_row.set_selected(effect_keys.index(lyrics_prefs.effects_level()))
+
+        def on_effect_changed(row, _pspec):
+            idx = row.get_selected()
+            if 0 <= idx < len(effect_keys):
+                lyrics_prefs.set_effects_level(effect_keys[idx])
+                grown = getattr(self, "_lyrics_grown_row", None)
+                if grown is not None:
+                    grown.set_sensitive(effect_keys[idx] != "off")
+                self._apply_lyrics_display_prefs()
+
+        effect_row.connect("notify::selected", on_effect_changed)
+        effects_group.add(effect_row)
+
+        sweep_row = Adw.SwitchRow()
+        sweep_row.set_title("Emulate Word Timing")
+        sweep_row.set_subtitle(
+            "On sources with no word timing, move the highlight across the "
+            "line instead of lighting the whole line at once"
+        )
+        sweep_row.set_active(lyrics_prefs.line_sweep())
+
+        def on_sweep_toggled(switch, _pspec):
+            lyrics_prefs.set_line_sweep(switch.get_active())
+            self._apply_lyrics_display_prefs()
+
+        sweep_row.connect("notify::active", on_sweep_toggled)
+        effects_group.add(sweep_row)
+
+        # ── Text size ─────────────────────────────────────────────────
+        size_group = Adw.PreferencesGroup()
+        size_group.set_title("Text Size")
+        size_group.set_description(
+            "Resting size of the lyric column, and how much bigger the "
+            "line being sung is drawn. The active line is scaled when it "
+            "is painted, so growing it never changes the row's height or "
+            "disturbs the scrolling."
+        )
+        page.add(size_group)
+
+        base_row = Adw.ActionRow()
+        base_row.set_title("Lyrics Size")
+        base_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL,
+            lyrics_prefs.FONT_SCALE_MIN, lyrics_prefs.FONT_SCALE_MAX, 0.05,
+        )
+        base_scale.set_value(lyrics_prefs.font_scale())
+        base_scale.set_draw_value(True)
+        base_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        base_scale.set_digits(2)
+        base_scale.set_size_request(220, -1)
+        base_scale.set_valign(Gtk.Align.CENTER)
+        base_scale.add_mark(
+            lyrics_prefs.FONT_SCALE_DEFAULT, Gtk.PositionType.BOTTOM, None
+        )
+        base_row.add_suffix(base_scale)
+
+        def on_base_size(scale):
+            lyrics_prefs.set_font_scale(scale.get_value())
+            self._apply_lyrics_display_prefs()
+
+        base_scale.connect("value-changed", on_base_size)
+        size_group.add(base_row)
+
+        grown_row = Adw.ActionRow()
+        grown_row.set_title("Active Line Size")
+        grown_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL,
+            lyrics_prefs.ACTIVE_SCALE_MIN, lyrics_prefs.ACTIVE_SCALE_MAX, 0.01,
+        )
+        grown_scale.set_value(lyrics_prefs.active_scale())
+        grown_scale.set_draw_value(True)
+        grown_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        grown_scale.set_digits(2)
+        grown_scale.set_size_request(220, -1)
+        grown_scale.set_valign(Gtk.Align.CENTER)
+        grown_scale.add_mark(
+            lyrics_prefs.ACTIVE_SCALE_DEFAULT, Gtk.PositionType.BOTTOM, None
+        )
+        grown_row.add_suffix(grown_scale)
+
+        def on_grown_size(scale):
+            lyrics_prefs.set_active_scale(scale.get_value())
+            self._apply_lyrics_display_prefs()
+
+        grown_scale.connect("value-changed", on_grown_size)
+        # Growing only happens at Subtle and above.
+        grown_row.set_sensitive(lyrics_prefs.effects_level() != "off")
+        size_group.add(grown_row)
+
+        self._lyrics_grown_row = grown_row
+
+        return page
+
+    def _lyrics_views(self):
+        """Both live LyricsView instances — the mobile expanded player's
+        and the desktop cover view's. Either may not exist yet."""
+        views = []
+        for holder in ("expanded_player", "desktop_cover_view"):
+            view = getattr(getattr(self, holder, None), "lyrics_view", None)
+            if view is not None:
+                views.append(view)
+        return views
+
+    def _apply_lyrics_display_prefs(self):
+        for view in self._lyrics_views():
+            view.apply_display_prefs()
+
+    def _on_clear_lyrics_cache(self, _button):
+        from player.lyrics_cache import LyricsCache
+
+        try:
+            removed = self.player.client._lyrics_cache.clear_all()
+        except Exception:
+            removed = LyricsCache().clear_all()
+        self.add_toast(
+            f"Cleared {removed} cached track(s)" if removed
+            else "No cached lyrics to clear"
+        )
+        for view in self._lyrics_views():
+            view.refresh()
 
     def _build_account_group(self, prefs, is_authed):
         """Build the 'Account' Adw.PreferencesGroup that leads the

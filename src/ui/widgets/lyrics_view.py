@@ -18,13 +18,16 @@ Architecture follows Nocturne's (Jeffser/Nocturne) playing lyrics page:
 """
 
 import html
+import math
 import os
+import re
 import threading
 import time
-from gi.repository import Gtk, Adw, GObject, GLib, Pango, Graphene
+from gi.repository import Gtk, Adw, GObject, GLib, Gdk, Gsk, Pango, Graphene
 
 from ui.widgets.fade_edges_bin import FadeEdgesBin
 from ui.util_classes import ScrolledWindow
+from player import lyrics_prefs
 
 
 # Pango's "alpha" attribute takes a 16-bit value where 65535 = fully opaque.
@@ -47,46 +50,348 @@ def _dlog(level, msg):
 _ALPHA_ACTIVE = 1.00
 _ALPHA_INACTIVE = 0.32
 _ALPHA_FUTURE_WORD = 0.32
-_LERP_SPEED = 0.18  # Per-frame fade speed (0..1 fraction of remaining gap).
+# The second line (romanization / translation / background vocals) sits
+# under the lead at a lower ceiling so it reads as support, not as a
+# second lyric competing for the eye.
+_ALPHA_SUB_ACTIVE = 0.78
+_ALPHA_SUB_INACTIVE = 0.20
+
+# Per-frame fade speed (fraction of the remaining gap). Effects-off keeps
+# the original constant-rate fade; with effects on the per-word target is
+# already ramped against the word's own duration, so the lerp only needs
+# to be fast enough to smooth out seeks.
+_LERP_SPEED = 0.18
+_LERP_SPEED_EFFECTS = 0.34
+
+# How long a word takes to reach full brightness, as a fraction of how
+# long it's actually held, clamped at both ends. A word held for two
+# seconds swells in; a rapid-fire syllable snaps.
+_WORD_RAMP_FRACTION = 0.55
+_WORD_RAMP_MIN_MS = 90
+_WORD_RAMP_MAX_MS = 420
+# Synthesized timings are an estimate, so their words ramp faster than
+# real ones: a slow swell on a guessed boundary reads as lag, while a
+# quicker fill reads as the highlight simply travelling.
+_SWEEP_RAMP_FRACTION = 0.3
+
+# What each level draws. The active line growing is the effect that
+# actually tracks the singing, so it carries "subtle" on its own; the
+# glow and the distance blur are decoration and belong to "full".
+#
+#   off     — plain fade, nothing else
+#   subtle  — duration-aware word fades + the active line grows
+#   full    — the above + accent glow + blur on distant lines
+_EFFECT_SCALE = ("subtle", "full")
+_EFFECT_GLOW = ("full",)
+_EFFECT_BLUR = ("full",)
+
+_BLUR_START_DISTANCE = 2
+_BLUR_PER_LINE = 0.65
+_BLUR_MAX = 2.6
+_EFFECT_LERP = 0.16
+
+# Scripts that a romanization actually helps with. Greek is left out on
+# purpose: it shows up as stylized Latin far more often than as a lyric
+# the listener can't read.
+_NON_LATIN_RE = re.compile(
+    "["
+    "\u0400-\u04FF"   # Cyrillic
+    "\u0590-\u05FF"   # Hebrew
+    "\u0600-\u06FF"   # Arabic
+    "\u0E00-\u0E7F"   # Thai
+    "\u3040-\u30FF"   # Hiragana + Katakana
+    "\u3400-\u4DBF"   # CJK extension A
+    "\u4E00-\u9FFF"   # CJK unified ideographs
+    "\uAC00-\uD7AF"   # Hangul syllables
+    "]"
+)
+
+
+def _is_non_latin(text):
+    return bool(text) and bool(_NON_LATIN_RE.search(text))
+
+
+def _second_line_for(line, mode):
+    """Pick the second line's content for one lyric line.
+
+    Returns ``(text, parts_or_None)``. ``parts`` is only ever set for
+    background vocals, which carry their own word timing and so can
+    karaoke along with the lead; romanizations and translations are
+    line-level and just follow the lead line's state.
+
+    ``auto`` shows a romanization when the lyric is in a script the
+    romanization is actually for, and background vocals otherwise — the
+    two cases where a second line adds something the listener can't get
+    from the first.
+    """
+    if mode == "off":
+        return None, None
+
+    roman = (line.get("romanization") or "").strip()
+    translation = (line.get("translation") or "").strip()
+    bg_text = (line.get("bg_text") or "").strip()
+    bg_parts = line.get("bg")
+
+    if mode == "romanization":
+        return (roman or None), None
+    if mode == "translation":
+        return (translation or None), None
+    if mode == "background":
+        return (bg_text or None), (bg_parts if bg_text else None)
+
+    # auto
+    if roman and _is_non_latin(line.get("text") or ""):
+        return roman, None
+    if bg_text:
+        return bg_text, bg_parts
+    return None, None
+
+
+# The lyric column's type size is a preference, so the rule that sets it
+# has to be generated rather than living in style.css. One provider for
+# the whole display: both LyricsView instances (mobile expanded player
+# and desktop cover view) show the same lyrics at the same size.
+_FONT_CSS_PROVIDER = None
+_FONT_CSS_SCALE = None
+
+# Matches the resting sizes in style.css, which these multiply.
+_BASE_FONT_EM = 1.4
+_SUB_FONT_EM = 0.98
+
+
+def apply_font_scale(force=False):
+    """Push the current type-size preference into the display's CSS."""
+    global _FONT_CSS_PROVIDER, _FONT_CSS_SCALE
+
+    scale = lyrics_prefs.font_scale()
+    if not force and scale == _FONT_CSS_SCALE:
+        return
+    display = Gdk.Display.get_default()
+    if display is None:
+        return
+    if _FONT_CSS_PROVIDER is None:
+        _FONT_CSS_PROVIDER = Gtk.CssProvider()
+        # One step above the app stylesheet so it wins over the resting
+        # sizes declared there, while still losing to user CSS.
+        Gtk.StyleContext.add_provider_for_display(
+            display, _FONT_CSS_PROVIDER,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+        )
+    _FONT_CSS_PROVIDER.load_from_string(
+        f".lyrics-line .lyrics-line-label {{ font-size: {_BASE_FONT_EM * scale:.3f}em; }}\n"
+        f".lyrics-line .lyrics-line-sub {{ font-size: {_SUB_FONT_EM * scale:.3f}em; }}\n"
+    )
+    _FONT_CSS_SCALE = scale
+
+
+def _is_cjk_char(ch):
+    """Scripts written without spaces between words."""
+    o = ord(ch)
+    return (
+        0x3040 <= o <= 0x30FF      # Hiragana + Katakana
+        or 0x3400 <= o <= 0x4DBF   # CJK extension A
+        or 0x4E00 <= o <= 0x9FFF   # CJK unified ideographs
+        or 0xAC00 <= o <= 0xD7AF   # Hangul syllables
+        or 0xF900 <= o <= 0xFAFF   # CJK compatibility ideographs
+    )
+
+
+def _sweep_tokens(text):
+    """Split a line into the chunks a sweep advances over.
+
+    Words for space-separated text, single characters for CJK. Splitting
+    Japanese on whitespace would yield one token for the whole line and
+    the sweep would have nothing to advance across — which is the case
+    that most wants it.
+
+    Returns ``[(text, space_after), ...]``.
+    """
+    tokens = []
+    buf = ""
+
+    def flush():
+        nonlocal buf
+        if buf:
+            tokens.append([buf, False])
+            buf = ""
+
+    for ch in text:
+        if ch.isspace():
+            flush()
+            if tokens:
+                tokens[-1][1] = True
+        elif _is_cjk_char(ch):
+            flush()
+            tokens.append([ch, False])
+        else:
+            buf += ch
+    flush()
+    return [(t, sp) for t, sp in tokens if t]
+
+
+# A line whose span runs longer than this is almost certainly followed by
+# an instrumental rather than being sung for that whole time. Cap the
+# sweep so it doesn't crawl across the line for half a minute.
+_SWEEP_MAX_MS = 12000
+# Below this there's no room for a sweep to read as anything but a flash.
+_SWEEP_MIN_MS = 400
+
+
+def _synthesize_parts(text, start_ms, end_ms):
+    """Fake per-word timing for a line-synced lyric.
+
+    Line-level sources give a start per line and nothing within it. The
+    line still has a known span, though, so dividing that span across the
+    line's own tokens — weighted by how long each one is — produces a
+    highlight that advances through the line instead of the whole line
+    lighting at once. It isn't real word timing and can drift inside a
+    line, but it tracks the singing far better than a single step does.
+
+    Returns ``[]`` when there's nothing sensible to sweep across.
+    """
+    if start_ms is None or end_ms is None:
+        return []
+    span = end_ms - start_ms
+    if span < _SWEEP_MIN_MS:
+        return []
+    span = min(span, _SWEEP_MAX_MS)
+
+    tokens = _sweep_tokens(text or "")
+    if len(tokens) < 2:
+        return []
+
+    total = sum(len(t) for t, _ in tokens) or 1
+    parts = []
+    cursor = float(start_ms)
+    for token, space_after in tokens:
+        share = span * (len(token) / total)
+        parts.append({
+            "start_ms": int(cursor),
+            "end_ms": int(cursor + share),
+            "text": token,
+            "space_after": space_after,
+        })
+        cursor += share
+    return parts
+
+
+def _normalize_parts(raw_parts):
+    """``[{start, end, text, space_after}]`` -> millisecond ints, dropping
+    anything without a start time (which we can't schedule)."""
+    out = []
+    for p in raw_parts or []:
+        start = p.get("start")
+        text = p.get("text")
+        if not text or start is None:
+            continue
+        end = p.get("end")
+        out.append({
+            "start_ms": int(start * 1000),
+            "end_ms": int((end if end is not None else start) * 1000),
+            "text": text,
+            # Sources that don't record inter-word spacing (older LRC-shaped
+            # payloads) default to space-separated, which is how word-level
+            # lines have always rendered.
+            "space_after": p.get("space_after", True),
+        })
+    return out
+
+
+def _join_parts_markup(parts, alphas):
+    chunks = []
+    for i, part in enumerate(parts):
+        alpha = int(max(0.0, min(1.0, alphas[i])) * _PANGO_ALPHA_MAX)
+        chunks.append(
+            f"<span fgalpha='{alpha}'>{html.escape(part['text'])}</span>"
+        )
+        if part.get("space_after") and i < len(parts) - 1:
+            chunks.append(" ")
+    return "".join(chunks)
 
 
 class LyricRow(Gtk.ListBoxRow):
     """A single lyric line. Always rendered with Pango markup so swapping
-    between active and inactive doesn't re-layout the label."""
+    between active and inactive doesn't re-layout the label.
+
+    A line that carries a romanization, translation or background vocal
+    gets a second, dimmer label underneath. Both labels are built once at
+    construction, so the row's measured height is the same active and
+    inactive — that stability is what the autoscroll target depends on."""
 
     __gtype_name__ = "MixtapesLyricRow"
 
-    def __init__(self, line, line_idx):
+    def __init__(self, line, line_idx, second_line_mode="auto",
+                 effects=lyrics_prefs.EFFECTS_DEFAULT, sweep_end_ms=None,
+                 sweep=True, active_scale=lyrics_prefs.ACTIVE_SCALE_DEFAULT):
         super().__init__()
         self.line_idx = line_idx
         self.start_ms = int((line.get("start") or 0.0) * 1000)
         self.text = line.get("text") or ""
+        self._effects = effects
+        self._can_scale = effects in _EFFECT_SCALE
+        self._can_glow = effects in _EFFECT_GLOW
+        self._can_blur = effects in _EFFECT_BLUR
+        self._active_scale = active_scale
+        self._lerp = _LERP_SPEED if effects == "off" else _LERP_SPEED_EFFECTS
         # Word-level parts (each {start, end, text}) if the source ships
-        # syllable / word timing. ``None`` means line-level only.
-        raw_parts = line.get("parts")
-        self.parts = []
-        if raw_parts:
-            for p in raw_parts:
-                start = p.get("start")
-                end = p.get("end")
-                text = p.get("text")
-                if text and start is not None:
-                    self.parts.append({
-                        "start_ms": int(start * 1000),
-                        "end_ms": int((end or start) * 1000),
-                        "text": text,
-                    })
+        # syllable / word timing. Empty means line-level only.
+        self.parts = _normalize_parts(line.get("parts"))
+        # No real word timing, but we know when the line starts and when
+        # it gives way to the next one. Spreading that span across the
+        # line's own words turns the single on/off step of a line-synced
+        # source into a highlight that travels through the line, which is
+        # what word-level sources look like. Skipped when effects are off,
+        # where the whole point is the plain original behaviour.
+        self.swept = False
+        if not self.parts and sweep and line.get("start") is not None:
+            synthetic = _synthesize_parts(self.text, self.start_ms, sweep_end_ms)
+            if synthetic:
+                self.parts = synthetic
+                self.swept = True
+
+        # Duets: Apple tags each line with the voice singing it, and the
+        # second voice (plus the parts they sing together) sits against
+        # the opposite edge. Only set when the source actually declares
+        # more than one agent, so single-voice tracks are unaffected.
+        self.opposite_voice = line.get("align") == "end"
+        align = Gtk.Align.END if self.opposite_voice else Gtk.Align.START
+        justify = (
+            Gtk.Justification.RIGHT if self.opposite_voice
+            else Gtk.Justification.LEFT
+        )
+        xalign = 1.0 if self.opposite_voice else 0.0
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.set_child(box)
 
         self.label = Gtk.Label(
             wrap=True,
             wrap_mode=Pango.WrapMode.WORD_CHAR,
-            justify=Gtk.Justification.LEFT,
-            halign=Gtk.Align.START,
+            justify=justify,
+            halign=align,
             valign=Gtk.Align.CENTER,
-            xalign=0.0,
+            xalign=xalign,
         )
         self.label.add_css_class("lyrics-line-label")
-        self.set_child(self.label)
+        box.append(self.label)
+
+        # ── Second line ───────────────────────────────────────────────
+        sub_text, sub_parts = _second_line_for(line, second_line_mode)
+        self.sub_text = sub_text or ""
+        self.sub_parts = _normalize_parts(sub_parts) if sub_parts else []
+        self.sub_label = None
+        if self.sub_text:
+            self.sub_label = Gtk.Label(
+                wrap=True,
+                wrap_mode=Pango.WrapMode.WORD_CHAR,
+                justify=justify,
+                halign=align,
+                valign=Gtk.Align.CENTER,
+                xalign=xalign,
+            )
+            self.sub_label.add_css_class("lyrics-line-sub")
+            box.append(self.sub_label)
+
         self.add_css_class("lyrics-line")
         self.set_selectable(True)
         self.set_activatable(True)
@@ -100,19 +405,30 @@ class LyricRow(Gtk.ListBoxRow):
         # Per-word alpha state. Each word has a current alpha that lerps
         # toward a target on every frame tick. For line-only sources we
         # synthesize a single "word" covering the whole line.
-        if self.parts:
-            self._word_alphas = [_ALPHA_FUTURE_WORD for _ in self.parts]
-            self._word_targets = [_ALPHA_FUTURE_WORD for _ in self.parts]
-        else:
-            self._word_alphas = [_ALPHA_INACTIVE]
-            self._word_targets = [_ALPHA_INACTIVE]
+        n = len(self.parts) or 1
+        base = _ALPHA_FUTURE_WORD if self.parts else _ALPHA_INACTIVE
+        self._word_alphas = [base] * n
+        self._word_targets = [base] * n
+
+        n_sub = len(self.sub_parts) or 1
+        self._sub_alphas = [_ALPHA_SUB_INACTIVE] * n_sub
+        self._sub_targets = [_ALPHA_SUB_INACTIVE] * n_sub
 
         # Current playback position (ms) — drives the targets each tick.
         # Set by the parent view; -1 means "not the active line".
         self._cursor_ms = -1
         self._dirty = True
+        # "Full" effects: animated scale on the active line and blur that
+        # deepens with distance from it. Both live in the snapshot pass.
+        self._scale = 1.0
+        self._scale_target = 1.0
+        self._blur = 0.0
+        self._blur_target = 0.0
+        self._distance = 99
+        self._glowing = False
         self.add_tick_callback(self._on_tick)
         self._render_markup()
+        self._render_sub_markup()
 
     # The parent view pushes the current cursor position into the active
     # row and (-1) into all others. The tick callback turns this into a
@@ -123,44 +439,413 @@ class LyricRow(Gtk.ListBoxRow):
         self._cursor_ms = ms
         self._recompute_targets()
 
+    def set_distance(self, distance):
+        """How many lines away from the active one this row is. Only
+        consulted for the distance blur; a no-op otherwise."""
+        if distance == self._distance:
+            return
+        self._distance = distance
+        self._recompute_effect_targets()
+
+    def _word_alpha_for(self, part, ceiling, floor):
+        """Target alpha for one word at the current cursor.
+
+        With effects on, the word ramps in over a slice of the time it's
+        actually held, so a long vowel swells and a fast syllable snaps.
+        With effects off it flips straight to the ceiling the moment the
+        cursor reaches it, which is the original behaviour."""
+        if self._cursor_ms < part["start_ms"]:
+            return floor
+        if self._effects == "off":
+            return ceiling
+        held = max(0, part["end_ms"] - part["start_ms"])
+        fraction = _SWEEP_RAMP_FRACTION if self.swept else _WORD_RAMP_FRACTION
+        ramp = min(_WORD_RAMP_MAX_MS, max(_WORD_RAMP_MIN_MS,
+                                          held * fraction))
+        progress = min(1.0, (self._cursor_ms - part["start_ms"]) / ramp)
+        return floor + (ceiling - floor) * progress
+
     def _recompute_targets(self):
         is_active = self._cursor_ms >= 0
+
         if not self.parts:
-            self._word_targets[0] = _ALPHA_ACTIVE if is_active else _ALPHA_INACTIVE
-            return
-        for i, p in enumerate(self.parts):
-            if is_active and self._cursor_ms >= p["start_ms"]:
-                self._word_targets[i] = _ALPHA_ACTIVE
+            self._word_targets[0] = (
+                _ALPHA_ACTIVE if is_active else _ALPHA_INACTIVE
+            )
+        else:
+            for i, part in enumerate(self.parts):
+                self._word_targets[i] = (
+                    self._word_alpha_for(part, _ALPHA_ACTIVE, _ALPHA_FUTURE_WORD)
+                    if is_active else _ALPHA_FUTURE_WORD
+                )
+
+        if self.sub_label is not None:
+            if not self.sub_parts:
+                self._sub_targets[0] = (
+                    _ALPHA_SUB_ACTIVE if is_active else _ALPHA_SUB_INACTIVE
+                )
             else:
-                self._word_targets[i] = _ALPHA_FUTURE_WORD
+                for i, part in enumerate(self.sub_parts):
+                    self._sub_targets[i] = (
+                        self._word_alpha_for(
+                            part, _ALPHA_SUB_ACTIVE, _ALPHA_SUB_INACTIVE
+                        )
+                        if is_active else _ALPHA_SUB_INACTIVE
+                    )
+
+        self._set_glow(is_active and self._can_glow)
+        self._recompute_effect_targets()
+
+    def _set_glow(self, on):
+        if on == self._glowing:
+            return
+        self._glowing = on
+        # The glow is a CSS text-shadow so it can transition on its own
+        # clock without touching the Pango markup we re-render per frame.
+        if on:
+            self.label.add_css_class("lyrics-line-glow")
+        else:
+            self.label.remove_css_class("lyrics-line-glow")
+
+    def _fitting_scale(self):
+        """The largest growth this line can take without running off the
+        edge of the row.
+
+        The labels wrap to the width they're given, so a line long enough
+        to fill the row has no room to grow into and any scale above 1
+        pushes it under the scroller's clip. Measuring the laid-out text
+        instead of assuming the configured scale always fits means short
+        lines still grow the full amount while long ones grow by however
+        much slack they actually have."""
+        if not self._can_scale:
+            return 1.0
+        width = self.get_width()
+        if width <= 0:
+            return self._active_scale
+
+        # How far the content reaches from the edge the scale is anchored
+        # to. Both labels count: a romanization can be wider than the
+        # lyric above it.
+        reach = 0
+        for label in (self.label, self.sub_label):
+            if label is None:
+                continue
+            layout = label.get_layout()
+            if layout is None:
+                continue
+            text_w = layout.get_pixel_size()[0]
+            if text_w <= 0:
+                continue
+            alloc = label.get_allocation()
+            if self.opposite_voice:
+                reach = max(reach, width - (alloc.x + alloc.width - text_w))
+            else:
+                reach = max(reach, alloc.x + text_w)
+
+        if reach <= 0:
+            return self._active_scale
+        return max(1.0, min(self._active_scale, width / reach))
+
+    def _recompute_effect_targets(self):
+        is_active = self._cursor_ms >= 0
+        self._scale_target = (
+            self._fitting_scale() if (is_active and self._can_scale) else 1.0
+        )
+        if not self._can_blur:
+            self._blur_target = 0.0
+            return
+        if is_active or self._distance < _BLUR_START_DISTANCE:
+            self._blur_target = 0.0
+        else:
+            self._blur_target = min(
+                _BLUR_MAX,
+                (self._distance - _BLUR_START_DISTANCE + 1) * _BLUR_PER_LINE,
+            )
 
     def _on_tick(self, _widget, _frame_clock):
         changed = False
         for i, target in enumerate(self._word_targets):
             cur = self._word_alphas[i]
             if abs(cur - target) > 0.002:
-                self._word_alphas[i] = cur + (target - cur) * _LERP_SPEED
+                self._word_alphas[i] = cur + (target - cur) * self._lerp
                 changed = True
         if changed or self._dirty:
             self._render_markup()
-            self._dirty = False
+
+        sub_changed = False
+        if self.sub_label is not None:
+            for i, target in enumerate(self._sub_targets):
+                cur = self._sub_alphas[i]
+                if abs(cur - target) > 0.002:
+                    self._sub_alphas[i] = cur + (target - cur) * self._lerp
+                    sub_changed = True
+            if sub_changed or self._dirty:
+                self._render_sub_markup()
+
+        self._dirty = False
+
+        # Scale and blur are drawn, not laid out, so they need an explicit
+        # redraw rather than a markup rebuild.
+        redraw = False
+        for attr, target_attr in (("_scale", "_scale_target"),
+                                  ("_blur", "_blur_target")):
+            cur = getattr(self, attr)
+            target = getattr(self, target_attr)
+            if abs(cur - target) > 0.002:
+                setattr(self, attr, cur + (target - cur) * _EFFECT_LERP)
+                redraw = True
+        if redraw:
+            self.queue_draw()
+
         # Keep ticking — cheap when no alphas are in motion.
         return GLib.SOURCE_CONTINUE
 
     def _render_markup(self):
         if not self.parts:
-            alpha = int(self._word_alphas[0] * _PANGO_ALPHA_MAX)
-            escaped = html.escape(self.text)
-            markup = f"<span fgalpha='{alpha}'>{escaped}</span>"
+            alpha = int(
+                max(0.0, min(1.0, self._word_alphas[0])) * _PANGO_ALPHA_MAX
+            )
+            markup = f"<span fgalpha='{alpha}'>{html.escape(self.text)}</span>"
         else:
-            chunks = []
-            for i, p in enumerate(self.parts):
-                alpha = int(self._word_alphas[i] * _PANGO_ALPHA_MAX)
-                chunks.append(
-                    f"<span fgalpha='{alpha}'>{html.escape(p['text'])}</span>"
-                )
-            markup = " ".join(chunks)
+            markup = _join_parts_markup(self.parts, self._word_alphas)
         self.label.set_markup(markup)
+
+    def _render_sub_markup(self):
+        if self.sub_label is None:
+            return
+        if not self.sub_parts:
+            alpha = int(
+                max(0.0, min(1.0, self._sub_alphas[0])) * _PANGO_ALPHA_MAX
+            )
+            markup = (
+                f"<span fgalpha='{alpha}'>{html.escape(self.sub_text)}</span>"
+            )
+        else:
+            markup = _join_parts_markup(self.sub_parts, self._sub_alphas)
+        self.sub_label.set_markup(markup)
+
+    def do_snapshot(self, snapshot):
+        scaling = abs(self._scale - 1.0) > 0.002
+        blurring = self._blur > 0.02
+        if not scaling and not blurring:
+            Gtk.ListBoxRow.do_snapshot(self, snapshot)
+            return
+
+        if blurring:
+            snapshot.push_blur(self._blur)
+        if scaling:
+            # Anchor at the edge the line is aligned to, vertically
+            # centred, so growing keeps the first character pinned instead
+            # of sliding the line sideways. A duet's opposite-voice lines
+            # are anchored on the right, so they grow from there.
+            height = self.get_height()
+            anchor_x = float(self.get_width()) if self.opposite_voice else 0.0
+            snapshot.save()
+            snapshot.translate(Graphene.Point().init(anchor_x, height / 2.0))
+            snapshot.scale(self._scale, self._scale)
+            snapshot.translate(Graphene.Point().init(-anchor_x, -height / 2.0))
+        Gtk.ListBoxRow.do_snapshot(self, snapshot)
+        if scaling:
+            snapshot.restore()
+        if blurring:
+            snapshot.pop()
+
+
+# An instrumental stretch shorter than this isn't worth marking — the
+# gap between two lines of a normal verse is often 3-4 seconds.
+_INTERLUDE_MIN_S = 5.0
+# End the marker just before the vocal returns, so the dots clear as the
+# singer comes back in rather than on the exact frame of the first word.
+# Lifted from beautiful-lyrics, which does the same for the same reason.
+_INTERLUDE_END_EARLY_S = 0.25
+# Dots stop pulsing and hold full brightness for the last moment before
+# the vocal comes back in, so the fill reads as a countdown.
+_INTERLUDE_DOTS = 3
+# Drawn, not typeset, so these are real pixels rather than a font size.
+_DOT_RADIUS = 3.0
+_DOT_SPACING = 11.0
+# How much a dot grows as its own slice of the gap fills, and the smaller
+# wave that keeps travelling along the row underneath that.
+_DOT_FOCUS_SWELL = 0.55
+_DOT_WAVE_SWELL = 0.14
+_DOT_WAVE_PERIOD = 2.2
+_DOT_MAX_SWELL = 1.0 + _DOT_FOCUS_SWELL + _DOT_WAVE_SWELL
+
+
+def _find_interludes(lines):
+    """Locate the instrumental stretches in a line list.
+
+    Returns ``[(start_s, end_s), ...]``. Two shapes feed this: providers
+    that stamp an empty line at the top of a break (LRCLIB does), and
+    providers that just leave a hole in the timeline (Apple Music does,
+    since its lines carry an explicit ``end``). Both end up as a gap
+    between two lines that actually have words.
+    """
+    timed = [
+        (i, l) for i, l in enumerate(lines)
+        if l.get("start") is not None
+    ]
+    if not timed:
+        return []
+    sung = [(i, l) for i, l in timed if (l.get("text") or "").strip()]
+    if not sung:
+        return []
+
+    out = []
+    # A long lead-in before the first word is an interlude too.
+    first_start = sung[0][1]["start"]
+    if first_start >= _INTERLUDE_MIN_S:
+        out.append((0.0, first_start - _INTERLUDE_END_EARLY_S))
+
+    for (idx_a, a), (_idx_b, b) in zip(sung, sung[1:]):
+        # Prefer the line's own end. Failing that, an empty marker line
+        # between the two says where the singing actually stopped.
+        gap_start = a.get("end")
+        if gap_start is None:
+            for j, l in timed:
+                if j > idx_a and not (l.get("text") or "").strip():
+                    gap_start = l["start"]
+                    break
+        if gap_start is None:
+            continue
+        gap_end = b["start"]
+        if gap_end - gap_start >= _INTERLUDE_MIN_S:
+            out.append((gap_start, gap_end - _INTERLUDE_END_EARLY_S))
+    return out
+
+
+class InterludeRow(Gtk.ListBoxRow):
+    """The music-only marker shown during an instrumental stretch.
+
+    Three dots that fill in turn across the gap, so the row doubles as a
+    countdown to the next line instead of just saying "nothing here".
+    They're drawn rather than typeset: a glyph can only be given an
+    opacity through Pango, while drawing them means each dot can also
+    swell as its turn comes round and ride a slow wave that travels along
+    the row, which is what keeps a twenty-second break from looking
+    frozen. Clicking seeks to the start of the break."""
+
+    __gtype_name__ = "MixtapesLyricInterludeRow"
+
+    def __init__(self, start_s, end_s, effects=lyrics_prefs.EFFECTS_DEFAULT):
+        super().__init__()
+        self.line_idx = -1
+        self.start_ms = int(start_s * 1000)
+        self.end_ms = int(end_s * 1000)
+        self._effects = effects
+        self._lerp = _LERP_SPEED if effects == "off" else _LERP_SPEED_EFFECTS
+
+        # An empty box purely to claim the row's space; the dots are
+        # painted over its allocation so they line up with the lyric text
+        # column above and below.
+        self._dots = Gtk.Box()
+        self._dots.add_css_class("lyrics-interlude")
+        self._dots.set_halign(Gtk.Align.START)
+        self._dots.set_valign(Gtk.Align.CENTER)
+        self._dots.set_size_request(
+            int(_DOT_SPACING * (_INTERLUDE_DOTS - 1) + _DOT_RADIUS * 2),
+            int(_DOT_RADIUS * 2 * _DOT_MAX_SWELL),
+        )
+        self.set_child(self._dots)
+
+        self.add_css_class("lyrics-line")
+        self.set_selectable(True)
+        self.set_activatable(True)
+        self.set_can_focus(False)
+        self.set_focusable(False)
+
+        self._alphas = [_ALPHA_FUTURE_WORD] * _INTERLUDE_DOTS
+        self._targets = [_ALPHA_FUTURE_WORD] * _INTERLUDE_DOTS
+        self._swell = [0.0] * _INTERLUDE_DOTS
+        self._cursor_ms = -1
+        self._t0 = time.monotonic()
+        self.add_tick_callback(self._on_tick)
+
+    def set_cursor_ms(self, ms):
+        if ms == self._cursor_ms:
+            return
+        self._cursor_ms = ms
+        self._recompute_targets()
+
+    # Distance blur doesn't apply to the marker; it stays legible.
+    def set_distance(self, distance):
+        return
+
+    def _progress(self):
+        if self._cursor_ms < 0:
+            return -1.0
+        span = max(1, self.end_ms - self.start_ms)
+        return min(1.0, max(0.0, (self._cursor_ms - self.start_ms) / span))
+
+    def _recompute_targets(self):
+        progress = self._progress()
+        if progress < 0:
+            self._targets = [_ALPHA_FUTURE_WORD] * _INTERLUDE_DOTS
+            return
+        for i in range(_INTERLUDE_DOTS):
+            # Each dot owns its slice of the gap and fills across it.
+            filled = min(1.0, max(0.0, (progress - i / _INTERLUDE_DOTS)
+                                  * _INTERLUDE_DOTS))
+            self._targets[i] = (
+                _ALPHA_FUTURE_WORD
+                + (_ALPHA_ACTIVE - _ALPHA_FUTURE_WORD) * filled
+            )
+
+    def _on_tick(self, _widget, _frame_clock):
+        changed = False
+        for i, target in enumerate(self._targets):
+            cur = self._alphas[i]
+            if abs(cur - target) > 0.002:
+                self._alphas[i] = cur + (target - cur) * self._lerp
+                changed = True
+
+        progress = self._progress()
+        if progress >= 0 and self._effects != "off":
+            # A dot swells as its own slice fills, and a slow wave runs
+            # along the row underneath that so the marker keeps moving
+            # even while a single dot is holding.
+            elapsed = time.monotonic() - self._t0
+            for i in range(_INTERLUDE_DOTS):
+                filled = min(1.0, max(0.0, (progress - i / _INTERLUDE_DOTS)
+                                      * _INTERLUDE_DOTS))
+                focus = 1.0 - abs(2.0 * filled - 1.0) if 0 < filled < 1 else 0.0
+                wave = math.sin(
+                    elapsed * (2 * math.pi / _DOT_WAVE_PERIOD) - i * 0.8
+                )
+                self._swell[i] = _DOT_FOCUS_SWELL * focus + _DOT_WAVE_SWELL * wave
+            changed = True
+        elif any(v for v in self._swell):
+            self._swell = [0.0] * _INTERLUDE_DOTS
+            changed = True
+
+        if changed:
+            self.queue_draw()
+        return GLib.SOURCE_CONTINUE
+
+    def do_snapshot(self, snapshot):
+        Gtk.ListBoxRow.do_snapshot(self, snapshot)
+
+        alloc = self._dots.get_allocation()
+        if alloc.width <= 0:
+            return
+        color = self._dots.get_color()
+        cy = alloc.y + alloc.height / 2.0
+
+        for i in range(_INTERLUDE_DOTS):
+            radius = _DOT_RADIUS * (1.0 + self._swell[i])
+            cx = alloc.x + _DOT_RADIUS + i * _DOT_SPACING
+            dot = Gdk.RGBA()
+            dot.red, dot.green, dot.blue = color.red, color.green, color.blue
+            dot.alpha = color.alpha * max(0.0, min(1.0, self._alphas[i]))
+
+            rect = Graphene.Rect().init(
+                cx - radius, cy - radius, radius * 2, radius * 2
+            )
+            rounded = Gsk.RoundedRect()
+            rounded.init_from_rect(rect, radius)
+            snapshot.push_rounded_clip(rounded)
+            snapshot.append_color(dot, rect)
+            snapshot.pop()
 
 
 class LyricsView(Gtk.Box):
@@ -186,12 +871,31 @@ class LyricsView(Gtk.Box):
         # view) from racing the visible one's autoscroll.
         self.connect("map", self._on_map)
 
+        # Display prefs (second-line content, effect level). Cached on the
+        # view because every row build reads them; refreshed whenever the
+        # settings dialog reports a change.
+        self._second_line_mode = lyrics_prefs.second_line_mode()
+        self._effects = lyrics_prefs.effects_level()
+        self._sweep = lyrics_prefs.line_sweep()
+        self._active_scale = lyrics_prefs.active_scale()
+        apply_font_scale()
+
         # Async fetch generation token — invalidates stale in-flight fetches.
         self._fetch_gen = 0
         self._current_video_id = None
         self._lines = []
         self._synced = False
         self._active_idx = -1
+        # The row currently carrying a live cursor. This is NOT always
+        # ``_active_idx``: while the view is unmapped, progression updates
+        # _active_idx without lighting anything, and a rebuild drops every
+        # row. Clearing the previous highlight has to follow the row that
+        # was really lit, or two lines end up bright at once.
+        self._lit_idx = -1
+        # line index -> LyricRow, and the standalone instrumental markers.
+        self._row_for_line = {}
+        self._interlude_rows = []
+        self._lit_interlude = None
         self._last_pos = 0.0
 
         # Suspend autoscroll for a short window after the user manually
@@ -212,7 +916,9 @@ class LyricsView(Gtk.Box):
         self.stack.set_transition_duration(150)
         self.stack.set_hexpand(True)
         self.stack.set_vexpand(True)
-        self.append(self.stack)
+        self._stack_overlay = Gtk.Overlay()
+        self._stack_overlay.set_child(self.stack)
+        self.append(self._stack_overlay)
 
         # --- Loading page ---
         loading_box = Gtk.Box(
@@ -282,8 +988,8 @@ class LyricsView(Gtk.Box):
         # a popover listing every provider's result for the current
         # track so the user can switch sources when the chain-picked
         # default has bad timing or a wrong-language version.
-        self._lyrics_page_overlay = Gtk.Overlay()
-        self._lyrics_page_overlay.set_child(fade)
+        self._lyrics_page_overlay = Gtk.Box()
+        self._lyrics_page_overlay.append(fade)
 
         # Small floating menu button. Just an icon — the current source
         # is shown as a checkmark inside the popover. The button needs to
@@ -292,10 +998,15 @@ class LyricsView(Gtk.Box):
         self._source_picker_btn = Gtk.MenuButton()
         self._source_picker_btn.set_icon_name("view-more-symbolic")
         self._source_picker_btn.set_tooltip_text("Choose lyrics source")
-        self._source_picker_btn.add_css_class("lyrics-source-btn")
-        # Drop the default chunky button chrome that draws inside the
-        # MenuButton — we paint our own soft disc via the CSS class.
-        self._source_picker_btn.set_has_frame(False)
+        # ``osd`` + ``circular`` is the HIG treatment for a control
+        # floating over content, and it comes with a full-size hit
+        # target. The previous hand-rolled disc zeroed the inner button's
+        # padding and min-width/min-height, which shrank the clickable
+        # area to roughly the icon itself and made the button feel like
+        # it was ignoring clicks.
+        self._source_picker_btn.add_css_class("osd")
+        self._source_picker_btn.add_css_class("circular")
+        self._source_picker_btn.add_css_class("lyrics-osd-btn")
         self._source_picker_btn.set_halign(Gtk.Align.END)
         self._source_picker_btn.set_valign(Gtk.Align.START)
         self._source_picker_btn.set_margin_top(10)
@@ -310,9 +1021,12 @@ class LyricsView(Gtk.Box):
         self._source_picker_btn.connect(
             "notify::active", self._on_source_picker_toggled,
         )
-        self._lyrics_page_overlay.add_overlay(self._source_picker_btn)
-
         self.stack.add_named(self._lyrics_page_overlay, "lyrics")
+
+        # The button overlays the whole stack, not just the lyrics page,
+        # so it stays reachable when a track has no lyrics — that's when
+        # switching provider or typing a query actually matters.
+        self._stack_overlay.add_overlay(self._source_picker_btn)
 
         # Detect manual scrolling so autoscroll pauses while the user is
         # interacting with the view. Only the scroll controller — the
@@ -342,7 +1056,7 @@ class LyricsView(Gtk.Box):
     def _build_source_picker_popover(self):
         pop = Gtk.Popover()
         pop.set_position(Gtk.PositionType.BOTTOM)
-        pop.set_size_request(260, -1)
+        pop.set_size_request(200, -1)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         # No margins on the container — the popover already provides its
@@ -351,8 +1065,9 @@ class LyricsView(Gtk.Box):
         header = Gtk.Label(label="Lyrics source")
         header.add_css_class("heading")
         header.set_halign(Gtk.Align.START)
-        header.set_margin_start(4)
+        header.set_margin_start(10)
         header.set_margin_top(4)
+        header.set_margin_bottom(2)
         outer.append(header)
 
         # Mirrors the add-to-playlist popover: ``navigation-sidebar`` for
@@ -375,13 +1090,380 @@ class LyricsView(Gtk.Box):
         spinner = Adw.Spinner()
         spinner.set_size_request(16, 16)
         sb.append(spinner)
-        lab = Gtk.Label(label="Looking for other sources…")
+        lab = Gtk.Label(label="Searching…")
         lab.add_css_class("dim-label")
         sb.append(lab)
         self._source_picker_spinner_row.set_child(sb)
 
-        pop.set_child(outer)
+        # ── Second line ───────────────────────────────────────────────
+        # Which second-line kinds exist is a property of the track, not of
+        # the app, so the choice belongs next to the lyrics rather than
+        # only in Settings. Only the kinds this track actually has are
+        # offered; the section hides itself when there are none.
+        self._matches_source = None
+        self._second_line_section = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6,
+        )
+        self._second_line_section.append(
+            Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        )
+        sl_header = Gtk.Label(label="Second line")
+        sl_header.add_css_class("heading")
+        sl_header.set_halign(Gtk.Align.START)
+        sl_header.set_margin_start(10)
+        sl_header.set_margin_bottom(2)
+        self._second_line_section.append(sl_header)
+
+        self._second_line_list = Gtk.ListBox()
+        self._second_line_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._second_line_list.add_css_class("navigation-sidebar")
+        self._second_line_list.add_css_class("lyrics-source-list")
+        self._second_line_list.connect(
+            "row-activated", self._on_second_line_row_activated,
+        )
+        self._second_line_section.append(self._second_line_list)
+        self._second_line_section.set_visible(False)
+        outer.append(self._second_line_section)
+
+        # Second page: every match one provider has for this track. The
+        # chain picks one and the gates try to make it the right one, but
+        # catalogs carry re-records and same-title songs that no rule
+        # separates reliably, so this is the escape hatch.
+        self._picker_stack = Gtk.Stack()
+        self._picker_stack.set_transition_type(
+            Gtk.StackTransitionType.SLIDE_LEFT_RIGHT
+        )
+        self._picker_stack.set_transition_duration(150)
+        self._picker_stack.add_named(outer, "sources")
+        self._picker_stack.add_named(self._build_matches_page(), "matches")
+        self._picker_stack.add_named(self._build_search_page(), "search")
+        self._picker_stack.set_visible_child_name("sources")
+
+        pop.set_child(self._picker_stack)
+        pop.connect("closed", lambda *_: self._show_picker_page("sources"))
         return pop
+
+    # The two pages want different widths: the source list is a handful of
+    # short provider names, while a match list has to keep "[A Cappella]"
+    # distinguishable from "[Slowed]" — truncating those to the same
+    # prefix would defeat the point of showing them.
+    _PICKER_WIDTHS = {"sources": 200, "matches": 340, "search": 340}
+
+    def _show_picker_page(self, name):
+        self._source_picker_popover.set_size_request(
+            self._PICKER_WIDTHS.get(name, 200), -1
+        )
+        self._picker_stack.set_visible_child_name(name)
+
+    def _build_search_page(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        back = Gtk.Button(icon_name="go-previous-symbolic")
+        back.add_css_class("flat")
+        back.set_tooltip_text("Back to sources")
+        back.connect("clicked", lambda *_: self._show_picker_page("sources"))
+        header.append(back)
+        title = Gtk.Label(label="Search by name")
+        title.add_css_class("heading")
+        title.set_halign(Gtk.Align.START)
+        header.append(title)
+        box.append(header)
+
+        self._search_entry = Gtk.SearchEntry()
+        self._search_entry.set_placeholder_text("Song title")
+        self._search_entry.set_margin_start(4)
+        self._search_entry.set_margin_end(4)
+        self._search_entry.connect("activate", self._on_manual_search)
+        self._search_entry.connect("search-changed", lambda *_: None)
+        box.append(self._search_entry)
+
+        self._search_list = Gtk.ListBox()
+        self._search_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._search_list.add_css_class("navigation-sidebar")
+        self._search_list.add_css_class("lyrics-source-list")
+        self._search_list.connect("row-activated", self._on_match_row_activated)
+        scroller = ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_propagate_natural_height(True)
+        scroller.set_max_content_height(280)
+        scroller.set_child(self._search_list)
+        box.append(scroller)
+        return box
+
+    def _open_search(self):
+        # Seed with the track's title so the common case is a small edit
+        # (deleting the bracketed credits) rather than typing it out.
+        title, _artist, _dur = self._track_metadata(self._current_video_id)
+        if title and not self._search_entry.get_text():
+            self._search_entry.set_text(title)
+        self._show_picker_page("search")
+        self._search_entry.grab_focus()
+
+    def _on_manual_search(self, entry):
+        query = entry.get_text().strip()
+        if not query:
+            return
+        self._clear_list(self._search_list)
+        self._search_list.append(self._loading_row("Searching…"))
+        self._matches_source = None
+        gen = self._fetch_gen
+        _title, artist, duration = self._track_metadata(self._current_video_id)
+
+        def _worker():
+            try:
+                matches = self.player.client.search_lyrics_manually(
+                    query, artist, duration,
+                )
+            except Exception as e:
+                self._log(1, f"manual search failed: {e}")
+                matches = []
+            GLib.idle_add(self._show_search_results, gen, matches)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _show_search_results(self, gen, matches):
+        if gen != self._fetch_gen:
+            return False
+        self._clear_list(self._search_list)
+        if not matches:
+            self._search_list.append(self._message_row("Nothing found"))
+            return False
+        for match in matches:
+            self._search_list.append(
+                self._build_match_row(match, source=match.get("source"))
+            )
+        return False
+
+    @staticmethod
+    def _clear_list(listbox):
+        child = listbox.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            listbox.remove(child)
+            child = nxt
+
+    @staticmethod
+    def _loading_row(text):
+        row = Gtk.ListBoxRow()
+        row.set_activatable(False)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.set_halign(Gtk.Align.CENTER)
+        box.set_margin_top(8); box.set_margin_bottom(8)
+        spinner = Adw.Spinner(); spinner.set_size_request(16, 16)
+        box.append(spinner)
+        box.append(Gtk.Label(label=text, css_classes=["dim-label"]))
+        row.set_child(box)
+        return row
+
+    @staticmethod
+    def _message_row(text):
+        row = Gtk.ListBoxRow()
+        row.set_activatable(False)
+        label = Gtk.Label(label=text)
+        label.add_css_class("dim-label")
+        label.set_margin_top(8); label.set_margin_bottom(8)
+        row.set_child(label)
+        return row
+
+    def _build_match_row(self, match, source=None):
+        row = Gtk.ListBoxRow()
+        row.set_activatable(True)
+        row._match_result = match["result"]
+        row._match_source = source or match.get("source")
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        name = Gtk.Label(label=match["label"])
+        name.set_halign(Gtk.Align.START)
+        name.set_ellipsize(Pango.EllipsizeMode.END)
+        text.append(name)
+        bits = []
+        if source:
+            bits.append(source)
+        if match.get("detail"):
+            bits.append(match["detail"])
+        lines = match["result"].get("lines") or []
+        if any(l.get("parts") for l in lines):
+            bits.append("word by word")
+        elif match["result"].get("synced"):
+            bits.append("line by line")
+        else:
+            bits.append("no timing")
+        detail = Gtk.Label(label=" · ".join(bits))
+        detail.set_halign(Gtk.Align.START)
+        detail.add_css_class("dim-label")
+        detail.add_css_class("caption")
+        detail.set_ellipsize(Pango.EllipsizeMode.END)
+        text.append(detail)
+        row.set_child(text)
+        return row
+
+    def _build_matches_page(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        back = Gtk.Button(icon_name="go-previous-symbolic")
+        back.add_css_class("flat")
+        back.set_tooltip_text("Back to sources")
+        back.connect(
+            "clicked",
+            lambda *_: self._show_picker_page("sources"),
+        )
+        header.append(back)
+        self._matches_title = Gtk.Label()
+        self._matches_title.add_css_class("heading")
+        self._matches_title.set_halign(Gtk.Align.START)
+        self._matches_title.set_ellipsize(Pango.EllipsizeMode.END)
+        header.append(self._matches_title)
+        box.append(header)
+
+        self._matches_list = Gtk.ListBox()
+        self._matches_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._matches_list.add_css_class("navigation-sidebar")
+        self._matches_list.add_css_class("lyrics-source-list")
+        self._matches_list.connect("row-activated", self._on_match_row_activated)
+
+        # Several matches per provider is normal, so this scrolls rather
+        # than growing the popover past the window.
+        scroller = ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_propagate_natural_height(True)
+        scroller.set_max_content_height(300)
+        scroller.set_child(self._matches_list)
+        box.append(scroller)
+        return box
+
+    # Label for each second-line mode, in the order they're offered.
+    _SECOND_LINE_LABELS = [
+        ("off", "Off"),
+        ("auto", "Auto"),
+        ("romanization", "Romanization"),
+        ("translation", "Translation"),
+        ("background", "Background vocals"),
+    ]
+
+    def _available_second_lines(self):
+        """The second-line modes this track's current lyrics can actually
+        fill. ``off`` and ``auto`` are always offered once anything else
+        is; a mode with no data would just render a blank line."""
+        if not self._lines:
+            return []
+        have = set()
+        for line in self._lines:
+            if (line.get("romanization") or "").strip():
+                have.add("romanization")
+            if (line.get("translation") or "").strip():
+                have.add("translation")
+            if (line.get("bg_text") or "").strip():
+                have.add("background")
+        if not have:
+            return []
+        return [
+            key for key, _label in self._SECOND_LINE_LABELS
+            if key in ("off", "auto") or key in have
+        ]
+
+    def _refresh_second_line_rows(self):
+        child = self._second_line_list.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            self._second_line_list.remove(child)
+            child = nxt
+
+        available = self._available_second_lines()
+        self._second_line_section.set_visible(bool(available))
+        if not available:
+            return
+
+        labels = dict(self._SECOND_LINE_LABELS)
+        for key in available:
+            row = Gtk.ListBoxRow()
+            row.set_activatable(True)
+            row._second_line_mode = key
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            label = Gtk.Label(label=labels[key])
+            label.set_halign(Gtk.Align.START)
+            label.set_hexpand(True)
+            box.append(label)
+            check = Gtk.Image.new_from_icon_name("object-select-symbolic")
+            check.set_valign(Gtk.Align.CENTER)
+            check.set_opacity(1.0 if key == self._second_line_mode else 0.0)
+            box.append(check)
+            row.set_child(box)
+            self._second_line_list.append(row)
+
+    def _open_matches(self, source):
+        """Show every match ``source`` has for the current track."""
+        self._matches_title.set_label(source)
+        self._matches_source = source
+        self._clear_list(self._matches_list)
+        self._matches_list.append(self._loading_row("Searching…"))
+        self._show_picker_page("matches")
+
+        vid = self._current_video_id
+        title, artist, duration = self._track_metadata(vid)
+        gen = self._fetch_gen
+
+        def _worker():
+            try:
+                matches = self.player.client.fetch_provider_matches(
+                    source, title, artist, duration,
+                )
+            except Exception as e:
+                self._log(1, f"match list failed: {e}")
+                matches = []
+            GLib.idle_add(self._show_matches, gen, source, matches)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _show_matches(self, gen, source, matches):
+        # A track change while we were searching invalidates the list.
+        if gen != self._fetch_gen or self._matches_source != source:
+            return False
+        self._clear_list(self._matches_list)
+        if not matches:
+            self._matches_list.append(
+                self._message_row(f"No other matches from {source}")
+            )
+            return False
+        for match in matches:
+            self._matches_list.append(self._build_match_row(match))
+        return False
+
+    def _on_match_row_activated(self, listbox, row):
+        result = getattr(row, "_match_result", None)
+        source = getattr(row, "_match_source", None) or self._matches_source
+        if not result or not source or not self._current_video_id:
+            return
+        client = self.player.client
+        # Give it the same second line the automatic pick would have had.
+        title, artist, duration = self._track_metadata(self._current_video_id)
+        try:
+            result = client.augment_result(result, title, artist, duration)
+        except Exception as e:
+            self._log(1, f"augment failed: {e}")
+        # Store it as this provider's result and pin it, so the choice
+        # survives the next play of the track.
+        client._lyrics_cache.add_result(
+            self._current_video_id, result, user_choice=True
+        )
+        client.set_preferred_lyrics_source(self._current_video_id, source)
+        self._switch_to_source(source, result)
+        self._source_picker_btn.set_active(False)
+
+    def _on_second_line_row_activated(self, listbox, row):
+        mode = getattr(row, "_second_line_mode", None)
+        if not mode or mode == self._second_line_mode:
+            self._source_picker_btn.set_active(False)
+            return
+        lyrics_prefs.set_second_line_mode(mode)
+        # Both LyricsView instances read the same pref, so push it through
+        # the window rather than only rebuilding this one.
+        window = self.get_root()
+        if window is not None and hasattr(window, "_apply_lyrics_display_prefs"):
+            window._apply_lyrics_display_prefs()
+        else:
+            self.apply_display_prefs()
+        self._source_picker_btn.set_active(False)
 
     def _on_source_picker_toggled(self, btn, *_):
         if not btn.get_active():
@@ -389,6 +1471,7 @@ class LyricsView(Gtk.Box):
         # Repopulate every time the picker opens so the rows reflect the
         # current cache state (in case the user changed tracks).
         self._refresh_source_picker_rows(include_spinner=True)
+        self._refresh_second_line_rows()
         if not self._current_video_id:
             return
         # Fire any uncached provider in the background; the callback adds
@@ -417,9 +1500,22 @@ class LyricsView(Gtk.Box):
             return
 
         client = self.player.client
-        alts = client.get_lyrics_alternatives(self._current_video_id)
+        alts = client.get_lyrics_alternatives(self._current_video_id) or []
         preferred = client.get_preferred_lyrics_source(self._current_video_id)
         active_source = self._active_source_name()
+
+        # Order the rows the way the user ordered their queue in Settings.
+        # Providers they've disabled still appear (a cached result from one
+        # is fine to switch to by hand) but sort to the bottom.
+        queue = lyrics_prefs.full_provider_order()
+        disabled = lyrics_prefs.disabled_providers()
+
+        def _rank(item):
+            name = item[0]
+            pos = queue.index(name) if name in queue else len(queue)
+            return (name in disabled, pos, name)
+
+        alts = sorted(alts, key=_rank)
 
         for source, result in alts:
             self._source_picker_list.append(
@@ -433,48 +1529,99 @@ class LyricsView(Gtk.Box):
         if include_spinner:
             self._source_picker_list.append(self._source_picker_spinner_row)
 
+        # Always offered, and the only route in when nothing matched at
+        # all: some titles carry so much decoration that no automatic
+        # query finds the song.
+        search_row = Gtk.ListBoxRow()
+        search_row.set_activatable(True)
+        search_row._open_search = True
+        sbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        sbox.append(Gtk.Image.new_from_icon_name("system-search-symbolic"))
+        slabel = Gtk.Label(label="Search by name…")
+        slabel.set_halign(Gtk.Align.START)
+        slabel.set_hexpand(True)
+        sbox.append(slabel)
+        search_row.set_child(sbox)
+        self._source_picker_list.append(search_row)
+
+        # Only offered once something is pinned — otherwise there'd be a
+        # permanent "undo" for a choice nobody made.
+        if preferred:
+            reset_row = Gtk.ListBoxRow()
+            reset_row.set_activatable(True)
+            reset_row._reset_choice = True
+            rbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            rtitle = Gtk.Label(label="Use automatic choice")
+            rtitle.set_halign(Gtk.Align.START)
+            rbox.append(rtitle)
+            rsub = Gtk.Label(label=f"Pinned to {preferred}")
+            rsub.set_halign(Gtk.Align.START)
+            rsub.add_css_class("dim-label")
+            rsub.add_css_class("caption")
+            rsub.set_ellipsize(Pango.EllipsizeMode.END)
+            rbox.append(rsub)
+            reset_row.set_child(rbox)
+            self._source_picker_list.append(reset_row)
+
     def _build_source_row(self, source, result, is_active, is_preferred):
+        """One row of the source picker.
+
+        Provider name with what its timing is worth underneath, and a
+        checkmark for the one being shown. The subtitle used to lead with
+        a line count, which is the one fact that can't help you choose
+        (every source has roughly the same number of lines — they're the
+        same song), and described timing as "word-level" / "plain", which
+        names the data format rather than what you'd see."""
         row = Gtk.ListBoxRow()
         row.set_activatable(True)
         # Tag the row with its source name so the activation handler
         # knows what to switch to.
         row._lyrics_source = source
 
-        # No inner margins on the hbox — the listbox's `.lyrics-source-
-        # list` CSS rule provides the only padding so it stays in sync
-        # with the rest of the popover layout.
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
 
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         text.set_hexpand(True)
+        text.set_valign(Gtk.Align.CENTER)
 
-        title = Gtk.Label(label=source)
-        title.set_halign(Gtk.Align.START)
-        title.add_css_class("heading")
-        text.append(title)
+        name = Gtk.Label(label=source)
+        name.set_halign(Gtk.Align.START)
+        name.set_ellipsize(Pango.EllipsizeMode.END)
+        text.append(name)
 
-        n = len(result.get("lines") or [])
-        has_word = any(l.get("parts") for l in result.get("lines") or [])
-        synced = bool(result.get("synced"))
-        if has_word:
-            kind = "word-level"
-        elif synced:
-            kind = "synced"
+        lines = result.get("lines") or []
+        if any(l.get("parts") for l in lines):
+            timing = "Word by word"
+        elif result.get("synced"):
+            timing = "Line by line"
         else:
-            kind = "plain"
-        suffix = " · pinned" if is_preferred else ""
-        sub = Gtk.Label(label=f"{n} lines · {kind}{suffix}")
-        sub.set_halign(Gtk.Align.START)
-        sub.add_css_class("caption")
-        sub.set_opacity(0.7)
-        text.append(sub)
+            timing = "No timing"
+        tier = Gtk.Label(label=timing)
+        tier.add_css_class("dim-label")
+        tier.add_css_class("caption")
+        tier.set_halign(Gtk.Align.START)
+        text.append(tier)
 
         box.append(text)
 
-        if is_active:
-            check = Gtk.Image.new_from_icon_name("object-select-symbolic")
-            check.set_valign(Gtk.Align.CENTER)
-            box.append(check)
+        # The checkmark is always in the box, transparent when inactive,
+        # so switching source doesn't shift every other row sideways.
+        check = Gtk.Image.new_from_icon_name("object-select-symbolic")
+        check.set_valign(Gtk.Align.CENTER)
+        check.set_opacity(1.0 if is_active else 0.0)
+        box.append(check)
+
+        client = self.player.client
+        if getattr(client, "provider_supports_matches", lambda _s: False)(source):
+            more = Gtk.Button(icon_name="go-next-symbolic")
+            more.add_css_class("flat")
+            more.set_valign(Gtk.Align.CENTER)
+            more.set_tooltip_text(f"Other matches from {source}")
+            more.connect("clicked", lambda _b, s=source: self._open_matches(s))
+            box.append(more)
+
+        if is_preferred:
+            row.set_tooltip_text(f"Pinned to {source} for this track")
 
         row.set_child(box)
         return row
@@ -490,12 +1637,21 @@ class LyricsView(Gtk.Box):
             self._current_video_id or "")}
         all_done = all(
             name in cached_sources or name == source
-            for name, _attr, _vid in client._LYRIC_PROVIDERS
+            for name in client._LYRIC_PROVIDERS
         )
         self._refresh_source_picker_rows(include_spinner=not all_done)
         return False
 
     def _on_source_row_activated(self, listbox, row):
+        if getattr(row, "_open_search", False):
+            self._open_search()
+            return
+        if getattr(row, "_reset_choice", False):
+            if self._current_video_id:
+                self.player.client.clear_lyrics_preference(self._current_video_id)
+                self._refresh_for_current_track(force=True)
+            self._source_picker_btn.set_active(False)
+            return
         source = getattr(row, "_lyrics_source", None)
         if not source or not self._current_video_id:
             return
@@ -522,6 +1678,7 @@ class LyricsView(Gtk.Box):
         self._build_rows()
         self.stack.set_visible_child_name("lyrics")
         self._update_source_picker_label()
+        self._refresh_second_line_rows()
         if self._synced and getattr(self.player, "duration", 0) > 0:
             idx = self._index_for_position(self._last_pos)
             self._activate_row(idx, cursor_ms=int(self._last_pos * 1000))
@@ -540,11 +1697,42 @@ class LyricsView(Gtk.Box):
     # ── Public API ─────────────────────────────────────────────────────────
 
     def refresh(self):
+        """Drop this track's cached lyrics and fetch again from scratch."""
         if self._current_video_id:
             cache = getattr(self.player.client, "_lyrics_cache", None)
-            if cache:
-                cache.pop(self._current_video_id, None)
+            if cache is not None:
+                cache.invalidate(self._current_video_id)
             self._refresh_for_current_track(force=True)
+
+    def apply_display_prefs(self):
+        """Re-read the second-line and effects prefs and rebuild the rows
+        in place. Called by the settings dialog — no refetch, the line
+        data already carries every second-line variant the provider had."""
+        lyrics_prefs.invalidate()
+        apply_font_scale()
+        second_line = lyrics_prefs.second_line_mode()
+        effects = lyrics_prefs.effects_level()
+        sweep = lyrics_prefs.line_sweep()
+        active_scale = lyrics_prefs.active_scale()
+        if (second_line == self._second_line_mode
+                and effects == self._effects
+                and sweep == self._sweep
+                and active_scale == self._active_scale):
+            return
+        self._second_line_mode = second_line
+        self._effects = effects
+        self._sweep = sweep
+        self._active_scale = active_scale
+        if not self._lines:
+            return
+        active = self._active_idx
+        self._active_idx = -1
+        self._build_rows()
+        if self._synced:
+            self._activate_row(
+                active if active >= 0 else self._index_for_position(self._last_pos),
+                cursor_ms=int(self._last_pos * 1000),
+            )
 
     # ── Player signal handlers ─────────────────────────────────────────────
 
@@ -570,6 +1758,20 @@ class LyricsView(Gtk.Box):
             return
         idx = self._index_for_position(pos)
         ms = int(pos * 1000)
+
+        # An instrumental stretch takes over the view: the dots fill and
+        # the last sung line dims, instead of the line before the break
+        # sitting there lit for ten seconds as if it were still playing.
+        interlude = self._interlude_at(ms)
+        if interlude is not None:
+            self._enter_interlude(interlude, ms)
+            return
+        if self._lit_interlude is not None:
+            self._lit_interlude.set_cursor_ms(-1)
+            self._lit_interlude = None
+            # Force the next activation to re-scroll onto the vocal line.
+            self._active_idx = -1
+
         if idx != self._active_idx:
             self._log(1, f"progression pos={pos:.2f}s -> idx changed "
                          f"{self._active_idx} -> {idx}")
@@ -580,17 +1782,47 @@ class LyricsView(Gtk.Box):
                 row.set_cursor_ms(ms)
             self._log(2, f"progression pos={pos:.2f}s same idx={idx}")
 
+    def _interlude_at(self, ms):
+        for row in self._interlude_rows:
+            if row.start_ms <= ms < row.end_ms:
+                return row
+        return None
+
+    def _enter_interlude(self, row, ms):
+        if self._lit_interlude is not row:
+            # Dim whatever lyric line was lit before the break.
+            if 0 <= self._lit_idx:
+                prev = self._row_at(self._lit_idx)
+                if prev is not None:
+                    prev.set_cursor_ms(-1)
+                self._lit_idx = -1
+            if self._lit_interlude is not None:
+                self._lit_interlude.set_cursor_ms(-1)
+            self._lit_interlude = row
+            self._suppress_select_signal = True
+            self.lrc_list.select_row(row)
+            self._suppress_select_signal = False
+            self._scroll_to_row(row)
+        row.set_cursor_ms(ms)
+
     def _on_map(self, *_):
         # Switching into this view: jump straight to the correct line
         # without animation so the user lands on the right spot.
         self._log(1, "view mapped")
         if self._synced and self._lines:
             pos = self._last_pos
-            idx = self._index_for_position(pos)
+            ms = int(pos * 1000)
             # Force a re-activation even if idx didn't change while we
             # were hidden — the row may not have been scrolled to.
             self._active_idx = -1
-            self._activate_row(idx, cursor_ms=int(pos * 1000))
+            interlude = self._interlude_at(ms)
+            if interlude is not None:
+                # Coming back mid-break: land on the dots, not on the line
+                # that stopped being sung ten seconds ago.
+                self._lit_interlude = None
+                self._enter_interlude(interlude, ms)
+            else:
+                self._activate_row(self._index_for_position(pos), cursor_ms=ms)
 
     def _on_state_changed(self, player, state):
         if state == "stopped" and not self.player.current_video_id:
@@ -606,6 +1838,7 @@ class LyricsView(Gtk.Box):
             self._lines = []
             self._active_idx = -1
             self._clear_rows()
+            self._source_picker_btn.set_visible(False)
             self._render_status("empty", title="Not playing",
                                 description="Play a song to see lyrics.")
             return
@@ -620,7 +1853,7 @@ class LyricsView(Gtk.Box):
         self._synced = False
         self._active_idx = -1
         self._current_source = None
-        self._source_picker_btn.set_visible(False)
+        self._source_picker_btn.set_visible(True)
         self._clear_rows()
         self.stack.set_visible_child_name("loading")
 
@@ -671,8 +1904,11 @@ class LyricsView(Gtk.Box):
             self._synced = False
             self._render_status(
                 "empty", title="No lyrics",
-                description="We couldn't find lyrics for this track.",
+                description="Nothing matched automatically. Try another "
+                            "source, or search by name.",
             )
+            self._source_picker_btn.set_visible(True)
+            self._update_source_picker_label()
             return False
 
         self._lines = data["lines"]
@@ -702,6 +1938,12 @@ class LyricsView(Gtk.Box):
     # ── Row management ────────────────────────────────────────────────────
 
     def _clear_rows(self):
+        # Every row is about to go, so no row is lit any more. Leaving a
+        # stale index here would suppress the next activation's clear.
+        self._lit_idx = -1
+        self._row_for_line = {}
+        self._interlude_rows = []
+        self._lit_interlude = None
         # GTK 4.12+ has remove_all; earlier versions need a loop. Use the
         # iterative removal for compatibility.
         child = self.lrc_list.get_first_child()
@@ -712,8 +1954,37 @@ class LyricsView(Gtk.Box):
 
     def _build_rows(self):
         self._clear_rows()
+
+        # Interlude markers occupy their own rows, so a row's position in
+        # the ListBox stops matching its index in ``_lines``. Everything
+        # that looks a row up by line index goes through ``_row_for_line``.
+        interludes = (
+            _find_interludes(self._lines) if self._synced else []
+        )
+        pending = list(interludes)
+
         for i, line in enumerate(self._lines):
-            row = LyricRow(line, i)
+            start = line.get("start")
+            # Emit any interlude that finishes before this line starts.
+            while pending and start is not None and pending[0][1] <= start:
+                gap_start, gap_end = pending.pop(0)
+                row = InterludeRow(gap_start, gap_end, effects=self._effects)
+                self.lrc_list.append(row)
+                self._interlude_rows.append(row)
+
+            # A provider's empty marker line has no words to show; the
+            # interlude row above already stands in for it.
+            if not (line.get("text") or "").strip():
+                continue
+
+            row = LyricRow(
+                line, i,
+                second_line_mode=self._second_line_mode,
+                effects=self._effects,
+                sweep_end_ms=self._sweep_end_ms(i),
+                sweep=self._sweep,
+                active_scale=self._active_scale,
+            )
             # Plain (unsynced) sources have no cursor to scrub against, so
             # the active-line dim/bright contrast just communicates "this
             # is offline text" if every line stayed at INACTIVE alpha.
@@ -722,12 +1993,39 @@ class LyricsView(Gtk.Box):
             if not self._synced:
                 row.set_cursor_ms(0)
             self.lrc_list.append(row)
-        self._log(1, f"built {len(self._lines)} rows, "
-                 f"lrc_list margins t={self.lrc_list.get_margin_top()} "
-                 f"b={self.lrc_list.get_margin_bottom()}")
+            self._row_for_line[i] = row
+
+        for gap_start, gap_end in pending:
+            row = InterludeRow(gap_start, gap_end, effects=self._effects)
+            self.lrc_list.append(row)
+            self._interlude_rows.append(row)
+
+        self._log(1, f"built {len(self._row_for_line)} lyric rows + "
+                 f"{len(self._interlude_rows)} interludes")
+
+    def _sweep_end_ms(self, idx):
+        """When line ``idx`` gives way to the next one, in ms.
+
+        The line's own ``end`` when the source provides one (TTML does),
+        otherwise the next timed line's start. Only used to spread a
+        synthesized sweep across the line, so an estimate is fine — but
+        it has to be the *next line's* start rather than the next row's,
+        since a blank marker line between them is where the singing
+        actually stops."""
+        if not self._synced:
+            return None
+        line = self._lines[idx]
+        end = line.get("end")
+        if end is not None:
+            return int(end * 1000)
+        for nxt in self._lines[idx + 1:]:
+            start = nxt.get("start")
+            if start is not None:
+                return int(start * 1000)
+        return None
 
     def _row_at(self, idx):
-        return self.lrc_list.get_row_at_index(idx)
+        return self._row_for_line.get(idx)
 
     # ── Activation + autoscroll ───────────────────────────────────────────
 
@@ -746,11 +2044,20 @@ class LyricsView(Gtk.Box):
         return active
 
     def _activate_row(self, idx, cursor_ms):
-        # Clear the previously-active row's cursor so its words fade back.
-        if 0 <= self._active_idx:
-            prev = self._row_at(self._active_idx)
+        # A lyric line becoming current means no instrumental break is.
+        # Clearing it here rather than only on the progression path covers
+        # the routes that jump straight to a line — remapping the view,
+        # switching provider, changing the second-line setting — any of
+        # which would otherwise leave the marker lit alongside the line.
+        if self._lit_interlude is not None:
+            self._lit_interlude.set_cursor_ms(-1)
+            self._lit_interlude = None
+        # Clear the previously-lit row's cursor so its words fade back.
+        if 0 <= self._lit_idx and self._lit_idx != idx:
+            prev = self._row_at(self._lit_idx)
             if prev is not None:
                 prev.set_cursor_ms(-1)
+            self._lit_idx = -1
         self._active_idx = idx
         if idx < 0:
             self._log(1, "activate idx=-1 (no active line yet)")
@@ -760,6 +2067,8 @@ class LyricsView(Gtk.Box):
             self._log(1, f"activate idx={idx} but row_at returned None")
             return
         row.set_cursor_ms(cursor_ms)
+        self._lit_idx = idx
+        self._update_row_distances(idx)
         self._log(1, f"activate idx={idx} cursor_ms={cursor_ms} "
                  f"-> calling select_row")
         # Selecting the row drives both visual state (:selected style) and
@@ -768,6 +2077,17 @@ class LyricsView(Gtk.Box):
         self._suppress_select_signal = True
         self.lrc_list.select_row(row)
         self._suppress_select_signal = False
+
+    def _update_row_distances(self, active_idx):
+        """Tell each row how far it is from the active line. Only the
+        ``full`` effect level uses it (for the distance blur), so the
+        whole walk is skipped otherwise — it runs on every line change."""
+        if self._effects not in _EFFECT_BLUR:
+            return
+        for i in range(len(self._lines)):
+            row = self._row_at(i)
+            if row is not None:
+                row.set_distance(abs(i - active_idx))
 
     def _on_row_selected(self, listbox, row):
         if row is None:
@@ -782,7 +2102,7 @@ class LyricsView(Gtk.Box):
         # User clicked a row → seek the player to that line's timestamp.
         if self._suppress_select_signal or row is None:
             return
-        if not isinstance(row, LyricRow):
+        if not isinstance(row, (LyricRow, InterludeRow)):
             return
         if not self._synced:
             return
@@ -801,7 +2121,10 @@ class LyricsView(Gtk.Box):
         # by the time the deferred scroll fires, abort. Multiple deferred
         # scrolls queueing in idle order was causing the active line to
         # snap back and forth as out-of-date callbacks executed.
-        target_idx = row.line_idx
+        # Interlude rows all report line_idx -1, which would make every
+        # one of them look like the same scroll target. Key off the row
+        # itself for those.
+        target_idx = row.line_idx if row.line_idx >= 0 else row
         self._scroll_target_idx = target_idx
         self._log(1, f"scroll_to_row idx={target_idx} scheduled")
 

@@ -31,6 +31,34 @@ import time
 from gi.repository import GLib
 
 
+# Bumped whenever the fetch/parse pipeline starts producing better data
+# for input it already handled. Entries written by an older pipeline are
+# dropped on read and refetched, so a fix reaches tracks the user has
+# already played without them knowing to clear anything.
+#
+#   2 — Apple Music parsed from its TTML (word timing, romanization,
+#       translations, background vocals); Unicode-aware artist matching;
+#       NetEase romanization/translation tracks.
+#   3 — Search hits gated on duration and version before the
+#       richest-lyrics walk, so a different song can no longer be served
+#       in place of the track.
+#   4 — Romanization merged in from a second provider when the one that
+#       won the lyrics doesn't carry one.
+#   5 — Korean romanization generated locally.
+#   6 — Apple Music catalog resolved through the public iTunes Search
+#       API, so tracks the JWT scrape couldn't reach are found now.
+#   7 — Cyrillic romanization generated locally; NetEase search hits
+#       gated the same way Apple's and BiniLyrics' are.
+#   8 — Duet voice recorded per line, so the second singer's lines can
+#       sit against the opposite edge.
+#   9 — Artist takes precedence over title when picking a search hit, so
+#       a same-title track by someone else can't win.
+#  10 — Romanization gaps completed from a local dictionary.
+#  11 — Second line applied to manually picked sources too, not just the
+#       one the chain settled on.
+#  12 — Store watermarks stripped from the top of a lyric.
+PIPELINE_VERSION = 12
+
 _CACHE_DIR = None
 
 
@@ -76,15 +104,42 @@ class LyricsCache:
             return None
         if not isinstance(data, dict):
             return None
+        if data.get("pipeline") != PIPELINE_VERSION:
+            # Stale shape. Drop the cached lyrics so the chain refetches
+            # them through the current parsers, but keep the user's pinned
+            # provider and anything they picked by hand — those are
+            # deliberate choices, and re-deriving them would silently
+            # replace the match they went to the trouble of selecting.
+            kept = {
+                name: res
+                for name, res in (data.get("results") or {}).items()
+                if isinstance(res, dict) and res.get("user_choice")
+            }
+            data = {
+                "preferred_source": data.get("preferred_source"),
+                "results": kept,
+                "pipeline": PIPELINE_VERSION,
+            }
         data.setdefault("results", {})
         data.setdefault("preferred_source", None)
         self._mem[video_id] = data
         return data
 
-    def get_result(self, video_id):
-        """Return the cached lyrics result to show: the user-pinned
-        ``preferred_source`` if set and present, otherwise the
-        highest-ranked one available. ``None`` if nothing usable."""
+    def get_result(self, video_id, order=None, accept_rank=1):
+        """Return the cached lyrics result to show, or ``None``.
+
+        The user-pinned ``preferred_source`` always wins when it's
+        present. Otherwise this mirrors what the live chain would have
+        picked: walk the user's provider queue (``order``) and take the
+        first source whose result is at least ``accept_rank``, holding a
+        weaker one as a fallback.
+
+        With ``order`` given and none of its providers cached, this
+        returns ``None`` on purpose — the caller then runs the chain,
+        which is what should happen when the only cached sources are
+        ones the user has since switched off. Callers that want whatever
+        is on disk regardless (the source picker) use
+        :meth:`get_alternatives`."""
         entry = self.load(video_id)
         if not entry or not entry.get("results"):
             return None
@@ -92,6 +147,21 @@ class LyricsCache:
         pref = entry.get("preferred_source")
         if pref and pref in results:
             return results[pref]
+
+        if order:
+            fallback = None
+            fallback_rank = 0
+            for name in order:
+                res = results.get(name)
+                if not res:
+                    continue
+                rank = _rank_score(res)
+                if rank >= accept_rank:
+                    return res
+                if rank > fallback_rank:
+                    fallback, fallback_rank = res, rank
+            return fallback
+
         # Pick the richest result by rank.
         ranked = sorted(results.values(), key=_rank_score, reverse=True)
         return ranked[0] if ranked else None
@@ -116,12 +186,19 @@ class LyricsCache:
             return False
         return source in (entry.get("results") or {})
 
-    def add_result(self, video_id, result):
+    def add_result(self, video_id, result, user_choice=False):
         """Save a single provider's result under the source name it
         already carries in ``result["source"]``. No-op if ``result`` is
-        falsy or doesn't carry lines."""
+        falsy or doesn't carry lines.
+
+        ``user_choice`` marks a result the listener selected themselves,
+        which survives the pipeline-version wipe that clears everything
+        else."""
         if not video_id or not result or not result.get("lines"):
             return
+        result = dict(result)
+        if user_choice:
+            result["user_choice"] = True
         source = result.get("source") or "Unknown"
         entry = self.load(video_id) or {
             "preferred_source": None, "results": {},
@@ -152,6 +229,22 @@ class LyricsCache:
         entry["preferred_source"] = source
         self._write(video_id, entry)
 
+    def clear_user_choice(self, video_id):
+        """Undo a hand-picked source: drop the pin and any result the
+        listener selected, so the chain's own choice applies again.
+
+        Only the picked results go — whatever the chain had already
+        cached stays, so undoing is instant rather than a refetch."""
+        entry = self.load(video_id)
+        if not entry:
+            return
+        entry["preferred_source"] = None
+        entry["results"] = {
+            name: res for name, res in (entry.get("results") or {}).items()
+            if not (isinstance(res, dict) and res.get("user_choice"))
+        }
+        self._write(video_id, entry)
+
     def invalidate(self, video_id):
         """Wipe the cache for a single track (e.g. user explicitly asks
         to refresh)."""
@@ -163,8 +256,30 @@ class LyricsCache:
         except OSError:
             pass
 
+    def clear_all(self):
+        """Wipe every cached track. Used by Settings after the provider
+        queue changes — reordering only decides which cached source gets
+        shown, so a track already cached from a now-lower-priority
+        provider needs the chain re-run to pick up a better one."""
+        self._mem.clear()
+        removed = 0
+        try:
+            d = _cache_dir()
+            for fname in os.listdir(d):
+                if not fname.endswith(".json"):
+                    continue
+                try:
+                    os.remove(os.path.join(d, fname))
+                    removed += 1
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        return removed
+
     def _write(self, video_id, entry):
         path = _path_for(video_id)
+        entry["pipeline"] = PIPELINE_VERSION
         try:
             with self._lock:
                 with open(path, "w") as f:

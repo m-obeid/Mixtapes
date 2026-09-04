@@ -77,15 +77,41 @@ class DesktopCoverView(Adw.Bin):
         # Lyrics toggle floats in the top-right of the cover itself.
         # Built early so we can drop it into the cover_overlay below; the
         # toggled handler is wired up later, after self.split exists.
+        #
+        # ``osd`` is the HIG's style class for controls that float over
+        # content: it paints its own dark scrim with a light foreground
+        # regardless of theme or accent colour, which is the only way to
+        # stay legible over arbitrary album art. The previous hand-rolled
+        # translucent-window-background fill went invisible over pale
+        # covers, and its accent-tinted checked state turned the icon
+        # yellow-on-yellow whenever dynamic accent picked up a warm cover.
         self.lyrics_toggle = Gtk.ToggleButton()
         self.lyrics_toggle.set_icon_name("format-justify-fill-symbolic")
         self.lyrics_toggle.set_tooltip_text("Show lyrics")
-        self.lyrics_toggle.add_css_class("lyrics-toggle-btn")
-        self.lyrics_toggle.set_has_frame(False)
+        self.lyrics_toggle.add_css_class("osd")
+        self.lyrics_toggle.add_css_class("circular")
+        self.lyrics_toggle.add_css_class("lyrics-osd-btn")
         self.lyrics_toggle.set_halign(Gtk.Align.END)
         self.lyrics_toggle.set_valign(Gtk.Align.START)
         self.lyrics_toggle.set_margin_top(10)
         self.lyrics_toggle.set_margin_end(10)
+
+        # Reveal on hover, the way media overlays behave elsewhere in
+        # GNOME (Loupe, Videos) and in the YouTube Music web player, so
+        # the cover is unobstructed while you're just listening.
+        self._lyrics_toggle_revealer = Gtk.Revealer()
+        self._lyrics_toggle_revealer.set_transition_type(
+            Gtk.RevealerTransitionType.CROSSFADE
+        )
+        self._lyrics_toggle_revealer.set_transition_duration(150)
+        self._lyrics_toggle_revealer.set_child(self.lyrics_toggle)
+        self._lyrics_toggle_revealer.set_halign(Gtk.Align.END)
+        self._lyrics_toggle_revealer.set_valign(Gtk.Align.START)
+        self._lyrics_toggle_revealer.set_reveal_child(False)
+        # A revealer that isn't revealed still takes its child's input
+        # region in an overlay; make it inert so the hidden button can't
+        # swallow clicks meant for the cover.
+        self._lyrics_toggle_revealer.set_can_target(False)
 
         # The overlay must sit *inside* the AspectFrame so it inherits the
         # frame's square allocation — otherwise the button anchors to the
@@ -94,7 +120,30 @@ class DesktopCoverView(Adw.Bin):
         # corner.
         cover_overlay = Gtk.Overlay()
         cover_overlay.set_child(self.cover_img)
-        cover_overlay.add_overlay(self.lyrics_toggle)
+        cover_overlay.add_overlay(self._lyrics_toggle_revealer)
+
+        self._pointer_over_cover = False
+        motion = Gtk.EventControllerMotion()
+        motion.connect("enter", self._on_cover_enter)
+        motion.connect("leave", self._on_cover_leave)
+        cover_overlay.add_controller(motion)
+
+        # Touch screens never emit a pointer-enter, so hover alone would
+        # leave the control unreachable on a tablet. A tap on the cover
+        # brings it up for a few seconds, the way media controls behave on
+        # touch elsewhere. Touch-only: a mouse press shouldn't start a
+        # countdown when hover already handles that case.
+        self._touch_reveal = False
+        self._touch_reveal_source = 0
+        tap = Gtk.GestureClick()
+        tap.set_touch_only(True)
+        tap.connect("released", self._on_cover_tapped)
+        cover_overlay.add_controller(tap)
+        # Keyboard users never generate a pointer-enter, so hiding the
+        # control outright would put it out of reach. Focus reveals it too.
+        self.lyrics_toggle.connect(
+            "notify::has-focus", lambda *_: self._sync_lyrics_toggle_reveal()
+        )
 
         cover_frame = Gtk.AspectFrame(ratio=1.0, obey_child=False)
         cover_frame.set_vexpand(True)
@@ -210,6 +259,49 @@ class DesktopCoverView(Adw.Bin):
         # does all the work of attaching/detaching the panel.
         if bool(_load_pref("lyrics_shown_desktop", False)):
             self.lyrics_toggle.set_active(True)
+        self._sync_lyrics_toggle_reveal()
+
+    def _on_cover_enter(self, *_):
+        self._pointer_over_cover = True
+        self._sync_lyrics_toggle_reveal()
+
+    def _on_cover_leave(self, *_):
+        self._pointer_over_cover = False
+        self._sync_lyrics_toggle_reveal()
+
+    # How long the control stays up after a tap before fading away again.
+    TOUCH_REVEAL_SECONDS = 4
+
+    def _on_cover_tapped(self, _gesture, _n_press, _x, _y):
+        self._touch_reveal = True
+        self._sync_lyrics_toggle_reveal()
+        self._restart_touch_reveal_timer()
+
+    def _restart_touch_reveal_timer(self):
+        if self._touch_reveal_source:
+            GLib.source_remove(self._touch_reveal_source)
+        self._touch_reveal_source = GLib.timeout_add_seconds(
+            self.TOUCH_REVEAL_SECONDS, self._end_touch_reveal
+        )
+
+    def _end_touch_reveal(self):
+        self._touch_reveal_source = 0
+        self._touch_reveal = False
+        self._sync_lyrics_toggle_reveal()
+        return GLib.SOURCE_REMOVE
+
+    def _sync_lyrics_toggle_reveal(self):
+        # Hover, keyboard focus, or a recent tap. The toggle's state is
+        # already visible in the window — the lyrics column is either
+        # there or it isn't — so keeping the button on screen to report
+        # it would just put a permanent widget back on the cover.
+        reveal = (
+            self._pointer_over_cover
+            or self.lyrics_toggle.has_focus()
+            or self._touch_reveal
+        )
+        self._lyrics_toggle_revealer.set_reveal_child(reveal)
+        self._lyrics_toggle_revealer.set_can_target(reveal)
 
     def _on_lyrics_toggled(self, btn):
         shown = btn.get_active()
@@ -218,6 +310,9 @@ class DesktopCoverView(Adw.Bin):
         self.split.set_show_sidebar(shown)
         self._suppress_intent_sync = False
         btn.set_tooltip_text("Hide lyrics" if shown else "Show lyrics")
+        if self._touch_reveal:
+            self._restart_touch_reveal_timer()
+        self._sync_lyrics_toggle_reveal()
         _save_pref("lyrics_shown_desktop", bool(shown))
 
     def _on_show_sidebar_changed(self, *_):

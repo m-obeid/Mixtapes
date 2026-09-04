@@ -619,104 +619,72 @@ window > windowhandle,
   font-size: 1.4em;
   font-weight: 700;
   color: @accent_color;
+  /* The glow below is a shadow transition; declaring the resting state
+     here (rather than only on .lyrics-line-glow) gives GTK both ends of
+     the animation, so the halo fades out as well as in. */
+  text-shadow: 0 0 0 alpha(@accent_color, 0);
+  transition: text-shadow 280ms ease-out;
 }
 
-/* Floating icon-only menu button in the top-right of the lyrics view.
-   Soft translucent rounded-square so it sits gently over the lyrics
-   content, regardless of whether the background is bright album art
-   or chrome. No border — borders read as harsh ring-edges against
-   the lyrics text. */
-.lyrics-source-btn {
-  background-color: alpha(@window_bg_color, 0.55);
-  color: @theme_fg_color;
-  border-radius: 8px;
-  padding: 6px;
-  min-height: 0;
-  min-width: 0;
-  border: none;
-  box-shadow: 0 1px 3px alpha(black, 0.18);
-  transition: background-color 150ms ease, opacity 150ms ease;
-  opacity: 0.65;
+/* Active-line halo. Soft and accent-tinted so it reads as the line
+   lighting up rather than as a hard outline — at 1.4em bold the text is
+   heavy enough that a tight shadow just looks like a rendering fault. */
+.lyrics-line .lyrics-line-label.lyrics-line-glow {
+  text-shadow: 0 0 18px alpha(@accent_color, 0.45);
 }
 
-.lyrics-source-btn:hover {
-  background-color: alpha(@window_bg_color, 0.85);
-  opacity: 1.0;
+/* Instrumental marker. The dots are painted in the snapshot pass, so all
+   this contributes is the colour they're drawn in — shared with the lead
+   line so a break reads as part of the same column. */
+.lyrics-line .lyrics-interlude {
+  color: @accent_color;
 }
 
-.lyrics-source-btn:active,
-.lyrics-source-btn:checked {
-  background-color: alpha(@accent_color, 0.25);
-  opacity: 1.0;
+/* Second line: romanization, translation or background vocals. Smaller
+   and lighter than the lead so it supports the line above instead of
+   competing with it. Per-glyph opacity still comes from Pango alpha —
+   this only sets the type. */
+.lyrics-line .lyrics-line-sub {
+  font-size: 0.98em;
+  font-weight: 600;
+  color: @accent_color;
+}
+
+/* Floating overlay controls: the lyrics toggle on the cover art and the
+   source picker in the lyrics column.
+
+   Colour comes entirely from libadwaita's `.osd` class, which paints a
+   dark scrim with a light foreground no matter the theme or the accent.
+   That's the point: these sit on top of album art, so nothing derived
+   from the window background or the cover-tinted accent can be relied
+   on to contrast with what's behind them.
+
+   All this rule adds is the hit target. `.circular` alone leaves the
+   icon-only button at its natural size; 34px is libadwaita's standard
+   button metric and the HIG's minimum comfortable touch/click area. */
+.lyrics-osd-btn,
+.lyrics-osd-btn > button {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
 }
 
 /* Source-picker list inside the popover — mirrors .add-to-playlist-list:
    the .boxed-list border/shadow combo turns each row into its own card
    inside the popover, which reads as cluttered. We use navigation-
-   sidebar's hover effect and trim the default theme padding. */
+   sidebar's hover effect and trim the default theme padding.
+
+   navigation-sidebar paints its own background, which made the list read
+   as a panel sitting inside the popover rather than as part of it — two
+   tones where there should be one. */
+.lyrics-source-list {
+  background: none;
+  background-color: transparent;
+}
+
 .lyrics-source-list > row {
   padding: 4px 8px;
   border-radius: 6px;
-}
-
-/* MenuButton renders its content inside an internal `button` child. We
-   paint the disc on the outer .lyrics-source-btn; the inner button has
-   to be invisible or it draws a second background pill that reads as a
-   "weird ring" around the icon. */
-.lyrics-source-btn > button,
-.lyrics-source-btn > button:hover,
-.lyrics-source-btn > button:active,
-.lyrics-source-btn > button:checked {
-  background: none;
-  background-color: transparent;
-  border: none;
-  box-shadow: none;
-  outline: none;
-  min-height: 0;
-  min-width: 0;
-  padding: 0;
-}
-
-.lyrics-toggle-btn > button,
-.lyrics-toggle-btn > button:hover,
-.lyrics-toggle-btn > button:active,
-.lyrics-toggle-btn > button:checked {
-  background: none;
-  background-color: transparent;
-  border: none;
-  box-shadow: none;
-  outline: none;
-  min-height: 0;
-  min-width: 0;
-  padding: 0;
-}
-
-/* Compact icon-only toggle overlaid in the top-right of the cover art.
-   Same soft rounded-square look as .lyrics-source-btn so the two
-   buttons read as a family. Brighter accent fill when the lyrics
-   column is currently shown. */
-.lyrics-toggle-btn {
-  background-color: alpha(@window_bg_color, 0.55);
-  color: @theme_fg_color;
-  border-radius: 8px;
-  padding: 6px;
-  min-height: 0;
-  min-width: 0;
-  border: none;
-  box-shadow: 0 1px 3px alpha(black, 0.18);
-  transition: background-color 150ms ease, opacity 150ms ease;
-  opacity: 0.65;
-}
-
-.lyrics-toggle-btn:hover {
-  background-color: alpha(@window_bg_color, 0.85);
-  opacity: 1.0;
-}
-
-.lyrics-toggle-btn:checked {
-  background-color: alpha(@accent_color, 0.35);
-  color: @accent_color;
-  opacity: 1.0;
 }
 
 /* Static (unsynced) lyrics: no hover affordance, full opacity so the body

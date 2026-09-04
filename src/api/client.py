@@ -215,14 +215,577 @@ def _result_rank(res):
     return 1
 
 
-def _norm_artist_for_match(s):
-    """Strip everything but alphanumerics + lowercase. Lets us compare
-    artists across providers that format the same name differently
-    (e.g. ``Daft Punk`` vs ``daft-punk`` vs ``Daft Punk feat. Pharrell``)."""
+def _is_cjk_char(ch):
+    """True for scripts that don't put spaces between words: kana, CJK
+    ideographs and Hangul."""
+    o = ord(ch)
+    return (
+        0x3040 <= o <= 0x30FF      # Hiragana + Katakana
+        or 0x3400 <= o <= 0x4DBF   # CJK extension A
+        or 0x4E00 <= o <= 0x9FFF   # CJK unified ideographs
+        or 0xAC00 <= o <= 0xD7AF   # Hangul syllables
+        or 0xF900 <= o <= 0xFAFF   # CJK compatibility ideographs
+    )
+
+
+def _space_between(left, right):
+    """Whether two adjacent karaoke words need a space between them.
+
+    Only used for sources that ship no whitespace of their own. Joining
+    everything with spaces put a gap between every Japanese syllable;
+    joining with none would run English words together. Deciding per
+    boundary handles the mixed-script lines that are common in J-pop.
+    """
+    if not left or not right:
+        return False
+    return not (_is_cjk_char(left[-1]) and _is_cjk_char(right[0]))
+
+
+# Words that mark a candidate as a DIFFERENT RECORDING of the same song.
+# A live take or a remix has the same words with entirely different
+# timing, so its synced lyrics are worse than useless against the studio
+# track. "Remaster" is deliberately absent: a remaster keeps the timing.
+_VERSION_MARKERS = (
+    "live", "remix", "instrumental", "acoustic", "karaoke", "cover",
+    "nightcore", "sped up", "spedup", "slowed", "reverb", "8d audio",
+    "demo", "rehearsal", "unplugged", "orchestral", "piano version",
+)
+
+
+def _norm_title_for_match(s):
+    """Casefold and drop everything but letters and digits, in any
+    script. Same Unicode caveat as the artist normalizer."""
     if not s:
         return ""
+    return "".join(ch for ch in s.casefold() if ch.isalnum())
+
+
+def _titles_match(expected, found):
+    """True when two titles plausibly name the same song. Containment
+    either way, so ``Lemon`` matches ``Lemon (Special Edition)``."""
+    e = _norm_title_for_match(expected)
+    f = _norm_title_for_match(found)
+    if not e or not f:
+        return False
+    return e in f or f in e
+
+
+def _version_mismatch(query_title, candidate_name):
+    """True when the candidate advertises itself as a different take
+    (live, remix, ...) and the track we're looking for doesn't."""
+    q = (query_title or "").casefold()
+    c = (candidate_name or "").casefold()
+    return any(m in c and m not in q for m in _VERSION_MARKERS)
+
+
+def _duration_ok(expected, found_s, tolerance=5):
+    """Whether two durations describe the same recording. Unknown on
+    either side is not evidence of a mismatch, so it passes.
+
+    Measured against real catalogs, a correct match lands within a second
+    or two (Lemon 0s, Blinding Lights 1s, Bohemian Rhapsody 1s) while a
+    cover or a different song is 9s or more out, so this separates them
+    cleanly."""
+    if not expected or not found_s:
+        return True
+    return abs(int(expected) - int(found_s)) <= tolerance
+
+
+def _candidate_matches(title, artists, duration, cand_name, cand_artist,
+                       cand_duration_s):
+    """Gate a search hit before we spend a request on its lyrics.
+
+    Catalog search is fuzzy and happily returns a different song
+    entirely. Ranking alone can't save us: the caller walks several
+    candidates preferring the richest lyric type, so one unrelated song
+    with word-level timing outranks the correct song with line-level
+    timing. Requiring a real match first is what keeps
+    ``Sakura Biyori and Time Machine`` from being served as ``千本桜``.
+    """
+    if not _duration_ok(duration, cand_duration_s):
+        return False
+    if _version_mismatch(title, cand_name):
+        return False
+    if any(_artist_matches(a, cand_artist) for a in artists if a):
+        return True
+    # Catalogs romanize CJK titles (千本桜 -> Senbonzakura), so a title
+    # miss is not disqualifying on its own — the artist can carry it.
+    if not _titles_match(title, cand_name):
+        return False
+    # Title agreement alone, from a different artist. Only trust it when
+    # the duration corroborates: "Popular" names a Weeknd track and an
+    # Ariana Grande one, and with no duration to separate them the title
+    # is no evidence at all.
+    if artists and not (duration and cand_duration_s):
+        return False
+    return True
+
+
+def _match_detail(artist, duration_s):
+    """The one-line subtitle under a candidate in the match browser."""
+    bits = []
+    if artist:
+        bits.append(str(artist))
+    if duration_s:
+        bits.append(f"{int(duration_s) // 60}:{int(duration_s) % 60:02d}")
+    return " · ".join(bits)
+
+
+# How far a candidate's duration may sit from the track's and still be
+# worth showing in the match list. Far looser than the chain's 5s gate —
+# the point is to surface the near-misses it rejected — but not so loose
+# that a provider's whole back catalogue counts as a match.
+_MATCH_DURATION_SLACK = 20
+
+
+def _rank_matches(items, title, artist, duration, name_of, artist_of, dur_of):
+    """Candidates worth showing, likeliest first.
+
+    Looser than the chain's gate, which is the point: the gate throwing
+    away the right take is why someone opens this list. But a candidate
+    that shares neither the title nor roughly the duration isn't a
+    near-miss, it's a different song — listing "Rips in Jeans" under
+    "Why's this dealer?" just because the same artist made both is noise,
+    and it reads as though the app has lost track of what's playing.
+    """
+    artists = [a for a in _split_artists(artist) if a]
+
+    def plausible(item):
+        if _titles_match(title, name_of(item)):
+            return True
+        cand_dur = dur_of(item) or 0
+        if duration and cand_dur:
+            return abs(int(duration) - int(cand_dur)) <= _MATCH_DURATION_SLACK
+        # No duration to compare and no title agreement: nothing links it
+        # to this track beyond the artist, which every result shares.
+        return False
+
+    items = [it for it in items if plausible(it)]
+
+    def score(item):
+        value = 0
+        cand_dur = dur_of(item) or 0
+        if duration and cand_dur:
+            delta = abs(int(duration) - int(cand_dur))
+            value += 100 if delta <= 2 else 60 if delta <= 5 else 20 if delta <= 15 else 0
+        if any(_artist_matches(a, artist_of(item) or "") for a in artists):
+            value += 50
+        if _titles_match(title, name_of(item)):
+            value += 30
+        if _version_mismatch(title, name_of(item)):
+            value -= 40
+        return -value
+
+    return sorted(items, key=score)
+
+
+def _prefer_artist_matches(items, artists, artist_of):
+    """Narrow a candidate list to the ones by an artist we recognise.
+
+    The artist is the strongest signal we have, so it takes precedence
+    over everything the scoring does afterwards rather than merely being
+    one way to pass the gate. Without this, "Popular" by The Weeknd loses
+    to "Popular" by Ariana Grande whenever the duration isn't known yet
+    (fetching starts on the metadata change, before the stream reports
+    one): her title matches exactly and scores higher than his
+    "Popular (feat. Playboi Carti)".
+
+    Falls through unchanged when nothing matches, so a catalog that
+    spells the artist differently still gets a chance.
+    """
+    if not artists:
+        return items
+    matched = [
+        it for it in items
+        if any(_artist_matches(a, artist_of(it) or "") for a in artists if a)
+    ]
+    return matched or items
+
+
+# Revised Romanization of Korean, transliteration variant. Hangul
+# syllables decompose arithmetically from their code point, so unlike
+# Japanese (where a kanji's reading depends on context and needs a
+# morphological dictionary) Korean romanizes exactly with three tables
+# and no data files. beautiful-lyrics generates its Korean readings the
+# same way rather than asking a provider for them.
+_HANGUL_INITIALS = [
+    "g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "",
+    "j", "jj", "ch", "k", "t", "p", "h",
+]
+_HANGUL_MEDIALS = [
+    "a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o", "wa", "wae",
+    "oe", "yo", "u", "wo", "we", "wi", "yu", "eu", "ui", "i",
+]
+_HANGUL_FINALS = [
+    "", "k", "k", "ks", "n", "nj", "nh", "t", "l", "lk", "lm", "lb",
+    "ls", "lt", "lp", "lh", "m", "p", "ps", "s", "ss", "ng", "j", "ch",
+    "k", "t", "p", "h",
+]
+
+
+def _romanize_korean(text):
+    """Romanize Hangul in ``text``, leaving everything else untouched.
+    Returns ``None`` when there was no Hangul to convert."""
+    if not text:
+        return None
+    out = []
+    converted = False
+    for ch in text:
+        o = ord(ch)
+        if 0xAC00 <= o <= 0xD7A3:
+            i = o - 0xAC00
+            out.append(
+                _HANGUL_INITIALS[i // 588]
+                + _HANGUL_MEDIALS[(i % 588) // 28]
+                + _HANGUL_FINALS[i % 28]
+            )
+            converted = True
+        else:
+            out.append(ch)
+    return "".join(out) if converted else None
+
+
+# Cyrillic romanization, BGN/PCGN-leaning: no diacritics, and digraphs an
+# English speaker can actually pronounce (zh, kh, shch, ya, yu) rather
+# than ISO 9's š/ž/č. Like Hangul this is a transliteration, not a
+# reading, so it needs no dictionary. The table covers the union of the
+# Russian, Ukrainian, Belarusian, Bulgarian, Serbian and Macedonian
+# letters with Russian-leaning values, which is the pragmatic choice for
+# song lyrics.
+_CYRILLIC_MAP = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "yo",
+    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch",
+    "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+    "і": "i", "ї": "yi", "є": "ye", "ґ": "g", "ў": "w", "ѓ": "gj",
+    "ќ": "kj", "ђ": "dj", "ћ": "c", "ј": "j", "љ": "lj", "њ": "nj",
+    "џ": "dz", "ѕ": "dz", "һ": "h", "ә": "a", "ө": "o", "ү": "u",
+    "ң": "ng", "қ": "q", "ғ": "gh", "ұ": "u",
+}
+_CYRILLIC_VOWELS = set("аеёиоуыэюяіїєaeiouy")
+
+
+def _romanize_cyrillic(text):
+    """Romanize Cyrillic in ``text``, leaving everything else alone.
+    Returns ``None`` when there was no Cyrillic to convert."""
+    if not text:
+        return None
+    chars = list(text)
+    out = []
+    converted = False
+    for i, ch in enumerate(chars):
+        low = ch.lower()
+        if low not in _CYRILLIC_MAP:
+            out.append(ch)
+            continue
+        converted = True
+        roman = _CYRILLIC_MAP[low]
+        if low == "е":
+            # "е" is "ye" at the start of a word and after a vowel or a
+            # soft/hard sign, "e" everywhere else.
+            prev = chars[i - 1].lower() if i else ""
+            roman = (
+                "ye"
+                if (not prev or not prev.isalpha()
+                    or prev in _CYRILLIC_VOWELS or prev in "ъь")
+                else "e"
+            )
+        if roman and ch.isupper():
+            # Keep an all-caps word all-caps instead of turning ДОЖДЬ
+            # into "DoZhD".
+            prev_up = (
+                i > 0 and chars[i - 1].isalpha() and chars[i - 1].isupper()
+            )
+            next_up = (
+                i + 1 < len(chars) and chars[i + 1].isalpha()
+                and chars[i + 1].isupper()
+            )
+            roman = roman.upper() if (prev_up or next_up) else roman.capitalize()
+        out.append(roman)
+    return "".join(out) if converted else None
+
+
+# Japanese and Chinese need a dictionary, unlike Hangul and Cyrillic which
+# transliterate arithmetically. These are optional: the app works without
+# them, it just falls back to whatever romanization a provider shipped.
+# Import lazily so a missing package costs nothing at start-up.
+_DICT_ROMANIZERS = {}
+_DICT_ROMANIZERS_READY = False
+
+
+def _dict_romanizers():
+    global _DICT_ROMANIZERS_READY
+    if _DICT_ROMANIZERS_READY:
+        return _DICT_ROMANIZERS
+    _DICT_ROMANIZERS_READY = True
+    try:
+        import pykakasi
+
+        kks = pykakasi.kakasi()
+
+        def _ja(text):
+            parts = [p["hepburn"] for p in kks.convert(text)]
+            return " ".join(p for p in (x.strip() for x in parts) if p)
+
+        _DICT_ROMANIZERS["ja"] = _ja
+    except Exception:
+        pass
+    try:
+        from pypinyin import pinyin, Style
+
+        def _zh(text):
+            return " ".join(
+                x[0] for x in pinyin(text, style=Style.TONE) if x and x[0].strip()
+            )
+
+        _DICT_ROMANIZERS["zh"] = _zh
+    except Exception:
+        pass
+    return _DICT_ROMANIZERS
+
+
+def _romanize_with_dictionary(text):
+    """Romanize Japanese or Chinese using an installed dictionary, or
+    ``None`` when the text isn't one of those or no package is present."""
+    if not text:
+        return None
+    romanizers = _dict_romanizers()
+    if not romanizers:
+        return None
+    has_kana = any(0x3040 <= ord(c) <= 0x30FF for c in text)
+    has_han = any(
+        0x3400 <= ord(c) <= 0x4DBF or 0x4E00 <= ord(c) <= 0x9FFF
+        or 0xF900 <= ord(c) <= 0xFAFF for c in text
+    )
+    # Kana settles it: a line with kana is Japanese even when it also has
+    # kanji, while han characters on their own are Chinese.
+    key = "ja" if has_kana else ("zh" if has_han else None)
+    if key is None or key not in romanizers:
+        return None
+    try:
+        out = romanizers[key](text)
+    except Exception:
+        return None
+    out = (out or "").strip()
+    return out if out and out != text else None
+
+
+# Below this much provider coverage, a locally generated reading replaces
+# the provider's rather than filling in around it. Mixing two romanization
+# styles down one column reads as a glitch, and at that point most of the
+# song would be the local one anyway.
+_ROMANIZATION_CONSISTENCY_FLOOR = 0.5
+
+
+def _fill_romanization_gaps(result):
+    """Complete a partly-romanized song using an installed dictionary.
+
+    Providers romanize whichever lines they happen to have, so coverage
+    is routinely partial — measured across twelve Japanese tracks it
+    averaged 84%, with three of them under 60%. Official transliterations
+    read better than generated ones, so they're kept where they exist and
+    this only fills the holes. When the provider covered less than half,
+    the whole song is regenerated instead, so the column doesn't alternate
+    between two romanization styles.
+
+    A no-op when neither pykakasi nor pypinyin is installed.
+    """
+    if not result or not result.get("lines") or not _dict_romanizers():
+        return result
+    lines = result["lines"]
+    want = [
+        l for l in lines
+        if any(_needs_provider_romanization(ch) for ch in (l.get("text") or ""))
+    ]
+    if not want:
+        return result
+
+    have = sum(1 for l in want if l.get("romanization"))
+    replace_all = have < len(want) * _ROMANIZATION_CONSISTENCY_FLOOR
+
+    filled = 0
+    for line in want:
+        if line.get("romanization") and not replace_all:
+            continue
+        roman = _romanize_with_dictionary(line.get("text"))
+        if roman:
+            line["romanization"] = roman
+            filled += 1
+    if filled:
+        how = "regenerated" if replace_all else "filled"
+        print(f"[LYRICS] romanization: {how} {filled}/{len(want)} lines locally")
+    return result
+
+
+def _romanize_locally(text):
+    """Romanize the scripts we can transliterate exactly with no
+    dictionary and no network. ``None`` if this text isn't one of them."""
+    return _romanize_korean(text) or _romanize_cyrillic(text)
+
+
+def _needs_provider_romanization(ch):
+    """True for scripts whose romanization is a *reading* rather than a
+    transliteration, so only a provider (or a morphological dictionary)
+    can supply it.
+
+    Japanese kanji readings are context-dependent and Chinese needs a
+    pinyin dictionary. Deliberately excluded: Arabic, Hebrew, Thai and
+    the Indic scripts. Those aren't just missing from this list, they
+    can't be done character-by-character at all — Arabic and Hebrew omit
+    short vowels in writing, so a character map yields "ktb" rather than
+    a pronounceable word. Guessing there would be worse than showing
+    nothing, and no provider we use carries readings for them either, so
+    they don't even earn a network round trip."""
+    o = ord(ch)
+    return (
+        0x3040 <= o <= 0x30FF      # Hiragana + Katakana
+        or 0x3400 <= o <= 0x4DBF   # CJK extension A
+        or 0x4E00 <= o <= 0x9FFF   # CJK unified ideographs
+        or 0xF900 <= o <= 0xFAFF   # CJK compatibility ideographs
+    )
+
+
+def _is_hangul_char(ch):
+    o = ord(ch)
+    return 0xAC00 <= o <= 0xD7A3 or 0x1100 <= o <= 0x11FF or 0x3130 <= o <= 0x318F
+
+
+def _is_non_latin_char(ch):
+    """True for the scripts a romanization is actually for. Mirrors the
+    view's test so the fetch side and the display side agree on which
+    lines want a second line."""
+    o = ord(ch)
+    return (
+        0x0400 <= o <= 0x04FF      # Cyrillic
+        or 0x0590 <= o <= 0x05FF   # Hebrew
+        or 0x0600 <= o <= 0x06FF   # Arabic
+        or 0x0E00 <= o <= 0x0E7F   # Thai
+        or 0x3040 <= o <= 0x30FF   # Hiragana + Katakana
+        or 0x3400 <= o <= 0x4DBF   # CJK extension A
+        or 0x4E00 <= o <= 0x9FFF   # CJK unified ideographs
+        or 0xAC00 <= o <= 0xD7AF   # Hangul syllables
+    )
+
+
+def _norm_lyric_text(text):
+    """Normalize a lyric line for cross-provider comparison.
+
+    NFKC folds the full-width forms one source uses and another doesn't
+    (``悪霊退散　ICBM`` vs ``悪霊退散 ICBM``), the parenthetical strip drops
+    furigana annotations NetEase adds (``磊々落々(らいらいらくらく)``), and
+    keeping only Unicode alphanumerics removes the punctuation and
+    spacing the two disagree about.
+    """
     import re as _re
-    return _re.sub(r"[^a-z0-9]", "", s.lower())
+    import unicodedata
+
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKC", text)
+    text = _re.sub(r"[（(\[][^）)\]]*[）)\]]", "", text)
+    return "".join(ch for ch in text.casefold() if ch.isalnum())
+
+
+def _merge_romanization_by_text(lines, source_lines, max_join=4):
+    """Copy romanizations from another provider's lines onto ``lines``,
+    matched on the ORIGINAL text rather than on timestamps.
+
+    Timestamps can't be trusted across providers: two sources for the
+    same song are routinely different masters, offset by a second or
+    two, and split their lines differently. Merging 千本桜's NetEase
+    romanization onto LRCLIB's lines by time matched 4 of 47 lines and
+    mispaired several of them — it put ``反戦国家``'s reading under
+    ``日の丸印の二輪車転がし``. Matching on the text itself is proof the two
+    lines are the same lyric, and lands 43 of 47 on the same track.
+
+    ``max_join`` handles the split disagreements: one of our lines is
+    sometimes several of theirs run together.
+
+    Returns the number of lines that gained a romanization.
+    """
+    pairs = [
+        (_norm_lyric_text(l.get("text")), (l.get("romanization") or "").strip())
+        for l in source_lines
+    ]
+    pairs = [(t, r) for t, r in pairs if t and r]
+    if not pairs:
+        return 0
+
+    exact = {}
+    for t, r in pairs:
+        exact.setdefault(t, r)
+
+    matched = 0
+    for line in lines:
+        if line.get("romanization"):
+            continue
+        key = _norm_lyric_text(line.get("text"))
+        if not key:
+            continue
+        hit = exact.get(key)
+        if hit:
+            line["romanization"] = hit
+            matched += 1
+            continue
+        # Our line may be a run of consecutive source lines.
+        for i in range(len(pairs)):
+            if not key.startswith(pairs[i][0]):
+                continue
+            acc, parts = "", []
+            for j in range(i, min(i + max_join, len(pairs))):
+                acc += pairs[j][0]
+                parts.append(pairs[j][1])
+                if acc == key:
+                    line["romanization"] = " ".join(parts)
+                    matched += 1
+                    break
+                if not key.startswith(acc):
+                    break
+            if line.get("romanization"):
+                break
+    return matched
+
+
+def _split_artists(artist):
+    """Split a display artist string into individual names.
+
+    Providers credit a track as ``Hatsune Miku, WhiteFlame`` or
+    ``CTS feat. 初音ミク``. Matching only the first name loses the match
+    whenever the catalog credits the collaborator first, which is the
+    normal case for Vocaloid tracks (the producer, not the voice)."""
+    if not artist:
+        return []
+    import re as _re
+    parts = _re.split(
+        r"\s*(?:,|&|;|/|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b|\bx\b|\band\b|\bund\b)\s*",
+        artist, flags=_re.IGNORECASE,
+    )
+    out = []
+    for p in parts:
+        p = p.strip()
+        if p and p not in out:
+            out.append(p)
+    # The whole string counts too: some artists have "and" in their name.
+    if artist.strip() not in out:
+        out.append(artist.strip())
+    return out
+
+
+def _norm_artist_for_match(s):
+    """Strip punctuation and spacing, casefold, keep letters and digits in
+    ANY script. Lets us compare artists across providers that format the
+    same name differently (e.g. ``Daft Punk`` vs ``daft-punk`` vs
+    ``Daft Punk feat. Pharrell``).
+
+    The alphanumeric test has to be Unicode-aware. An ASCII-only filter
+    reduces every CJK name to the empty string, so ``初音ミク`` failed to
+    match even against itself — which silently disqualified every result
+    for Japanese, Korean and Chinese artists on the providers that filter
+    by artist, i.e. exactly the tracks that need a romanization."""
+    if not s:
+        return ""
+    return "".join(ch for ch in s.casefold() if ch.isalnum())
 
 
 def _artist_matches(expected, found):
@@ -267,6 +830,31 @@ def _is_generic_title(title):
     return False
 
 
+def _script_halves(text):
+    """Split a title that states its name twice, once per script.
+
+    ``トリノコシティ Torinoko City`` is one name written two ways, and a
+    provider indexes it under one or the other, never the concatenation.
+    Returns the runs when the text really is split that way, else ``[]``.
+    """
+    import re
+
+    if not text:
+        return []
+    runs = [r for r in re.split(r"\s+", text) if r]
+    if len(runs) < 2:
+        return []
+    cjk, latin = [], []
+    for run in runs:
+        if any(_is_non_latin_char(ch) for ch in run):
+            cjk.append(run)
+        else:
+            latin.append(run)
+    if not cjk or not latin:
+        return []
+    return [" ".join(cjk), " ".join(latin)]
+
+
 def _title_variants(title):
     """Return a deduplicated, order-preserving list of title strings to
     try when looking up lyrics. Catches the common YouTube Music shapes
@@ -288,6 +876,27 @@ def _title_variants(title):
             out.append(t)
 
     _add(title)
+
+    # Uploads from Nico/YouTube wrap credits in lenticular brackets
+    # anywhere in the title, not just at the end:
+    #   【初音ミク(40㍍)】 トリノコシティ Torinoko City【オリジナル】
+    # Nothing in there is the song's name, and leaving it in means every
+    # provider search misses. Strip the groups wherever they appear and
+    # offer what's left.
+    debracketed = re.sub(r"[【〔〖][^】〕〗]*[】〕〗]", " ", title)
+    debracketed = re.sub(r"\s+", " ", debracketed).strip()
+    if debracketed and debracketed != title:
+        _add(debracketed)
+        no_parens = re.sub(
+            r"\s*[\(（\[][^)）\]]*[\)）\]]\s*", " ", debracketed
+        )
+        no_parens = re.sub(r"\s+", " ", no_parens).strip()
+        _add(no_parens)
+        # These titles routinely carry the name twice, once in each
+        # script ("トリノコシティ Torinoko City"). Either half on its own is
+        # a better query than the pair.
+        for half in _script_halves(no_parens):
+            _add(half)
 
     # Split on the ``-`` separator that YT Music uses for translations.
     # Real songs that legitimately contain dashes ("U-Turn", "Brain-Stew")
@@ -315,56 +924,132 @@ def _paxsenix_to_lines(data):
     Schema:
         type     = "Syllable" (word-level), "Line" (line-level), or "None" (plain)
         content  = [{ timestamp, endtime, text: [{text, timestamp, endtime}, ...] }]
+
+    Background vocals reach us one of two ways depending on how the proxy
+    flattened Apple's TTML: as a nested ``background`` word list on the
+    line they answer, or as their own ``content`` entry flagged
+    ``background: true``. Both get folded onto the preceding lead line's
+    ``bg`` so the view can put them on the second line instead of
+    splicing them into the lead vocal.
     """
     if not isinstance(data, dict):
         return None
+
+    # The response carries the original Apple TTML alongside the flattened
+    # JSON, and the TTML is strictly richer: per-line transliterations and
+    # translations, background vocals as nested x-bg spans, and real
+    # inter-word spacing. The flattened `content` array drops all of that
+    # (its words carry no whitespace at all, so Japanese came out with a
+    # space between every syllable). Prefer the TTML and keep the JSON as
+    # the fallback for responses that don't include it.
+    ttml = data.get("ttmlContent")
+    if isinstance(ttml, str) and ttml.strip():
+        ttml_lines = _strip_leading_watermarks(_ttml_to_lines(ttml))
+        if ttml_lines:
+            synced = all(l.get("start") is not None for l in ttml_lines)
+            return {
+                "lines": ttml_lines,
+                "synced": synced,
+                "source": "Apple Music",
+            }
+
     kind = data.get("type")
     content = data.get("content") or []
     if not content:
         return None
+
+    def _words_to_parts(words):
+        """``[{text, timestamp, endtime}, ...]`` -> our parts list.
+
+        ``space_after`` comes from trailing whitespace on the raw word
+        when the payload carries it. This endpoint's words carry none at
+        all, so the fallback decides per boundary from the scripts on
+        either side — space-joining everything wedged a gap between every
+        Japanese syllable.
+        """
+        parts = []
+        saw_space = False
+        for w in words:
+            if not isinstance(w, dict):
+                continue
+            raw = w.get("text") or ""
+            wt = raw.strip()
+            if not wt:
+                continue
+            ws = w.get("timestamp")
+            we = w.get("endtime")
+            trailing = raw != raw.rstrip()
+            saw_space = saw_space or trailing
+            parts.append({
+                "start": float(ws) / 1000.0 if isinstance(ws, (int, float)) else None,
+                "end": float(we) / 1000.0 if isinstance(we, (int, float)) else None,
+                "text": wt,
+                "space_after": trailing,
+            })
+        if not saw_space:
+            for i, part in enumerate(parts):
+                part["space_after"] = (
+                    i < len(parts) - 1
+                    and _space_between(part["text"], parts[i + 1]["text"])
+                )
+        return parts
+
+    def _join(parts):
+        out = []
+        for part in parts:
+            out.append(part["text"])
+            if part.get("space_after"):
+                out.append(" ")
+        return "".join(out).strip()
 
     lines = []
     for entry in content:
         if not isinstance(entry, dict):
             continue
         words = entry.get("text") or []
-        # Each word entry: {text, timestamp, endtime}
-        text_join = " ".join(
-            (w.get("text") or "").strip()
-            for w in words
-            if isinstance(w, dict) and (w.get("text") or "").strip()
-        ).strip()
+        parts = _words_to_parts(words)
+        text_join = _join(parts)
         if not text_join:
             continue
         start_ms = entry.get("timestamp")
         start = float(start_ms) / 1000.0 if isinstance(start_ms, (int, float)) else None
-        line = {"start": start, "text": text_join}
         end_ms = entry.get("endtime")
-        if isinstance(end_ms, (int, float)):
-            line["end"] = float(end_ms) / 1000.0
+        end = float(end_ms) / 1000.0 if isinstance(end_ms, (int, float)) else None
+
+        line = {"start": start, "text": text_join}
+        if end is not None:
+            line["end"] = end
+        if entry.get("oppositeTurn"):
+            line["align"] = "end"
 
         # Attach word-level parts only when each word has its own timing
         # (i.e. type == "Syllable"). Skipped for "Line" / "None".
-        if kind == "Syllable":
-            parts = []
-            for w in words:
-                if not isinstance(w, dict):
-                    continue
-                wt = (w.get("text") or "").strip()
-                if not wt:
-                    continue
-                ws = w.get("timestamp")
-                we = w.get("endtime")
-                if isinstance(ws, (int, float)):
-                    parts.append({
-                        "start": float(ws) / 1000.0,
-                        "end": float(we) / 1000.0 if isinstance(we, (int, float)) else None,
-                        "text": wt,
-                    })
-            if parts:
-                line["parts"] = parts
+        if kind == "Syllable" and any(p.get("start") is not None for p in parts):
+            line["parts"] = parts
+
+        # ``background`` is a bool flag on the lead line; the words live
+        # in ``backgroundText`` beside it.
+        bg_words = entry.get("backgroundText")
+        if isinstance(bg_words, list) and bg_words:
+            bg_parts = _words_to_parts(bg_words)
+            bg_text = _join(bg_parts)
+            if bg_text:
+                line["bg_text"] = bg_text
+                if any(p.get("start") is not None for p in bg_parts):
+                    line["bg"] = bg_parts
+
+        for src_key, dst_key in (
+            ("translation", "translation"),
+            ("romanization", "romanization"),
+            ("transliteration", "romanization"),
+        ):
+            value = entry.get(src_key)
+            if isinstance(value, str) and value.strip() and value.strip() != text_join:
+                line.setdefault(dst_key, value.strip())
+
         lines.append(line)
 
+    lines = _strip_leading_watermarks(lines)
     if not lines:
         return None
     synced = all(l.get("start") is not None for l in lines)
@@ -380,6 +1065,33 @@ def _paxsenix_to_lines(data):
         "synced": synced,
         "source": "Apple Music",
     }
+
+
+# Store watermarks Apple prepends to some tracks. Matched only against
+# the opening lines, so a lyric that happens to mention buying something
+# mid-song is untouched.
+_LYRIC_WATERMARKS = (
+    "purchase your tracks",
+    "lyrics licensed",
+    "lyrics provided by",
+    "unauthorized reproduction",
+)
+
+
+def _strip_leading_watermarks(lines, limit=2):
+    """Drop a store watermark from the top of a lyric.
+
+    Apple serves some tracks with "(Purchase your tracks today)" as the
+    first line. It carries a timestamp like any other line, so it renders
+    as though the song opens with it."""
+    out = list(lines)
+    while out and limit > 0:
+        text = (out[0].get("text") or "").strip().lower().strip("()[]")
+        if not any(mark in text for mark in _LYRIC_WATERMARKS):
+            break
+        out.pop(0)
+        limit -= 1
+    return out
 
 
 def _strip_leading_credits(lines):
@@ -449,13 +1161,219 @@ def _parse_lrc_text(lrc_string):
     return out
 
 
+def _attach_secondary_lrc(lines, lrc_string, key, tolerance=0.45):
+    """Merge a parallel LRC track into ``lines`` under ``key``.
+
+    NetEase ships a track's translation (``tlyric``) and romanization
+    (``romalrc``) as separate LRC blobs stamped against the same clock as
+    the main lyric, but with their own line counts — credit lines and
+    empty interludes are often present in one and not the other. Index
+    position is therefore useless; we match on start time, taking the
+    nearest secondary line within ``tolerance`` seconds so a source that
+    rounds its stamps differently still lines up.
+
+    Returns the number of lines that got a value.
+    """
+    import bisect
+
+    if not lines or not lrc_string:
+        return 0
+    secondary = [
+        l for l in _parse_lrc_text(lrc_string)
+        if (l.get("text") or "").strip()
+    ]
+    if not secondary:
+        return 0
+
+    starts = [l["start"] for l in secondary]
+    matched = 0
+    for line in lines:
+        start = line.get("start")
+        if start is None:
+            continue
+        i = bisect.bisect_left(starts, start)
+        best = None
+        best_delta = tolerance
+        for j in (i - 1, i, i + 1):
+            if not (0 <= j < len(secondary)):
+                continue
+            delta = abs(starts[j] - start)
+            if delta <= best_delta:
+                best = secondary[j]
+                best_delta = delta
+        if best is None:
+            continue
+        text = best["text"].strip()
+        # A "translation" identical to the original is padding, not a
+        # translation — NetEase does this for lines that are already in
+        # the target language.
+        if not text or text == (line.get("text") or "").strip():
+            continue
+        line[key] = text
+        matched += 1
+    return matched
+
+
+def _ttml_local(tag):
+    """Local name of a possibly namespaced ElementTree tag."""
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def _ttml_attr(elem, local):
+    """Look up an attribute by local name, ignoring its namespace. TTML
+    from Apple mixes ``ttm:``, ``itunes:`` and bare attributes, and the
+    namespace URIs differ between the Apple, BetterLyrics and BiniLyrics
+    deployments."""
+    for k, v in elem.attrib.items():
+        if k == local or (k.rsplit("}", 1)[-1] == local):
+            return v
+    return None
+
+
+def _ttml_deep_text(elem):
+    """All text under ``elem``, whitespace-collapsed."""
+    return " ".join("".join(elem.itertext()).split())
+
+
+def _ttml_has_space_after(tail):
+    """True when the source put whitespace right after a span. Japanese
+    and Chinese TTML has none between syllables, and joining the parts
+    with spaces anyway (as the renderer used to) inserts gaps that aren't
+    in the lyric."""
+    return bool(tail) and tail[:1].isspace()
+
+
+def _ttml_parse_line(elem):
+    """Walk one TTML element's children into ``(parts, text, bg_elems,
+    translation, romanization)``.
+
+    Works on a ``<p>`` (a lyric line) and, recursively, on an
+    ``x-bg`` span (a background-vocal group), which has the same
+    word-span shape inside it.
+
+    Roles are checked before timing: a background or translation span
+    carries ``begin``/``end`` too and would otherwise be read as just
+    another word of the lead vocal. Tail text is appended whichever
+    branch the child took, so removing a background span doesn't swallow
+    the space that followed it.
+    """
+    parts = []
+    chunks = []
+    bg_elems = []
+    translation = None
+    romanization = None
+
+    if elem.text:
+        chunks.append(elem.text)
+    for child in list(elem):
+        local = _ttml_local(child.tag)
+        role = (_ttml_attr(child, "role") or "") if local == "span" else ""
+        if role == "x-bg":
+            bg_elems.append(child)
+        elif role.startswith("x-translation"):
+            translation = _ttml_deep_text(child)
+        elif role.startswith("x-roman") or role.startswith("x-translit"):
+            romanization = _ttml_deep_text(child)
+        elif local == "span":
+            word = _ttml_deep_text(child)
+            if word:
+                parts.append({
+                    "start": _ttml_time_to_seconds(child.get("begin")),
+                    "end": _ttml_time_to_seconds(child.get("end")),
+                    "text": word,
+                    "space_after": _ttml_has_space_after(child.tail),
+                })
+                chunks.append(word)
+        elif child.text:
+            chunks.append(child.text)
+        if child.tail:
+            chunks.append(child.tail)
+
+    text = " ".join(("".join(chunks)).split())
+    return parts, text, bg_elems, translation, romanization
+
+
+def _ttml_side_texts(root):
+    """Pull Apple's per-line translations and transliterations out of the
+    ``<iTunesMetadata>`` header block.
+
+    Shape::
+
+        <translations><translation xml:lang="es">
+            <text for="L1">Hasta el amanecer</text>
+        …
+        <transliterations><transliteration xml:lang="ja-Latn">
+            <text for="L1">yoake made</text>
+
+    ``for`` refers to the ``itunes:key`` on the matching ``<p>``. Returns
+    two dicts keyed by that value. Only the first block of each kind is
+    read — a track with several translation languages gets whichever one
+    the source listed first, which is the one Apple's own client shows by
+    default.
+    """
+    translations, transliterations = {}, {}
+    for elem in root.iter():
+        local = _ttml_local(elem.tag)
+        if local == "translation":
+            target = translations
+        elif local == "transliteration":
+            target = transliterations
+        else:
+            continue
+        if target:
+            continue  # Already filled from an earlier block.
+        for text_el in elem.iter():
+            if _ttml_local(text_el.tag) != "text":
+                continue
+            key = _ttml_attr(text_el, "for")
+            value = _ttml_deep_text(text_el)
+            if key and value:
+                target[key] = value
+    return translations, transliterations
+
+
+def _ttml_primary_agent(root):
+    """The ``xml:id`` of the first voice declared in the TTML head.
+
+    Apple tags every line with ``ttm:agent`` and declares the agents up
+    front::
+
+        <ttm:agent type="person" xml:id="v1"/>
+        <ttm:agent type="person" xml:id="v2"/>
+        <ttm:agent type="group"  xml:id="v3"/>
+
+    Lines belonging to the first agent are the ones Apple's own client
+    keeps on the leading edge; everything else — the second singer and
+    the group parts they sing together — goes to the opposite edge. The
+    proxy's flattened JSON encodes exactly this as ``oppositeTurn``, so
+    reading the first declaration is enough to reproduce it.
+    """
+    for elem in root.iter():
+        if _ttml_local(elem.tag) == "agent":
+            agent_id = _ttml_attr(elem, "id")
+            if agent_id:
+                return agent_id
+    return None
+
+
 def _ttml_to_lines(ttml_string):
-    """Turn a BetterLyrics TTML payload into our normalized line list.
+    """Turn a TTML payload (BetterLyrics, BiniLyrics, Apple Music) into
+    our normalized line list.
 
     Each line carries a start time and the full text. When the TTML has
     word-level ``<span>`` children with their own ``begin``/``end``, we
     also attach a ``parts`` list of ``{start, end, text}`` so the UI can
     do karaoke-style per-word highlighting.
+
+    Secondary content for the lyric view's second line comes from three
+    places, all optional:
+
+    - ``<span ttm:role="x-bg">`` — background vocals, nested inside the
+      line they answer. Their own word spans are kept in ``bg`` so the
+      second line can karaoke along with the lead.
+    - ``ttm:role="x-translation"`` / ``x-roman`` inline spans.
+    - Apple's ``<iTunesMetadata>`` translation / transliteration blocks,
+      matched to a line by its ``itunes:key``.
     """
     import xml.etree.ElementTree as ET
 
@@ -465,36 +1383,19 @@ def _ttml_to_lines(ttml_string):
         print(f"[LYRICS] TTML parse failed: {e}")
         return []
 
-    def _local(tag):
-        return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+    meta_translations, meta_transliterations = _ttml_side_texts(root)
+    primary_agent = _ttml_primary_agent(root)
 
     lines = []
     for elem in root.iter():
-        if _local(elem.tag) != "p":
+        if _ttml_local(elem.tag) != "p":
             continue
         line_start = _ttml_time_to_seconds(elem.get("begin"))
         line_end = _ttml_time_to_seconds(elem.get("end"))
 
-        # Walk direct children to preserve order. Each <span> with begin/end
-        # is a word. Any text outside spans is treated as filler.
-        parts = []
-        text_chunks = []
-        if elem.text:
-            text_chunks.append(elem.text)
-        for child in list(elem):
-            if _local(child.tag) == "span":
-                word = (child.text or "").strip()
-                if word:
-                    w_start = _ttml_time_to_seconds(child.get("begin"))
-                    w_end = _ttml_time_to_seconds(child.get("end"))
-                    parts.append({"start": w_start, "end": w_end, "text": word})
-                    text_chunks.append(word)
-            elif child.text:
-                text_chunks.append(child.text)
-            if child.tail:
-                text_chunks.append(child.tail)
-
-        text = " ".join(("".join(text_chunks)).split())
+        parts, text, bg_elems, inline_translation, inline_romanization = (
+            _ttml_parse_line(elem)
+        )
         if not text:
             continue
 
@@ -505,6 +1406,44 @@ def _ttml_to_lines(ttml_string):
         # the UI falls back to line-level rendering.
         if any(p.get("start") is not None for p in parts):
             line["parts"] = parts
+
+        if bg_elems:
+            bg_parts, bg_texts = [], []
+            for bg in bg_elems:
+                sub_parts, sub_text, _sub_bg, _t, _r = _ttml_parse_line(bg)
+                if not sub_text:
+                    continue
+                bg_texts.append(sub_text)
+                if sub_parts:
+                    bg_parts.extend(sub_parts)
+                else:
+                    # A background group with no inner word spans still has
+                    # its own begin/end; keep it as one timed chunk.
+                    bg_parts.append({
+                        "start": _ttml_time_to_seconds(bg.get("begin")),
+                        "end": _ttml_time_to_seconds(bg.get("end")),
+                        "text": sub_text,
+                        "space_after": True,
+                    })
+            if bg_texts:
+                line["bg_text"] = " ".join(bg_texts)
+                if any(p.get("start") is not None for p in bg_parts):
+                    line["bg"] = bg_parts
+
+        # Duets: mark the lines that belong to a voice other than the
+        # first so the view can set them against the opposite edge.
+        agent = _ttml_attr(elem, "agent")
+        if primary_agent and agent and agent != primary_agent:
+            line["align"] = "end"
+
+        key = _ttml_attr(elem, "key")
+        translation = inline_translation or meta_translations.get(key)
+        romanization = inline_romanization or meta_transliterations.get(key)
+        if translation and translation != text:
+            line["translation"] = translation
+        if romanization and romanization != text:
+            line["romanization"] = romanization
+
         lines.append(line)
     return lines
 
@@ -1527,16 +2466,22 @@ class MusicClient:
             print(f"Error getting watch playlist: {e}")
             return {}
 
-    # Provider catalog — display name -> (fetcher, takes_video_id_only).
-    # Listed in the order we try them in the chain.
-    _LYRIC_PROVIDERS = [
-        ("Apple Music", "_fetch_lyrics_paxsenix", False),
-        ("BetterLyrics",           "_fetch_lyrics_betterlyrics", False),
-        ("BiniLyrics",             "_fetch_lyrics_binilyrics", False),
-        ("NetEase",                "_fetch_lyrics_netease", False),
-        ("LRCLIB",                 "_fetch_lyrics_lrclib", False),
-        ("YouTube Music",          "_fetch_lyrics_ytm", True),
-    ]
+    # Provider catalog — display name -> (fetcher, takes_video_id_only,
+    # native_rank). ``native_rank`` is the best result shape the provider
+    # can return (3=word-level, 2=line-synced, 1=plain), which lets the
+    # chain skip a provider that can't beat what it already holds.
+    #
+    # The *order* the chain tries them in is the user's search queue, from
+    # player.lyrics_prefs — this dict only says what each one is capable
+    # of. Keep the names in sync with lyrics_prefs.DEFAULT_PROVIDER_ORDER.
+    _LYRIC_PROVIDERS = {
+        "Apple Music":   ("_fetch_lyrics_paxsenix",     False, 3),
+        "BetterLyrics":  ("_fetch_lyrics_betterlyrics", False, 3),
+        "BiniLyrics":    ("_fetch_lyrics_binilyrics",   False, 3),
+        "NetEase":       ("_fetch_lyrics_netease",      False, 2),
+        "LRCLIB":        ("_fetch_lyrics_lrclib",       False, 2),
+        "YouTube Music": ("_fetch_lyrics_ytm",          True,  1),
+    }
 
     @property
     def _lyrics_cache(self):
@@ -1566,7 +2511,13 @@ class MusicClient:
         if not video_id:
             return None
 
-        cached = self._lyrics_cache.get_result(video_id)
+        from player import lyrics_prefs
+
+        cached = self._lyrics_cache.get_result(
+            video_id,
+            order=lyrics_prefs.provider_order(),
+            accept_rank=self._lyrics_accept_rank(),
+        )
         if cached:
             return cached
 
@@ -1591,6 +2542,10 @@ class MusicClient:
         result the next :meth:`get_lyrics` call should return for this
         track. Pass ``None`` to clear the preference."""
         self._lyrics_cache.set_preferred(video_id, source)
+
+    def clear_lyrics_preference(self, video_id):
+        """Forget a hand-picked source for this track."""
+        self._lyrics_cache.clear_user_choice(video_id)
 
     def fetch_lyrics_alternatives_async(
         self, video_id, title, artist, duration, on_result,
@@ -1631,13 +2586,16 @@ class MusicClient:
                     # specific string (e.g. "BetterLyrics").
                     res = dict(res)
                     res["source"] = source_name
+                    res = self.augment_result(res, title, artist, duration)
                     self._lyrics_cache.add_result(video_id, res)
             except Exception as e:
                 print(f"[LYRICS] alt-fetch {source_name} failed: {e}")
                 res = None
             on_result(source_name, res)
 
-        for source_name, fetcher_attr, takes_vid_only in self._LYRIC_PROVIDERS:
+        for source_name, (fetcher_attr, takes_vid_only, _rank) in (
+            self._LYRIC_PROVIDERS.items()
+        ):
             if source_name in cached_sources:
                 continue
             if not self._lyrics_provider_ready(fetcher_attr):
@@ -1676,11 +2634,236 @@ class MusicClient:
             cooldowns[key] = deadline
             print(f"[LYRICS] backing off {key} for {seconds}s ({reason})")
 
+    # ── Browsing a provider's other matches ───────────────────────────
+    #
+    # The chain picks one hit per provider and the gates try hard to make
+    # it the right one, but catalogs carry re-records, edits and
+    # same-title songs that no heuristic separates reliably. Rather than
+    # keep tightening rules, let the listener see what a provider
+    # actually returned and choose.
+    _MATCH_BROWSERS = ("Apple Music", "NetEase", "LRCLIB")
+
+    def provider_supports_matches(self, source_name):
+        return source_name in self._MATCH_BROWSERS
+
+    def fetch_provider_matches(self, source_name, title, artist, duration,
+                               limit=8):
+        """Every usable match one provider has for this track.
+
+        Returns ``[{"label", "detail", "result"}, ...]``, best guess
+        first. Deliberately looser than the chain's gate — the point is
+        to show what's there, including the near-misses the gate threw
+        away, since a listener can tell a live take from a studio one at
+        a glance."""
+        handlers = {
+            "Apple Music": self._matches_apple,
+            "NetEase": self._matches_netease,
+            "LRCLIB": self._matches_lrclib,
+        }
+        handler = handlers.get(source_name)
+        if handler is None:
+            return []
+        try:
+            return handler(title, artist, duration, limit)
+        except Exception as e:
+            print(f"[LYRICS] match list for {source_name} failed: {e}")
+            return []
+
+    def search_lyrics_manually(self, query, artist=None, duration=None,
+                               per_provider=4):
+        """Search every browsable provider for a query the user typed.
+
+        Titles that carry their credits inline ("【初音ミク(40㍍)】 トリノコシティ
+        Torinoko City【オリジナル】") defeat automatic matching, and no
+        amount of cleaning catches every shape. Letting the listener type
+        the name is the reliable answer."""
+        from player import lyrics_prefs
+
+        enabled = lyrics_prefs.provider_order()
+        out = []
+        for name in self._MATCH_BROWSERS:
+            if name not in enabled:
+                continue
+            try:
+                for match in self.fetch_provider_matches(
+                    name, query, artist, duration, per_provider,
+                ):
+                    match = dict(match)
+                    match["source"] = name
+                    out.append(match)
+            except Exception as e:
+                print(f"[LYRICS] manual search on {name} failed: {e}")
+        return out
+
+    def _matches_apple(self, title, artist, duration, limit):
+        # Both catalog searches, not just the public one. They don't agree:
+        # iTunes Search has no "Why's this dealer?" at all while amp-api
+        # has it at the exact duration, so browsing only iTunes listed two
+        # unrelated Niko B songs and hid the correct match. The chain
+        # already falls back this way; the browser has to as well or it
+        # shows less than the automatic pick found.
+        seen, cands = set(), []
+
+        def _collect(items):
+            for cd in items:
+                if not cd.get("id") or cd["id"] in seen:
+                    continue
+                seen.add(cd["id"])
+                cands.append(cd)
+
+        for variant in (_title_variants(title) or [title]):
+            _collect(self._apple_music_candidates_itunes(variant, artist))
+            if len(cands) >= limit * 2:
+                break
+
+        token = self._apple_music_token(force_new=False)
+        if token:
+            for variant in (_title_variants(title) or [title]):
+                songs = self._apple_music_search(token, variant, artist) or []
+                _collect([
+                    {
+                        "id": sg.get("id"),
+                        "name": (sg.get("attributes") or {}).get("name"),
+                        "artist": (sg.get("attributes") or {}).get("artistName"),
+                        "duration": ((sg.get("attributes") or {}).get(
+                            "durationInMillis") or 0) // 1000,
+                    }
+                    for sg in songs
+                ])
+                if len(cands) >= limit * 3:
+                    break
+        cands = _rank_matches(cands, title, artist, duration,
+                              lambda c: c.get("name"),
+                              lambda c: c.get("artist"),
+                              lambda c: c.get("duration"))
+        out = []
+        for cd in cands:
+            data = self._paxsenix_fetch(cd.get("id"))
+            res = _paxsenix_to_lines(data) if data else None
+            if not res or not res.get("lines"):
+                continue
+            res = dict(res)
+            res["source"] = "Apple Music"
+            out.append({
+                "label": cd.get("name") or "Unknown",
+                "detail": _match_detail(cd.get("artist"), cd.get("duration")),
+                "result": res,
+            })
+            if len(out) >= limit:
+                break
+        return out
+
+    def _matches_netease(self, title, artist, duration, limit):
+        seen, songs = set(), []
+        for variant in (_title_variants(title) or [title]):
+            for query in (
+                variant + (" " + artist if artist else ""), variant,
+            ):
+                for song in self._netease_search(query):
+                    if song.get("id") in seen:
+                        continue
+                    seen.add(song["id"])
+                    songs.append(song)
+            if len(songs) >= limit * 2:
+                break
+        songs = _rank_matches(
+            songs, title, artist, duration,
+            lambda s: s.get("name"),
+            lambda s: " ".join((a.get("name") or "") for a in (s.get("ar") or [])),
+            lambda s: (s.get("dt") or 0) // 1000,
+        )
+        out = []
+        for song in songs:
+            res = self._netease_result(song.get("id"))
+            if not res:
+                continue
+            out.append({
+                "label": song.get("name") or "Unknown",
+                "detail": _match_detail(
+                    " & ".join((a.get("name") or "") for a in (song.get("ar") or [])),
+                    (song.get("dt") or 0) // 1000,
+                ),
+                "result": res,
+            })
+            if len(out) >= limit:
+                break
+        return out
+
+    def _matches_lrclib(self, title, artist, duration, limit):
+        import urllib.parse
+        import urllib.request
+        import json as _json
+
+        seen, hits = set(), []
+        for variant in (_title_variants(title) or [title]):
+            params = {"track_name": variant}
+            if artist:
+                params["artist_name"] = artist
+            url = "https://lrclib.net/api/search?" + urllib.parse.urlencode(params)
+            try:
+                req = urllib.request.Request(
+                    url, headers={"User-Agent": "Mixtapes/1.0"},
+                )
+                with urllib.request.urlopen(req, timeout=6) as resp:
+                    data = _json.loads(resp.read())
+            except Exception:
+                continue
+            for hit in data if isinstance(data, list) else []:
+                key = hit.get("id")
+                if key in seen:
+                    continue
+                seen.add(key)
+                hits.append(hit)
+            if len(hits) >= limit * 2:
+                break
+
+        hits = _rank_matches(hits, title, artist, duration,
+                             lambda h: h.get("trackName"),
+                             lambda h: h.get("artistName"),
+                             lambda h: h.get("duration"))
+        out = []
+        for hit in hits:
+            synced = hit.get("syncedLyrics") or ""
+            plain = hit.get("plainLyrics") or ""
+            if synced:
+                lines = _strip_leading_credits(_parse_lrc_text(synced))
+                is_synced = bool(lines)
+            else:
+                lines = [{"start": None, "text": t}
+                         for t in plain.splitlines() if t.strip()]
+                is_synced = False
+            if not lines:
+                continue
+            out.append({
+                "label": hit.get("trackName") or "Unknown",
+                "detail": _match_detail(hit.get("artistName"), hit.get("duration")),
+                "result": {"lines": lines, "synced": is_synced,
+                           "source": "LRCLIB"},
+            })
+            if len(out) >= limit:
+                break
+        return out
+
+    def _lyrics_accept_rank(self):
+        """The result quality that ends the search.
+
+        ``strict`` takes the first provider in the queue that returns
+        anything at all (rank 1). ``quality`` (the default) treats a
+        plain unsynced hit as a fallback only and keeps walking the queue
+        looking for something line-synced, so a provider high in your
+        order still wins whenever it actually has timed lyrics."""
+        from player import lyrics_prefs
+
+        return 1 if lyrics_prefs.match_mode() == lyrics_prefs.MATCH_STRICT else 2
+
     def _run_lyrics_chain(self, video_id, title, artist, duration):
-        """Walk the provider chain in priority order, returning the
-        richest result we can find. Word-level providers go first;
-        line-synced next; plain text last. ``rank`` encodes the order:
-        3=word, 2=line-synced, 1=plain.
+        """Walk the user's provider queue and return the result it
+        settles on, or ``None``.
+
+        The queue comes from ``player.lyrics_prefs`` (Settings → Lyrics);
+        disabled providers are already filtered out of it. Each provider
+        declares the richest shape it can produce, so one that can't beat
+        the result already in hand is skipped without a network call.
 
         YouTube Music titles for international tracks frequently arrive
         as ``Original - Translation`` (e.g. ``イガク - Medicine``) or
@@ -1688,37 +2871,172 @@ class MusicClient:
         the canonical title in lyrics DBs. We try a few normalized
         variants so a single source dropout doesn't lose us the song.
         """
+        from player import lyrics_prefs
+
         title_variants = _title_variants(title) if title else []
+        accept_rank = self._lyrics_accept_rank()
 
         result = None
         best_rank = 0
 
-        for fetcher, args_list, target_rank in [
-            (self._fetch_lyrics_paxsenix,
-             [(v, artist, duration) for v in title_variants], 3),
-            (self._fetch_lyrics_betterlyrics,
-             [(v, artist, duration) for v in title_variants], 3),
-            (self._fetch_lyrics_binilyrics,
-             [(v, artist, duration) for v in title_variants], 3),
-            (self._fetch_lyrics_netease,
-             [(v, artist, duration) for v in title_variants], 2),
-            (self._fetch_lyrics_lrclib,
-             [(v, artist, duration) for v in title_variants], 2),
-            (self._fetch_lyrics_ytm, [(video_id,)], 1),
-        ]:
-            if best_rank >= target_rank:
+        for name in lyrics_prefs.provider_order():
+            info = self._LYRIC_PROVIDERS.get(name)
+            if not info:
                 continue
-            if not self._lyrics_provider_ready(fetcher.__name__):
+            fetcher_attr, takes_vid_only, native_rank = info
+            # This provider's ceiling is no better than what we hold.
+            if best_rank >= native_rank:
                 continue
+            if not self._lyrics_provider_ready(fetcher_attr):
+                continue
+            fetcher = getattr(self, fetcher_attr, None)
+            if fetcher is None:
+                continue
+
+            if takes_vid_only:
+                args_list = [(video_id,)]
+            else:
+                args_list = [(v, artist, duration) for v in title_variants]
+
             for args in args_list:
-                res = fetcher(*args)
+                try:
+                    res = fetcher(*args)
+                except Exception as e:
+                    print(f"[LYRICS] {name} raised: {e}")
+                    res = None
                 rank = _result_rank(res)
                 if rank > best_rank:
                     result = res
                     best_rank = rank
-                if best_rank >= target_rank:
+                if best_rank >= accept_rank:
                     break
+            if best_rank >= accept_rank:
+                break
 
+        return self.augment_result(result, title, artist, duration)
+
+    def augment_result(self, result, title, artist, duration):
+        """Give a result its second line.
+
+        Every path that can put lyrics on screen goes through this, not
+        just the chain: switching provider in the picker, or choosing one
+        of a provider's other matches, has to produce the same second
+        line the automatic pick would have. Doing it only in the chain
+        meant manually selecting LRCLIB dropped the romanization."""
+        result = self._augment_romanization(result, title, artist, duration)
+        return _fill_romanization_gaps(result)
+
+    # Providers that carry a romanization of their own, richest first.
+    # Used only to fill in a second line when the provider that won the
+    # lyrics doesn't ship one.
+    _ROMANIZATION_SOURCES = ("NetEase", "Apple Music")
+
+    def _augment_romanization(self, result, title, artist, duration):
+        """Fill in a romanization from a second provider when the one
+        that won the lyrics has none.
+
+        The provider with the best timing often isn't the one with the
+        reading: LRCLIB has the correct synced 千本桜 and no romaji, while
+        NetEase has the romaji. Merging is by lyric text, so a different
+        master or a different line split can't mispair them.
+
+        Only runs when the user's second line is actually set to show a
+        romanization, and only for non-Latin lyrics.
+        """
+        from player import lyrics_prefs
+
+        if not result or not result.get("lines"):
+            return result
+        if lyrics_prefs.second_line_mode() not in ("auto", "romanization"):
+            return result
+        lines = result["lines"]
+        if any(l.get("romanization") for l in lines):
+            return result
+        # Nothing to romanize if the lyrics are already in Latin script.
+        sample = " ".join((l.get("text") or "") for l in lines[:12])
+        if not any(_is_non_latin_char(ch) for ch in sample):
+            return result
+
+        # Anything we can transliterate ourselves is done first: it's
+        # exact, instant, needs no network, and covers every track rather
+        # than only the ones some provider happened to romanize.
+        matched = 0
+        for line in lines:
+            roman = _romanize_locally(line.get("text"))
+            if roman and roman != line.get("text"):
+                line["romanization"] = roman
+                matched += 1
+        if matched:
+            print(f"[LYRICS] romanization: {matched}/{len(lines)} lines "
+                  f"(generated locally)")
+            return result
+
+        # What's left needs a reading, not a transliteration. If it isn't
+        # one of those scripts there is nothing to ask a provider for, so
+        # don't spend a round trip per title variant finding that out.
+        if not any(_needs_provider_romanization(ch) for ch in sample):
+            return result
+
+        enabled = lyrics_prefs.provider_order()
+        result = self._augment_from_providers(result, title, artist, duration,
+                                              enabled)
+        return _fill_romanization_gaps(result)
+
+    def _augment_from_providers(self, result, title, artist, duration, enabled):
+        lines = result["lines"]
+        for name in self._ROMANIZATION_SOURCES:
+            if name == result.get("source") or name not in enabled:
+                continue
+            info = self._LYRIC_PROVIDERS.get(name)
+            if not info:
+                continue
+            fetcher_attr, takes_vid_only, _rank = info
+            if takes_vid_only or not self._lyrics_provider_ready(fetcher_attr):
+                continue
+            fetcher = getattr(self, fetcher_attr, None)
+            if fetcher is None:
+                continue
+            # The artist name we hold is whatever YouTube Music credits,
+            # and it often isn't how the romanization source spells it —
+            # NetEase finds nothing for "千本桜 Hatsune Miku" but everything
+            # for "千本桜". Searching without the artist as a second pass is
+            # safe here in a way it wouldn't be for the lyrics themselves:
+            # the merge below only copies a reading onto a line whose text
+            # matches exactly, so a wrong song contributes nothing (merging
+            # Lemon's romaji onto 千本桜 matches 0 lines).
+            attempts = []
+            for variant in (_title_variants(title) if title else []):
+                attempts.append((variant, artist))
+            for variant in (_title_variants(title) if title else []):
+                attempts.append((variant, None))
+
+            memo_key = (name, title, artist, duration)
+            if getattr(self, "_roma_memo_key", None) == memo_key:
+                cached_lines = self._roma_memo_lines
+                if cached_lines and _merge_romanization_by_text(lines, cached_lines):
+                    return result
+                continue
+
+            for variant, search_artist in attempts:
+                try:
+                    if fetcher_attr == "_fetch_lyrics_netease":
+                        other = fetcher(
+                            variant, search_artist, duration, strict=False,
+                        )
+                    else:
+                        other = fetcher(variant, search_artist, duration)
+                except Exception as e:
+                    print(f"[LYRICS] romanization via {name} failed: {e}")
+                    break
+                if not other or not other.get("lines"):
+                    continue
+                self._roma_memo_key = memo_key
+                self._roma_memo_lines = other["lines"]
+                n = _merge_romanization_by_text(lines, other["lines"])
+                if n:
+                    print(f"[LYRICS] romanization: {n}/{len(lines)} lines "
+                          f"from {name}")
+                    return result
         return result
 
     def _fetch_lyrics_binilyrics(self, title, artist, duration):
@@ -1776,6 +3094,25 @@ class MusicClient:
             elif _is_generic_title(title):
                 return None
 
+        # Same recording gate as Apple Music: this endpoint's search is
+        # fuzzy, and the score below rewards word-level timing, so an
+        # unrelated hit that happens to have it would win outright.
+        artist_list = [a for a in _split_artists(artist) if a]
+        gated = [
+            r for r in results
+            if _candidate_matches(
+                title, artist_list, duration,
+                r.get("track_name") or r.get("name"),
+                r.get("artist_name") or "",
+                r.get("duration") or 0,
+            )
+        ]
+        if not gated:
+            return None
+        results = _prefer_artist_matches(
+            gated, artist_list, lambda r: r.get("artist_name")
+        )
+
         # Score: prefer results with word-level timing, then by duration
         # closeness (within 5 s).
         def _score(item):
@@ -1816,7 +3153,7 @@ class MusicClient:
             return {"lines": lines, "synced": False, "source": "BiniLyrics"}
         return {"lines": lines, "synced": synced, "source": "BiniLyrics"}
 
-    def _fetch_lyrics_netease(self, title, artist, duration):
+    def _fetch_lyrics_netease(self, title, artist, duration, strict=True):
         """Query NetEase Music (music.163.com) — by far the broadest
         source for Japanese, Vocaloid, K-pop, and other Asian tracks.
         Uses the unencrypted ``cloudsearch/pc`` search endpoint and the
@@ -1832,31 +3169,9 @@ class MusicClient:
             "Referer": "https://music.163.com/",
         }
 
-        # 1. Search for the track. The `cloudsearch/pc` variant returns
-        # unencrypted JSON (unlike the regular `cloudsearch/get/web` one).
+        # 1. Search for the track.
         query = title.strip() + (" " + artist.strip() if artist else "")
-        try:
-            search_url = (
-                "https://music.163.com/api/cloudsearch/pc?"
-                + urllib.parse.urlencode({
-                    "s": query, "type": 1, "limit": 8, "offset": 0,
-                })
-            )
-            req = urllib.request.Request(search_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                search_body = resp.read().decode("utf-8", errors="replace")
-        except Exception as e:
-            print(f"[LYRICS] NetEase search failed: {e}")
-            return None
-
-        try:
-            search_data = _json.loads(search_body)
-        except _json.JSONDecodeError:
-            return None
-        songs = (
-            (search_data.get("result") or {}).get("songs") or []
-            if isinstance(search_data, dict) else []
-        )
+        songs = self._netease_search(query)
         if not songs:
             return None
 
@@ -1880,7 +3195,36 @@ class MusicClient:
                 # Better to return nothing than wrong lyrics.
                 return None
 
-        # 3. Pick the best match: closest duration wins, with a small
+        # 3. Drop anything that isn't plausibly this recording. Scoring
+        # alone only ranks — it never rejects — so the closest-duration
+        # hit won even when it was a different song entirely (searching
+        # NetEase for the transliterated "Gruppa krovi" returned an
+        # unrelated English track and served its lyrics).
+        #
+        # ``strict=False`` is for the romanization pass, which validates
+        # what it gets by matching the original text line by line and so
+        # can afford a much wider search.
+        if strict:
+            artist_list = [a for a in _split_artists(artist) if a]
+            gated = [
+                song for song in songs
+                if _candidate_matches(
+                    title, artist_list, duration,
+                    song.get("name"),
+                    " ".join((a.get("name") or "") for a in (song.get("ar") or [])),
+                    (song.get("dt") or 0) // 1000,
+                )
+            ]
+            if not gated:
+                return None
+            songs = _prefer_artist_matches(
+                gated, artist_list,
+                lambda sg: " ".join(
+                    (a.get("name") or "") for a in (sg.get("ar") or [])
+                ),
+            )
+
+        # 4. Pick the best match: closest duration wins, with a small
         # bonus for exact-title match.
         title_low = title.lower().strip()
 
@@ -1901,40 +3245,79 @@ class MusicClient:
         if not song_id:
             return None
 
-        # 3. Fetch the lyric. NetEase returns an LRC string in
-        # `result.lrc.lyric` — exactly the format our LRC parser
-        # already understands.
+        # 3. Fetch the lyric for the winner.
+        return self._netease_result(song_id)
+
+    _NETEASE_HEADERS = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://music.163.com/",
+    }
+
+    def _netease_search(self, query, limit=8):
+        """Search NetEase. The ``cloudsearch/pc`` variant returns
+        unencrypted JSON, unlike the regular ``cloudsearch/get/web`` one."""
+        import urllib.parse
+        import urllib.request
+        import json as _json
+
+        if not query or not query.strip():
+            return []
+        url = "https://music.163.com/api/cloudsearch/pc?" + urllib.parse.urlencode(
+            {"s": query.strip(), "type": 1, "limit": limit, "offset": 0}
+        )
         try:
-            lyric_url = (
-                f"https://music.163.com/api/song/lyric?id={song_id}"
-                "&lv=1&kv=1&tv=-1"
-            )
-            req = urllib.request.Request(lyric_url, headers=headers)
+            req = urllib.request.Request(url, headers=self._NETEASE_HEADERS)
             with urllib.request.urlopen(req, timeout=5) as resp:
-                lyric_body = resp.read().decode("utf-8", errors="replace")
+                data = _json.loads(resp.read().decode("utf-8", errors="replace"))
+        except Exception as e:
+            print(f"[LYRICS] NetEase search failed: {e}")
+            return []
+        if not isinstance(data, dict):
+            return []
+        return (data.get("result") or {}).get("songs") or []
+
+    def _netease_result(self, song_id):
+        """Fetch one NetEase song's lyric as a normalized result.
+
+        ``tv=-1`` also returns the translation (``tlyric``) and ``rv=-1``
+        the romanization (``romalrc``), which is where the second line for
+        Japanese / Korean / Chinese tracks comes from. Both are optional
+        per track."""
+        import urllib.request
+        import json as _json
+
+        if not song_id:
+            return None
+        url = (f"https://music.163.com/api/song/lyric?id={song_id}"
+               "&lv=1&kv=1&tv=-1&rv=-1")
+        try:
+            req = urllib.request.Request(url, headers=self._NETEASE_HEADERS)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = _json.loads(resp.read().decode("utf-8", errors="replace"))
         except Exception as e:
             print(f"[LYRICS] NetEase lyric fetch failed: {e}")
             return None
-
-        try:
-            lyric_data = _json.loads(lyric_body)
-        except _json.JSONDecodeError:
+        if not isinstance(data, dict):
             return None
-        lrc = ((lyric_data.get("lrc") or {}).get("lyric") or "").strip() \
-            if isinstance(lyric_data, dict) else ""
+
+        lrc = ((data.get("lrc") or {}).get("lyric") or "").strip()
         if not lrc:
             return None
-
-        lines = _parse_lrc_text(lrc)
-        if not lines:
-            return None
         # NetEase usually pads the start with credit metadata (e.g.
-        # ``[00:00.000] 作词 : XXX``, ``[00:01.000] 作曲 : XXX``). Strip
-        # those leading credit lines so the lyrics column doesn't open on
-        # production notes instead of the actual song.
-        lines = _strip_leading_credits(lines)
+        # ``[00:00.000] 作词 : XXX``). Strip those leading credit lines so
+        # the column doesn't open on production notes.
+        lines = _strip_leading_credits(_parse_lrc_text(lrc))
         if not lines:
             return None
+
+        # Second-line tracks, timestamped against the same clock as the
+        # main lyric, so they survive the credit strip above.
+        _attach_secondary_lrc(
+            lines, (data.get("romalrc") or {}).get("lyric") or "", "romanization"
+        )
+        _attach_secondary_lrc(
+            lines, (data.get("tlyric") or {}).get("lyric") or "", "translation"
+        )
         synced = all(l.get("start") is not None for l in lines)
         return {"lines": lines, "synced": synced, "source": "NetEase"}
 
@@ -2040,18 +3423,30 @@ class MusicClient:
         re-serves Apple Music's lyric database. Apple Music ships
         syllable-level timing for an enormous chunk of Western pop, and
         Paxsenix's ``/apple-music/lyrics`` endpoint returns it as plain
-        JSON keyed by Apple Music's catalog song ID.
+        JSON (plus the original TTML) keyed by Apple's catalog song ID.
 
-        We have to scrape an Apple Music developer token from the Apple
-        Music web app (the same trick Metrolist uses) to do the catalog
-        search. The token is cached process-wide and re-fetched only
-        when Apple Music returns 401."""
-        import urllib.parse
-        import urllib.request
-        import urllib.error
-        import json as _json
+        Finding that ID is the only hard part, and there are two ways:
 
-        # 1. Apple Music search for matching tracks.
+        1. ``itunes.apple.com/search`` — public, documented, no auth, and
+           it returns the same catalog IDs the lyrics endpoint accepts.
+        2. ``amp-api.music.apple.com`` — needs a developer JWT scraped out
+           of the Apple Music web app's minified bundle.
+
+        We try the public one first. The scrape is a 3 MB bundle download
+        and a regex against obfuscated JavaScript that Apple can change at
+        any time — it had in fact silently broken, which disabled our best
+        word-level source entirely. It stays as a fallback because its
+        search ranks better for some queries, but it's no longer the only
+        way in.
+        """
+        candidates = self._apple_music_candidates_itunes(title, artist)
+        result = self._paxsenix_from_candidates(
+            candidates, title, artist, duration
+        )
+        if result is not None:
+            return result
+
+        # Fall back to the authenticated catalog search.
         token = self._apple_music_token(force_new=False)
         songs = self._apple_music_search(token, title, artist) if token else None
         if songs is None and token:
@@ -2060,53 +3455,96 @@ class MusicClient:
             songs = self._apple_music_search(token, title, artist) if token else None
         if not songs:
             return None
+        amp = [
+            {
+                "id": s.get("id"),
+                "name": (s.get("attributes") or {}).get("name"),
+                "artist": (s.get("attributes") or {}).get("artistName"),
+                "duration": ((s.get("attributes") or {}).get("durationInMillis") or 0) // 1000,
+            }
+            for s in songs
+        ]
+        # Don't re-fetch IDs the iTunes pass already tried and rejected.
+        seen = {str(c["id"]) for c in candidates}
+        amp = [c for c in amp if str(c.get("id")) not in seen]
+        return self._paxsenix_from_candidates(amp, title, artist, duration)
 
-        # 2. Hard-filter to artist matches. Generic-title tracks would
-        # otherwise pick up Apple Music's "Intro" by anyone with the
-        # closest duration.
+    def _apple_music_candidates_itunes(self, title, artist):
+        """Search the public iTunes catalog. Returns our normalized
+        candidate dicts; empty list on any failure."""
+        import urllib.parse
+        import urllib.request
+        import json as _json
+
+        term = (title or "").strip()
         if artist:
-            artist_filtered = [
-                s for s in songs
-                if _artist_matches(
-                    artist,
-                    (s.get("attributes") or {}).get("artistName") or "",
-                )
-            ]
-            if artist_filtered:
-                songs = artist_filtered
-            elif _is_generic_title(title):
-                return None
+            term += " " + artist.strip()
+        if not term:
+            return []
+        url = "https://itunes.apple.com/search?" + urllib.parse.urlencode({
+            "term": term, "entity": "song", "limit": 8,
+        })
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mixtapes/1.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = _json.loads(resp.read())
+        except Exception as e:
+            print(f"[LYRICS] iTunes search failed: {e}")
+            return []
+        out = []
+        for r in (data.get("results") or []):
+            if not r.get("trackId"):
+                continue
+            out.append({
+                "id": r.get("trackId"),
+                "name": r.get("trackName"),
+                "artist": r.get("artistName"),
+                "duration": (r.get("trackTimeMillis") or 0) // 1000,
+            })
+        return out
 
-        # 3. Score candidates by duration + name match.
-        title_low = title.lower().strip()
+    def _paxsenix_from_candidates(self, candidates, title, artist, duration):
+        """Gate a candidate list down to this recording, then fetch the
+        richest lyrics among what survives. ``None`` if nothing matches."""
+        if not candidates:
+            return None
 
-        def _score(song):
-            attr = song.get("attributes") or {}
+        # Gate BEFORE the richest-lyrics walk below: that loop keeps
+        # whichever candidate has the best lyric type, so a single
+        # unrelated song with word-level timing would beat the correct
+        # song's line-level timing and be served as if it were the track.
+        artist_list = [a for a in _split_artists(artist) if a]
+        gated = [
+            c for c in candidates
+            if _candidate_matches(
+                title, artist_list, duration,
+                c.get("name"), c.get("artist"), c.get("duration"),
+            )
+        ]
+        if not gated:
+            return None
+        gated = _prefer_artist_matches(gated, artist_list, lambda c: c.get("artist"))
+
+        # Closest duration first, then exact-title matches.
+        title_low = (title or "").lower().strip()
+
+        def _score(c):
             score = 0
-            d_ms = attr.get("durationInMillis") or 0
-            if duration and d_ms:
-                delta = abs(int(duration) - (d_ms // 1000))
-                if delta <= 2:
-                    score += 100
-                elif delta <= 5:
-                    score += 50
-                elif delta <= 10:
-                    score += 10
-                else:
-                    score -= 50
-            name_low = (attr.get("name") or "").lower()
-            if title_low and (title_low == name_low):
+            if duration and c.get("duration"):
+                delta = abs(int(duration) - int(c["duration"]))
+                score += 100 if delta <= 2 else 50 if delta <= 5 else 10
+            name_low = (c.get("name") or "").lower()
+            if title_low and title_low == name_low:
                 score += 80
             elif title_low and (title_low in name_low or name_low in title_low):
                 score += 40
             return -score
-        songs.sort(key=_score)
+        gated.sort(key=_score)
 
-        # 3. Walk the top few matches looking for the richest lyric type.
         best = None
         best_rank = 0
-        for song in songs[:5]:
-            data = self._paxsenix_fetch(song.get("id"))
+        for c in gated[:5]:
+            data = self._paxsenix_fetch(c.get("id"))
             if not data:
                 continue
             res = _paxsenix_to_lines(data)
@@ -2122,7 +3560,18 @@ class MusicClient:
 
     def _apple_music_token(self, force_new=False):
         """Scrape an Apple Music JWT from the Apple Music web app and
-        cache it process-wide. Used to authorize catalog search calls."""
+        cache it process-wide. Used to authorize catalog search calls.
+
+        The bundle carries several JWTs and not all of them authorize the
+        catalog API, so candidates are tried against a cheap search until
+        one comes back 200. Matching is on the JWT's own shape
+        (``header.payload.signature``) rather than a fixed prefix: the
+        previous ``eyJh`` prefix assumed a header whose first key is
+        ``alg``, and Apple now emits ``{"typ":...,"alg":...,"kid":...}``,
+        which base64s to ``eyJ0``. That one-character mismatch was
+        silently disabling Apple Music — the richest word-level source —
+        for every track.
+        """
         import urllib.request
         import re as _re
 
@@ -2146,18 +3595,50 @@ class MusicClient:
             req = urllib.request.Request(
                 js_url, headers={"User-Agent": "Mozilla/5.0"},
             )
-            with urllib.request.urlopen(req, timeout=8) as resp:
+            with urllib.request.urlopen(req, timeout=10) as resp:
                 js_body = resp.read().decode("utf-8", errors="replace")
-            tok_match = _re.search(r"eyJh[A-Za-z0-9._-]+", js_body)
-            if not tok_match:
+            candidates = list(dict.fromkeys(_re.findall(
+                r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
+                js_body,
+            )))
+            if not candidates:
                 print("[LYRICS] Paxsenix: couldn't extract Apple Music token")
                 return None
-            tok = tok_match.group(0)
-            self._am_token = tok
-            return tok
+            for tok in candidates:
+                if self._apple_music_token_works(tok):
+                    self._am_token = tok
+                    return tok
+            print(f"[LYRICS] Paxsenix: none of {len(candidates)} Apple Music "
+                  f"tokens authorized")
+            return None
         except Exception as e:
             print(f"[LYRICS] Paxsenix: token fetch failed: {e}")
             return None
+
+    def _apple_music_token_works(self, token):
+        """True if ``token`` authorizes the catalog search endpoint."""
+        import urllib.request
+        import urllib.error
+        import urllib.parse
+
+        url = (
+            "https://amp-api.music.apple.com/v1/catalog/us/search?"
+            + urllib.parse.urlencode({
+                "term": "test", "types": "songs", "limit": 1,
+                "l": "en-US", "platform": "web",
+            })
+        )
+        try:
+            req = urllib.request.Request(url, headers={
+                "Authorization": f"Bearer {token}",
+                "Origin": "https://music.apple.com",
+                "Referer": "https://music.apple.com/",
+                "User-Agent": "Mozilla/5.0",
+            })
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
 
     def _apple_music_search(self, token, title, artist):
         import urllib.parse
