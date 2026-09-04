@@ -255,11 +255,13 @@ class MainWindow(Adw.ApplicationWindow):
         ctrl.connect("key-pressed", self.on_window_key_pressed)
         self.add_controller(ctrl)
 
-        # Avatar menu button — replaces the hamburger. Opens a popover
-        # with the user's profile, their channel link, the library
-        # navigation shortcuts (upload/history/downloads), and the
-        # previous hamburger entries (Preferences / About / Quit).
+        # Header-bar menus (Bazaar layout): a hamburger primary menu
+        # at the far right for app-scoped entries (Downloaded Songs /
+        # theme swatches / Shortcuts / Preferences / About / Quit),
+        # and an avatar button just to its left for account-scoped
+        # entries (Your Channel / Upload / History / Log Out).
         menu_btn = self._build_avatar_menu_button()
+        primary_btn = self._build_primary_menu_button()
 
         # Content setup: ViewStack
         self.view_stack = Adw.ViewStack()
@@ -357,6 +359,9 @@ class MainWindow(Adw.ApplicationWindow):
             "clicked", lambda b: self._dl_popover.popup()
         )
 
+        # pack_end stacks from the right, so primary_btn (packed
+        # first) ends up rightmost, avatar sits just left of it.
+        self.header_bar.pack_end(primary_btn)
         self.header_bar.pack_end(menu_btn)
         self.header_bar.pack_end(self._upload_progress_btn)
         self.header_bar.pack_end(self._download_progress_btn)
@@ -1149,44 +1154,82 @@ class MainWindow(Adw.ApplicationWindow):
             nav.pop()
 
     def _build_avatar_menu_button(self):
-        """Avatar button in the header bar. Replaces the hamburger menu.
-        Shows the user's channel photo; clicking reveals a popover with
-        name, channel link, upload/history/downloads shortcuts, and
-        Preferences/About/Quit."""
-        from ui.utils import AsyncImage
+        """Account button in the header bar — Bazaar-style.
+
+        Holds only account-scoped actions (channel / upload / history
+        / log out) plus a profile header. The app-scoped entries live
+        in a separate hamburger next to it — see
+        `_build_primary_menu_button`.
+
+        Menu items backed by win.* actions use `hidden-when=
+        "action-disabled"` so the popover shows the Sign In entry
+        when signed out and the account rows + Log Out when signed
+        in, driven entirely by action state."""
 
         menu_btn = Gtk.MenuButton()
         menu_btn.add_css_class("flat")
         menu_btn.add_css_class("circular")
         menu_btn.set_tooltip_text("Account")
 
-        # Use Adw.Avatar — it handles the circular mask natively. A
-        # hand-rolled Gtk.Image in a Box with overflow:hidden was
-        # getting squeezed into a non-square allocation inside the
-        # MenuButton's internal layout.
+        # Adw.Avatar handles the circular mask natively; a hand-rolled
+        # Gtk.Image in a Box with overflow:hidden was getting squeezed
+        # into a non-square allocation inside the MenuButton's layout.
         self._avatar_small = Adw.Avatar.new(28, "", False)
         menu_btn.set_child(self._avatar_small)
 
-        # Custom popover — GMenu can't host the name/photo header nicely.
-        popover = Gtk.Popover()
+        # ── Menu model ───────────────────────────────────────────────
+        menu = Gio.Menu()
+
+        # 1. Profile header — a custom child slot ("profile-header").
+        header_section = Gio.Menu()
+        header_item = Gio.MenuItem.new(None, None)
+        header_item.set_attribute_value(
+            "custom", GLib.Variant.new_string("profile-header")
+        )
+        header_section.append_item(header_item)
+        menu.append_section(None, header_section)
+
+        # 2. Signed-in-only account actions.
+        authed_section = Gio.Menu()
+        for label, action in (
+            ("Your Channel",       "win.open-channel"),
+            ("Upload Songs",       "win.open-upload"),
+            ("Listening History",  "win.open-history"),
+        ):
+            item = Gio.MenuItem.new(label, action)
+            item.set_attribute_value(
+                "hidden-when", GLib.Variant.new_string("action-disabled")
+            )
+            authed_section.append_item(item)
+        menu.append_section(None, authed_section)
+
+        # 3. Sign in / Log out — one is enabled at a time, the other
+        # hidden via `hidden-when="action-disabled"`.
+        auth_section = Gio.Menu()
+        signin_item = Gio.MenuItem.new("Sign In", "win.sign-in")
+        signin_item.set_attribute_value(
+            "hidden-when", GLib.Variant.new_string("action-disabled")
+        )
+        auth_section.append_item(signin_item)
+        logout_item = Gio.MenuItem.new("Log Out", "win.logout")
+        logout_item.set_attribute_value(
+            "hidden-when", GLib.Variant.new_string("action-disabled")
+        )
+        auth_section.append_item(logout_item)
+        menu.append_section(None, auth_section)
+
+        popover = Gtk.PopoverMenu.new_from_model(menu)
         popover.add_css_class("menu")
         menu_btn.set_popover(popover)
         self._avatar_popover = popover
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        box.set_margin_top(8)
-        box.set_margin_bottom(8)
-        box.set_margin_start(8)
-        box.set_margin_end(8)
-        box.set_size_request(240, -1)
-        popover.set_child(box)
-
-        # ── Profile header (avatar + name + handle) ──────────────────
+        # ── Custom profile-header child ──────────────────────────────
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        header.set_margin_bottom(4)
-        header.set_margin_start(4)
-        header.set_margin_end(4)
-        header.set_margin_top(4)
+        header.add_css_class("avatar-menu-header")
+        header.set_margin_top(2)
+        header.set_margin_bottom(6)
+        header.set_margin_start(6)
+        header.set_margin_end(6)
 
         self._avatar_large = Adw.Avatar.new(48, "", False)
         header.append(self._avatar_large)
@@ -1207,83 +1250,143 @@ class MainWindow(Adw.ApplicationWindow):
         name_col.append(self._avatar_name_label)
         name_col.append(self._avatar_handle_label)
         header.append(name_col)
-        box.append(header)
 
-        # ── Helper to build each menu row (icon + label, flat button) ─
-        def _row(icon_name, label, callback, sensitive=True):
-            btn = Gtk.Button()
-            btn.add_css_class("flat")
-            btn.add_css_class("avatar-menu-row")
-            btn.set_sensitive(sensitive)
-            hb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-            icon = Gtk.Image.new_from_icon_name(icon_name)
-            icon.set_pixel_size(16)
-            hb.append(icon)
-            lbl = Gtk.Label(label=label)
-            lbl.set_halign(Gtk.Align.START)
-            lbl.set_hexpand(True)
-            hb.append(lbl)
-            btn.set_child(hb)
+        popover.add_child(header, "profile-header")
 
-            def _on_click(_b):
-                popover.popdown()
-                callback()
-
-            btn.connect("clicked", _on_click)
-            return btn
-
-        # ── Your channel ─────────────────────────────────────────────
-        self._avatar_channel_btn = _row(
-            "avatar-default-symbolic",
-            "Your channel",
-            self._open_own_channel,
-        )
-        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-        box.append(self._avatar_channel_btn)
-
-        # ── Library shortcuts (moved from library actions row) ───────
-        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-        box.append(_row(
-            "document-send-symbolic",
-            "Upload songs",
-            self._open_upload_picker,
-        ))
-        box.append(_row(
-            "document-open-recent-symbolic",
-            "Listening history",
-            self._open_history_from_menu,
-        ))
-        box.append(_row(
-            "folder-download-symbolic",
-            "Downloaded songs",
-            self._open_downloads_from_menu,
-        ))
-
-        # ── App menu (previous hamburger entries) ────────────────────
-        # Call the handlers directly — the action-based path
-        # (`self.activate_action(...)`) has been flaky when invoked
-        # from inside a popover button click.
-        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-        box.append(_row(
-            "preferences-system-symbolic",
-            "Preferences",
-            lambda: self.show_preferences(None, None),
-        ))
-        box.append(_row(
-            "help-about-symbolic",
-            "About Mixtapes",
-            lambda: self.show_about(None, None),
-        ))
-        box.append(_row(
-            "application-exit-symbolic",
-            "Quit",
-            lambda: self._on_force_quit(None, None),
-        ))
+        # Backwards-compat alias — the old code toggled this single
+        # action; the auth-state flip now walks a group of them.
+        self._channel_action = self.lookup_action("open-channel")
 
         # Kick off an async fetch to populate the profile so the first
         # paint shows the user's real photo/name.
         GLib.idle_add(self._refresh_avatar_profile)
         return menu_btn
+
+    def _build_primary_menu_button(self):
+        """Hamburger primary menu — app-scoped entries only. Sits at
+        the far-right of the header bar, immediately to the right of
+        the profile avatar (Bazaar layout).
+
+        The top of the popover carries a Whisp-style row of three
+        circular theme swatches (System / Light / Dark) instead of a
+        submenu."""
+
+        btn = Gtk.MenuButton()
+        btn.add_css_class("flat")
+        btn.set_icon_name("open-menu-symbolic")
+        btn.set_tooltip_text("Main Menu")
+
+        menu = Gio.Menu()
+
+        # 1. Theme swatches — custom child.
+        theme_section = Gio.Menu()
+        theme_item = Gio.MenuItem.new(None, None)
+        theme_item.set_attribute_value(
+            "custom", GLib.Variant.new_string("theme-swatches")
+        )
+        theme_section.append_item(theme_item)
+        menu.append_section(None, theme_section)
+
+        # 2. Downloaded songs — works offline, not account-scoped, so
+        # this lives in the app menu rather than the profile one.
+        lib_section = Gio.Menu()
+        lib_section.append("Downloaded Songs", "win.open-downloads")
+        menu.append_section(None, lib_section)
+
+        # 3. App entries.
+        app_section = Gio.Menu()
+        app_section.append("Keyboard Shortcuts", "win.shortcuts")
+        app_section.append("Preferences", "win.preferences")
+        app_section.append("About Mixtapes", "win.about")
+        app_section.append("Quit", "win.quit")
+        menu.append_section(None, app_section)
+
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.add_css_class("menu")
+        btn.set_popover(popover)
+
+        popover.add_child(self._build_theme_swatches(), "theme-swatches")
+        return btn
+
+    def _build_theme_swatches(self):
+        """Three theme swatches (System / Light / Dark) at the top of
+        the primary menu — the shared GNOME pattern used by Text
+        Editor, Papers, Loupe et al. Three GtkCheckButton radios with
+        CSS classes `theme-selector` + `follow` / `light` / `dark`;
+        the diagonal split for System and the check overlay are drawn
+        by the CSS in style.css."""
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.add_css_class("themeselector")
+        row.set_hexpand(True)
+
+        specs = [
+            ("default", "follow", "Follow System Style"),
+            ("light",   "light",  "Light Style"),
+            ("dark",    "dark",   "Dark Style"),
+        ]
+        self._theme_swatch_buttons = {}
+        self._theme_swatch_syncing = False
+        group_head = None
+
+        for value, variant, tooltip in specs:
+            cb = Gtk.CheckButton()
+            cb.add_css_class("theme-selector")
+            cb.add_css_class(variant)
+            cb.set_tooltip_text(tooltip)
+            cb.set_hexpand(True)
+            cb.set_halign(Gtk.Align.CENTER)
+            cb.set_focus_on_click(False)
+            if group_head is None:
+                group_head = cb
+            else:
+                cb.set_group(group_head)
+
+            def _on_toggled(button, v=value):
+                if self._theme_swatch_syncing or not button.get_active():
+                    return
+                self.activate_action(
+                    "color-scheme", GLib.Variant.new_string(v)
+                )
+
+            cb.connect("toggled", _on_toggled)
+            row.append(cb)
+            self._theme_swatch_buttons[value] = cb
+
+        # Reflect the current action state now and on every change.
+        action = self.lookup_action("color-scheme")
+        if action is not None:
+            self._sync_theme_swatch_selection(action.get_state())
+            action.connect(
+                "notify::state",
+                lambda a, _p: self._sync_theme_swatch_selection(a.get_state()),
+            )
+        return row
+
+    def _sync_theme_swatch_selection(self, state):
+        current = state.get_string() if state is not None else "default"
+        # Guard the toggled handler so the action-driven update does
+        # not fire a redundant activate_action back into ourselves.
+        self._theme_swatch_syncing = True
+        try:
+            target = self._theme_swatch_buttons.get(current)
+            if target is not None and not target.get_active():
+                target.set_active(True)
+        finally:
+            self._theme_swatch_syncing = False
+
+    def _set_account_actions_authed(self, is_authed):
+        """Flip the auth-gated action enabled states so the profile
+        menu shows Sign In vs {Your Channel / Upload / History / Log
+        Out}. Called from _apply_avatar_profile (signed in) and
+        _reset_avatar_profile (signed out)."""
+        for name in ("open-channel", "open-upload", "open-history", "logout"):
+            act = self.lookup_action(name)
+            if act is not None:
+                act.set_enabled(is_authed)
+        act = self.lookup_action("sign-in")
+        if act is not None:
+            act.set_enabled(not is_authed)
 
     def _refresh_avatar_profile(self):
         """Fetch account info in a background thread and paint the
@@ -1312,7 +1415,12 @@ class MainWindow(Adw.ApplicationWindow):
             self._avatar_handle_label.set_visible(False)
         if photo:
             self._load_avatar_photo(photo)
-        self._avatar_channel_btn.set_sensitive(bool(handle))
+        # Enable the account-scoped actions now that we know we're
+        # signed in (channel needs the handle specifically).
+        self._set_account_actions_authed(True)
+        channel_action = self.lookup_action("open-channel")
+        if channel_action is not None:
+            channel_action.set_enabled(bool(handle))
 
     def _load_avatar_photo(self, url):
         """Fetch the account photo and feed it into both Adw.Avatar
@@ -1709,12 +1817,166 @@ class MainWindow(Adw.ApplicationWindow):
         quit_action.connect("activate", self._on_force_quit)
         self.add_action(quit_action)
 
+        # Primary-menu targets — library shortcuts. Kept as window
+        # actions so the popover items map straight onto them. The
+        # auth-gated ones start disabled; _set_account_actions_authed
+        # flips them once we've resolved the sign-in state.
+        for name, cb, gated in (
+            ("open-channel",   self._open_own_channel,       True),
+            ("open-upload",    self._open_upload_picker,     True),
+            ("open-history",   self._open_history_from_menu, True),
+            ("open-downloads", self._open_downloads_from_menu, False),
+        ):
+            act = Gio.SimpleAction.new(name, None)
+            act.connect("activate", lambda a, p, _cb=cb: _cb())
+            if gated:
+                act.set_enabled(False)
+            self.add_action(act)
+
+        # Sign-in / Log-out actions — the primary-menu items that
+        # target these use `hidden-when="action-disabled"` so exactly
+        # one appears at a time.
+        signin_action = Gio.SimpleAction.new("sign-in", None)
+        signin_action.connect("activate", lambda *_: self.check_auth())
+        self.add_action(signin_action)
+
+        logout_action = Gio.SimpleAction.new("logout", None)
+        logout_action.connect("activate", lambda *_: self.on_logout_clicked(None, None))
+        logout_action.set_enabled(False)
+        self.add_action(logout_action)
+
+        # Keyboard Shortcuts dialog (Adw.ShortcutsDialog).
+        shortcuts_action = Gio.SimpleAction.new("shortcuts", None)
+        shortcuts_action.connect("activate", self._show_shortcuts_dialog)
+        self.add_action(shortcuts_action)
+
+        # Stateful color-scheme action. State is one of
+        # "default" / "light" / "dark" — matches the string suffix on
+        # the menu items ("win.color-scheme::light" etc.).
+        current_scheme = self._load_color_scheme_pref()
+        color_scheme_action = Gio.SimpleAction.new_stateful(
+            "color-scheme",
+            GLib.VariantType.new("s"),
+            GLib.Variant.new_string(current_scheme),
+        )
+        color_scheme_action.connect(
+            "change-state", self._on_color_scheme_action
+        )
+        self.add_action(color_scheme_action)
+        # Push the loaded preference into Adw.StyleManager now that the
+        # window (and thus the display) exists.
+        self._apply_color_scheme(current_scheme)
+
+        # Register app-level accelerators for the menu entries.
+        app = self.get_application()
+        if app is not None:
+            app.set_accels_for_action("win.preferences", ["<Primary>comma"])
+            app.set_accels_for_action("win.quit", ["<Primary>q"])
+            app.set_accels_for_action(
+                "win.shortcuts", ["<Primary>question", "<Primary>slash"]
+            )
+
         # Intercept window close to hide instead of quit when playing
         self.connect("close-request", self._on_close_request)
 
         # On Windows, manage tray icon when window visibility changes
         if HAS_TRAY:
             self.connect("notify::visible", self._on_visibility_changed)
+
+    # ── Color scheme (Follow System / Light / Dark) ─────────────────
+    _COLOR_SCHEME_MAP = {
+        "default": Adw.ColorScheme.DEFAULT,
+        "light": Adw.ColorScheme.FORCE_LIGHT,
+        "dark": Adw.ColorScheme.FORCE_DARK,
+    }
+
+    def _prefs_path(self):
+        return os.path.join(GLib.get_user_data_dir(), "muse", "prefs.json")
+
+    def _load_color_scheme_pref(self):
+        import json as _json
+        try:
+            path = self._prefs_path()
+            if os.path.exists(path):
+                with open(path) as f:
+                    val = _json.load(f).get("color_scheme", "default")
+                if val in self._COLOR_SCHEME_MAP:
+                    return val
+        except Exception:
+            pass
+        return "default"
+
+    def _save_color_scheme_pref(self, value):
+        import json as _json
+        path = self._prefs_path()
+        data = {}
+        try:
+            if os.path.exists(path):
+                with open(path) as f:
+                    data = _json.load(f) or {}
+        except Exception:
+            data = {}
+        data["color_scheme"] = value
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                _json.dump(data, f)
+        except Exception as e:
+            print(f"[PREFS] failed to save color scheme: {e}")
+
+    def _apply_color_scheme(self, value):
+        scheme = self._COLOR_SCHEME_MAP.get(value, Adw.ColorScheme.DEFAULT)
+        Adw.StyleManager.get_default().set_color_scheme(scheme)
+
+    def _on_color_scheme_action(self, action, value):
+        s = value.get_string() if value is not None else "default"
+        if s not in self._COLOR_SCHEME_MAP:
+            s = "default"
+        action.set_state(GLib.Variant.new_string(s))
+        self._apply_color_scheme(s)
+        self._save_color_scheme_pref(s)
+
+    def _show_shortcuts_dialog(self, action, param):
+        """Present an Adw.ShortcutsDialog with the app's key bindings."""
+        # Adw.ShortcutsDialog landed in libadwaita 1.9. Fall back to a
+        # simple info toast on older runtimes so we don't crash.
+        if not hasattr(Adw, "ShortcutsDialog"):
+            self.add_toast("Shortcuts dialog not available on this system")
+            return
+
+        dialog = Adw.ShortcutsDialog()
+
+        general = Adw.ShortcutsSection()
+        general.set_title("General")
+        dialog.add(general)
+        for accel, title in (
+            ("<Primary>comma", "Preferences"),
+            ("<Primary>question", "Keyboard Shortcuts"),
+            ("<Primary>q", "Quit"),
+            ("Escape", "Go Back / Close Search"),
+        ):
+            item = Adw.ShortcutsItem()
+            item.set_title(title)
+            item.set_accelerator(accel)
+            general.add(item)
+
+        playback = Adw.ShortcutsSection()
+        playback.set_title("Playback")
+        dialog.add(playback)
+        pp = Adw.ShortcutsItem()
+        pp.set_title("Play / Pause")
+        pp.set_accelerator("space")
+        playback.add(pp)
+
+        search = Adw.ShortcutsSection()
+        search.set_title("Search")
+        dialog.add(search)
+        gs = Adw.ShortcutsItem()
+        gs.set_title("Start Typing to Search")
+        gs.set_accelerator("a")
+        search.add(gs)
+
+        dialog.present(self)
 
     def _get_background_play_enabled(self):
         import json as _json
@@ -1854,6 +2116,12 @@ class MainWindow(Adw.ApplicationWindow):
         page.set_title("General")
         page.set_icon_name("settings-symbolic")
         prefs.add(page)
+
+        # Account group first — profile header + Sign In/Sign Out.
+        from api.client import MusicClient
+        is_authed = MusicClient().is_authenticated()
+        account_group = self._build_account_group(prefs, is_authed)
+        page.add(account_group)
 
         app_group = Adw.PreferencesGroup()
         app_group.set_title("Application")
@@ -2288,37 +2556,8 @@ class MainWindow(Adw.ApplicationWindow):
         small_icon_row.connect("notify::active", on_small_icon_toggled)
         rpc_group.add(small_icon_row)
 
-        from api.client import MusicClient
-
-        is_authed = MusicClient().is_authenticated()
-
-        group = Adw.PreferencesGroup()
-        group.set_title("Account")
-        page.add(group)
-
-        # Sign Out Row
-        row = Adw.ActionRow()
-        row.set_title("Sign Out" if is_authed else "Sign In")
-        row.set_subtitle(
-            "Remove saved credentials and log out of YouTube Music"
-            if is_authed
-            else "Sign in to YouTube Music to access your library"
-        )
-
-        logout_btn = Gtk.Button(label="Sign Out" if is_authed else "Sign In")
-        logout_btn.set_valign(Gtk.Align.CENTER)
-
-        if is_authed:
-            logout_btn.add_css_class("destructive-action")
-            logout_btn.connect("clicked", self.on_logout_clicked, prefs)
-        else:
-            logout_btn.add_css_class("suggested-action")
-            logout_btn.connect(
-                "clicked", lambda b, p: (p.close(), self.check_auth()), prefs
-            )
-
-        row.add_suffix(logout_btn)
-        group.add(row)
+        # Account group was moved to the top of this page; see the
+        # _build_account_group call right after `page.add(page)`.
 
         # Downloads group
         dl_group = Adw.PreferencesGroup()
@@ -2443,12 +2682,119 @@ class MainWindow(Adw.ApplicationWindow):
 
         prefs.present(self)
 
-    def on_logout_clicked(self, btn, prefs_window):
+    def _build_account_group(self, prefs, is_authed):
+        """Build the 'Account' Adw.PreferencesGroup that leads the
+        Preferences page — a big avatar row with the signed-in account
+        name/handle, and a Sign In/Sign Out button."""
+        group = Adw.PreferencesGroup()
+        group.set_title("Account")
+
+        row = Adw.ActionRow()
+
+        # Avatar prefix
+        avatar = Adw.Avatar.new(40, "", False)
+        row.add_prefix(avatar)
+
+        # Suffix button — Sign Out (destructive) or Sign In (suggested).
+        btn = Gtk.Button(label="Sign Out" if is_authed else "Sign In")
+        btn.set_valign(Gtk.Align.CENTER)
+        if is_authed:
+            btn.add_css_class("destructive-action")
+            btn.connect("clicked", self.on_logout_clicked, prefs)
+        else:
+            btn.add_css_class("suggested-action")
+            btn.connect(
+                "clicked", lambda b, p: (p.close(), self.check_auth()), prefs
+            )
+        row.add_suffix(btn)
+
+        if not is_authed:
+            row.set_title("Not signed in")
+            row.set_subtitle(
+                "Sign in to YouTube Music to access your library"
+            )
+            group.add(row)
+            return group
+
+        # Signed in — fill from the cached account info if we already
+        # have it, otherwise show a placeholder and repaint when the
+        # background fetch lands.
+        info = None
+        try:
+            info = self.player.client.get_account_info()
+        except Exception:
+            info = None
+
+        def _apply(_info):
+            name = (_info or {}).get("accountName") or "Signed in"
+            handle = (_info or {}).get("channelHandle") or ""
+            photo = (_info or {}).get("accountPhotoUrl") or ""
+            row.set_title(name)
+            row.set_subtitle(handle or "YouTube Music account")
+            avatar.set_text(name)
+            if photo:
+                from ui.utils import (
+                    read_thumb_cache, write_thumb_cache, get_high_res_url,
+                )
+                hi_url = get_high_res_url(photo) or photo
+
+                def _work():
+                    data = read_thumb_cache(hi_url)
+                    if not data:
+                        try:
+                            import requests
+                            resp = requests.get(
+                                hi_url,
+                                headers={"User-Agent": "Mozilla/5.0"},
+                                timeout=10,
+                            )
+                            resp.raise_for_status()
+                            data = resp.content
+                            write_thumb_cache(hi_url, data)
+                        except Exception:
+                            return
+
+                    def _paint():
+                        try:
+                            from gi.repository import GdkPixbuf
+                            loader = GdkPixbuf.PixbufLoader()
+                            loader.write(data)
+                            loader.close()
+                            pb = loader.get_pixbuf()
+                            if pb is not None:
+                                avatar.set_custom_image(
+                                    Gdk.Texture.new_for_pixbuf(pb)
+                                )
+                        except Exception:
+                            pass
+                        return False
+
+                    GLib.idle_add(_paint)
+
+                threading.Thread(target=_work, daemon=True).start()
+
+        if info:
+            _apply(info)
+        else:
+            row.set_title("Loading account…")
+            row.set_subtitle("")
+
+            def _fetch():
+                data = self.player.client.get_account_info()
+                GLib.idle_add(_apply, data or {})
+
+            threading.Thread(target=_fetch, daemon=True).start()
+
+        group.add(row)
+        return group
+
+    def on_logout_clicked(self, btn, prefs_window=None):
         from api.client import MusicClient
 
         client = MusicClient()
         if client.logout():
-            prefs_window.close()
+            if prefs_window is not None:
+                prefs_window.close()
             # Clear library UI immediately
             if hasattr(self, "library_page"):
                 self.library_page.clear()
@@ -2469,7 +2815,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._avatar_name_label.set_label("Not signed in")
         self._avatar_handle_label.set_label("")
         self._avatar_handle_label.set_visible(False)
-        self._avatar_channel_btn.set_sensitive(False)
+        self._set_account_actions_authed(False)
 
     def init_pages(self):
 
