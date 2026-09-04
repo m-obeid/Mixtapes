@@ -92,11 +92,45 @@ modules:
   - name: muse
     buildsystem: simple
     build-commands:
-      - install -d ${FLATPAK_DEST}/lib/muse
-      - cp -r src ${FLATPAK_DEST}/lib/muse/
+      # Nuitka is not in the GNOME SDK. Install it with pip's flat --target
+      # layout rather than --prefix so nothing has to hardcode the runtime's
+      # python3.X version, and drive it with `python3 -m nuitka` (no console
+      # script on PATH needed). It lands outside ${FLATPAK_DEST}, so the
+      # compiler never ships in the finished app.
+      - pip3 install --no-cache-dir --target=nuitka-tools nuitka
+      - glib-compile-resources --sourcedir=. src/muse.gresource.xml --target=src/muse.gresource
+      # Same flags as the AUR PKGBUILD, minus --clang: the GNOME SDK ships
+      # gcc, and clang only exists behind the org.freedesktop.Sdk.Extension.llvm
+      # SDK extension we do not pull in. This is Nuitka's "accelerated" mode,
+      # not --standalone: the binary still loads gi, yt-dlp and the rest from
+      # /app/lib/python3.X/site-packages that the python-dependencies module
+      # populated, so only our own four modules get compiled.
+      - |
+        set -eu
+        root="$PWD"
+        cd src
+        PYTHONPATH="$root/nuitka-tools:${PYTHONPATH:-}" \
+        python3 -m nuitka \
+          --file-reference-choice=runtime \
+          --include-package=ui \
+          --include-package=api \
+          --include-package=player \
+          --include-module=logger \
+          --output-filename=muse \
+          --jobs="$(nproc)" \
+          --assume-yes-for-downloads \
+          main.py
+      # This layout is load-bearing, not cosmetic. --file-reference-choice=runtime
+      # makes every compiled module report __file__ as
+      # <directory of the binary>/<its original path relative to main.py>. With the
+      # binary at /app/lib/muse/src/muse that gives main.py a __file__ of
+      # /app/lib/muse/src/main.py, which is what makes all three runtime lookups
+      # resolve: dirname(__file__)/muse.gresource, dirname(__file__)/ui/style.css,
+      # and ../assets/icons. Move the binary and every one of them breaks.
+      - install -Dm755 src/muse ${FLATPAK_DEST}/lib/muse/src/muse
+      - install -Dm644 src/muse.gresource ${FLATPAK_DEST}/lib/muse/src/muse.gresource
+      - install -Dm644 src/ui/style.css ${FLATPAK_DEST}/lib/muse/src/ui/style.css
       - cp -r assets ${FLATPAK_DEST}/lib/muse/
-      - cp requirements.txt ${FLATPAK_DEST}/lib/muse/
-      - glib-compile-resources --sourcedir=. src/muse.gresource.xml --target=${FLATPAK_DEST}/lib/muse/src/muse.gresource
       - install -Dm644 com.pocoguy.Muse.desktop ${FLATPAK_DEST}/share/applications/com.pocoguy.Muse.desktop
       - install -Dm644 com.pocoguy.Muse.metainfo.xml ${FLATPAK_DEST}/share/metainfo/com.pocoguy.Muse.metainfo.xml
       - install -Dm644 assets/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg
@@ -107,7 +141,7 @@ modules:
         #!/bin/sh
         mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/muse"
         cd "${XDG_DATA_HOME:-$HOME/.local/share}/muse"
-        exec python3 /app/lib/muse/src/main.py "$@"
+        exec /app/lib/muse/src/muse "$@"
         EOF
       - chmod +x ${FLATPAK_DEST}/bin/muse
     sources:
@@ -118,6 +152,20 @@ modules:
       # workflow_dispatch, etc.) instead of always pulling `main`.
       - type: dir
         path: .
+        # Build detritus that has no business inside the sandbox. Without this
+        # a developer checkout copies ~900 MB per build, and src/main.build in
+        # particular is stale Nuitka output from a previous host compile that
+        # must not seed the in-sandbox one. .ccache matters in CI too: the
+        # restored ccache lives in the workspace, so without skipping it we
+        # would copy up to 1 GB of it into the sandbox and let it perturb the
+        # source hash flatpak-builder uses to decide whether to rebuild.
+        skip:
+          - .venv
+          - .git
+          - .ccache
+          - build-dir
+          - .flatpak-builder
+          - src/main.build
       - type: file
         path: com.pocoguy.Muse.desktop
       - type: file

@@ -9,17 +9,23 @@ on:
 jobs:
   flatpak:
     name: Build Flatpak (${{ matrix.arch }})
-    runs-on: ubuntu-latest
+    # Each arch builds on a native runner. The aarch64 leg used to run under
+    # QEMU, which was tolerable while the app module only copied Python files
+    # around. It no longer is: the module now compiles the app with Nuitka, and
+    # emulated C compilation plus linking would take hours and flirt with the
+    # 6-hour job limit. ubuntu-24.04-arm is free for public repos.
+    runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        if: matrix.arch == 'aarch64'
-        uses: docker/setup-qemu-action@v3
 
       - name: Install flatpak-builder
         run: |
@@ -27,9 +33,40 @@ jobs:
           sudo apt-get install -y flatpak flatpak-builder xvfb
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
+      # Nuitka compiles ~60 generated C files per build. A new key is written
+      # every run so the cache tracks the latest commit, and restore-keys falls
+      # back to whatever the previous run left. Separate per arch: the objects
+      # are native and share nothing across x86_64 and aarch64.
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-flatpak-${{ matrix.arch }}-${{ github.sha }}
+          restore-keys: |
+            ccache-flatpak-${{ matrix.arch }}-
+
       - name: Build using Flatpak Builder
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
         run: |
-          sudo xvfb-run --auto-servernum flatpak-builder \
+          # flatpak-builder --ccache exposes $CCACHE_DIR inside the build
+          # sandbox; Nuitka finds ccache there and routes its C compilation
+          # through it on its own. The log line to watch is "Cached C files
+          # (using ccache) with result ...", which reads 58 misses on a cold
+          # cache and 58 hits on a warm one.
+          #
+          # Set the size cap through ccache.conf rather than `ccache -M`: the
+          # runner has no ccache binary, only the SDK inside the sandbox does.
+          # One build's objects come to ~22 MB, so 1 GB is ample headroom.
+          mkdir -p "$CCACHE_DIR"
+          printf 'max_size = 1.0G\n' > "$CCACHE_DIR/ccache.conf"
+
+          # `sudo env VAR=...` rather than --preserve-env: it does not depend on
+          # the runner's sudoers env policy, and a silently dropped CCACHE_DIR
+          # would send the cache to flatpak-builder's default state dir and
+          # leave actions/cache saving an empty .ccache every run.
+          sudo env CCACHE_DIR="$CCACHE_DIR" xvfb-run --auto-servernum flatpak-builder \
+            --ccache \
             --repo=repo \
             --disable-rofiles-fuse \
             --install-deps-from=flathub \
@@ -38,6 +75,12 @@ jobs:
             --arch=${{ matrix.arch }} \
             flatpak_app com.pocoguy.Muse.yaml
           flatpak build-bundle --arch=${{ matrix.arch }} repo Mixtapes-${{ matrix.arch }}.flatpak com.pocoguy.Muse master
+
+          # The build ran as root, so everything it wrote to the cache is
+          # root-owned and the unprivileged actions/cache post-step cannot read
+          # it. Without this the cache silently never saves.
+          sudo chown -R "$(id -u):$(id -g)" "$CCACHE_DIR"
+          echo "ccache size: $(du -sh "$CCACHE_DIR" | cut -f1)"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

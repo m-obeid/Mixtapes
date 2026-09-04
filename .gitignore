@@ -170,3 +170,6 @@ data/
 .vscode/
 *.log
 browserold.json
+
+# ccache dir used by the flatpak build (see .github/workflows/build-flatpak.yml)
+.ccache/
