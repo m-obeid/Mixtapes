@@ -1,4 +1,3 @@
-import colorsys
 import os
 import sys
 import threading
@@ -9,6 +8,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gtk, Gdk, Adw, GObject, Gio, GLib, Pango
 from player.player import Player
+from ui import color_utils
 from ui.util_classes import ScrolledWindow
 
 
@@ -21,6 +21,29 @@ if sys.platform == "win32":
         pass
 
 
+# The luminance band cover_effects normalizes the backdrop into:
+# typical luminance, and the end worst for text.
+BLUR_BACKDROP = {           # is_dark -> (typical, worst-for-text)
+    True: (0.025, 0.14),
+    False: (0.55, 0.35),
+}
+# The playing row lifts off the backdrop by a fixed contrast ratio, not
+# a fixed color, so it looks equally strong in both schemes. A pinned
+# color gave a white band in light mode and nothing in dark.
+BLUR_ROW_SEPARATION = 1.30
+BLUR_ROW_OPACITY = 0.5
+# Band edges are percentiles. One point of headroom covers the tail.
+BLUR_LABEL_HEADROOM = 1.0
+# Damp the highlight's chroma. Equal luminance contrast is not equal
+# apparent strength, and dark mode keeps far more chroma.
+BLUR_ROW_TINT = 0.4
+# Panels (player bar, queue, sidebar) recede instead of lifting.
+# alpha(@window_bg_color, 0.35) sat above the backdrop in light mode and
+# below it in dark: a 1.41 lift versus 1.04.
+BLUR_PANEL_SEPARATION = 1.18
+BLUR_PANEL_OPACITY = 0.35
+BLUR_PANEL_TINT = 0.25
+
 # CSS that makes the chrome translucent when blurred-cover-bg is active.
 # Loaded via a Gtk.CssProvider at PRIORITY_USER + 1 so it actually wins
 # the cascade against a user's ~/.config/gtk-4.0/gtk.css. Putting these
@@ -28,12 +51,11 @@ if sys.platform == "win32":
 # (800) overwrite them, which is why the player bar / sidebar / mobile
 # view switcher kept rendering opaque despite the rules being there.
 _BLUR_OVERRIDE_CSS = """
-/* Every container that paints a flat fill goes transparent. The key
-   ones are Adw.ToolbarView's .top-bar / .bottom-bar wrappers (which use
-   element name "toolbars" internally in libadwaita) and
-   Adw.OverlaySplitView's pane wrappers — those layers sit behind
-   headerbar / playerbar / queue, so killing only the inner widgets does
-   nothing while the wrapper is still painting. */
+/* Every container painting a flat fill goes transparent. Watch
+   Adw.ToolbarView's .top-bar and .bottom-bar wrappers, named "toolbars"
+   internally, and Adw.OverlaySplitView's pane wrappers. Those sit behind
+   the headerbar, player bar and queue, and keep painting when only the
+   inner widgets are cleared. */
 window.cover-bg-active > windowhandle,
 window.cover-bg-active toolbarview,
 window.cover-bg-active toolbarview > .top-bar,
@@ -78,8 +100,8 @@ window.cover-bg-active headerbar > windowhandle > box {
 
 /* Mobile view switcher bar. The widget tree is `viewswitcherbar` →
    `revealer` → internal `actionbar` → `box`. Adwaita styles the
-   actionbar with a flat fill — wildcard inside the bar to be sure we
-   hit it regardless of internal structure. */
+   actionbar with a flat fill. Wildcard inside the bar to hit it
+   whatever the internal structure. */
 window.cover-bg-active viewswitcherbar,
 window.cover-bg-active viewswitcherbar *,
 window.cover-bg-active viewswitcherbar > actionbar,
@@ -92,24 +114,25 @@ window.cover-bg-active viewswitcherbar actionbar > revealer > box {
   box-shadow: none;
 }
 
-/* Mobile bottom sheet (full expanded player on mobile) — wildcard the
-   sheet's own paint layers so the blur shows through behind the
-   ExpandedPlayer like the rest of the chrome. */
-window.cover-bg-active bottomsheet,
-window.cover-bg-active bottomsheet > sheet,
-window.cover-bg-active bottomsheet > .sheet,
-window.cover-bg-active bottomsheet > box,
-window.cover-bg-active bottomsheet > .background {
-  background: none;
-  background-color: transparent;
+/* Mobile bottom sheet, the full expanded player on mobile. The sheet
+   covers the page underneath, so it stays opaque; clearing it lets the
+   playlist and the nav bar show through the player. Paint the panel
+   wash as a gradient layer over an opaque background-color instead, so
+   the whole sheet including the drag-handle strip is one surface.
+
+   The node is `bottom-sheet`, not `bottomsheet`. The old selectors read
+   `bottomsheet` and matched nothing. */
+window.cover-bg-active bottom-sheet > sheet {
+  background-color: @window_bg_color;
+  background-image: linear-gradient(@blur_panel_bg, @blur_panel_bg);
 }
 
 /* Player bar, queue panel, expanded player are Gtk.Box widgets carrying
    both libadwaita .background AND their own class. Match both for
    specificity, and use lower alpha so the blur reads through. The
-   sidebar itself goes fully transparent — its tint is carried by the
-   surrounding .sidebar-pane wrapper instead, so it reads as one
-   continuous panel matching the player bar. */
+   sidebar itself goes fully transparent. The surrounding .sidebar-pane
+   wrapper carries its tint, so the two read as one continuous panel
+   matching the player bar. */
 window.cover-bg-active .background.player-bar,
 window.cover-bg-active .background.queue-panel,
 window.cover-bg-active .background.player-drawer,
@@ -118,11 +141,30 @@ window.cover-bg-active .queue-panel,
 window.cover-bg-active .player-drawer,
 window.cover-bg-active .sidebar-pane {
   background: none;
-  background-color: alpha(@window_bg_color, 0.35);
+  background-color: @blur_panel_bg;
 }
 
 window.cover-bg-active .background.sidebar,
 window.cover-bg-active .sidebar {
+  background: none;
+  background-color: transparent;
+}
+
+/* Inside the sheet the surface above already carries the wash. Anything
+   painting its own on top would stack: the queue lives inside the
+   expanded player, so the Queue tab came out a different shade from the
+   Player tab. QueuePanel carries `.background` as well as
+   `.queue-panel`, so the `.background.queue-panel` form needs listing
+   too or it out-specifies this reset. Desktop keeps its washes, where
+   the expanded player sits in the main stack over the blur rather than
+   over the page. */
+window.cover-bg-active bottom-sheet .background.player-drawer,
+window.cover-bg-active bottom-sheet .background.queue-panel,
+window.cover-bg-active bottom-sheet .background.player-bar,
+window.cover-bg-active bottom-sheet .player-drawer,
+window.cover-bg-active bottom-sheet .queue-panel,
+window.cover-bg-active bottom-sheet .player-bar,
+window.cover-bg-active bottom-sheet .queue-header {
   background: none;
   background-color: transparent;
 }
@@ -138,27 +180,26 @@ window.cover-bg-active .lyrics-split > .sidebar-pane > .background {
 }
 
 window.cover-bg-active .queue-header {
-  background-color: alpha(@window_bg_color, 0.25);
+  background-color: @blur_panel_bg_weak;
 }
 
 window.cover-bg-active searchbar > revealer > box {
-  background-color: alpha(@window_bg_color, 0.35);
+  background-color: @blur_panel_bg;
 }
 
-/* Cards / boxed-lists — use a currentColor-based tint instead of
-   @card_bg_color so they read bright on dark blur / subtle on light
-   blur, matching the .home-speed-tile quick-picks aesthetic instead of
-   a muddy gray wash. */
+/* Cards and boxed-lists. A currentColor tint instead of @card_bg_color,
+   so they read bright on a dark blur and subtle on a light one. Matches
+   the .home-speed-tile quick-picks look instead of a muddy gray wash. */
 window.cover-bg-active .boxed-list,
 window.cover-bg-active .card {
   background-color: alpha(currentColor, 0.1);
 }
 
 /* Cards inside floating dialogs (Adw.PreferencesDialog etc.) and
-   popovers do NOT sit on the blurred cover bg — they sit on the
-   dialog's own surface — so the translucent treatment makes them look
-   washed-out and inconsistent. Restore full opacity inside dialogs/
-   popovers. Higher specificity than the rule above so it wins. */
+   popovers do NOT sit on the blurred cover bg. They sit on the dialog's
+   own surface, where the translucent treatment looks washed out and
+   inconsistent. Restore full opacity inside dialogs and popovers. Higher
+   specificity than the rule above, so this one wins. */
 window.cover-bg-active dialog .boxed-list,
 window.cover-bg-active dialog .card,
 window.cover-bg-active popover .boxed-list,
@@ -166,12 +207,10 @@ window.cover-bg-active popover .card {
   background-color: @card_bg_color;
 }
 
-/* Artist banner-scrim in blur mode: darken behind the artist name +
-   play button (around 60-75% down the banner) so text stays
-   readable, but fade BACK to transparent at the very bottom — the
-   FadeBottomBin already masks the image to alpha 0 there, and a
-   scrim that's still translucent at that point would re-introduce
-   the "colored band" the mask was designed to eliminate. */
+/* Artist banner scrim in blur mode. Darken behind the artist name and
+   play button, 60 to 75% down. Fade back to transparent at the bottom,
+   where FadeBottomBin masks the image to alpha 0; a scrim still
+   translucent there brings back the colored band the mask removes. */
 window.cover-bg-active .banner-scrim {
   background: linear-gradient(
     to bottom,
@@ -182,28 +221,44 @@ window.cover-bg-active .banner-scrim {
   );
 }
 
-/* Playing row: theme-neutral lighter tint, and EXPLICITLY restore text
-   color to the default fg (overriding the base @playing_fg, which is a
-   hue-shifted accent and ends up red-on-red when dynamic accent is on
-   with a red cover). */
+/* Playing row over the blurred cover, keeping its accent color. The old
+   13% wash could not support one: across 80 covers an accent-tinted
+   label measured 1.0 to 1.2:1. A translucent surface of the row's own
+   buys it back. _refresh_derived_colors computes both tokens against the
+   normalized backdrop band.
+
+   `list row.playing` is the ListBox shape (Home, Explore, search). The
+   selector read `listboxrow.song-row-wrapper.playing` before, which
+   matches nothing: the CSS node is `row`, and no widget carries that
+   class. */
 window.cover-bg-active box.song-row.playing,
-window.cover-bg-active listboxrow.song-row-wrapper.playing,
+window.cover-bg-active list row.playing,
 window.cover-bg-active .queue-row.playing {
-  background-color: alpha(@view_fg_color, 0.13);
-  color: @view_fg_color;
+  background-color: @playing_surface_over_blur;
+  color: @playing_fg_over_blur;
 }
 window.cover-bg-active box.song-row.playing label,
-window.cover-bg-active listboxrow.song-row-wrapper.playing label,
+window.cover-bg-active list row.playing label,
 window.cover-bg-active .queue-row.playing label {
-  color: @view_fg_color;
+  color: @playing_fg_over_blur;
+}
+
+/* Context menus keep regular text. A popover is a CSS child of the row
+   it is parented to, so it inherits the color above. */
+window.cover-bg-active box.song-row.playing popover label,
+window.cover-bg-active box.song-row.playing popover modelbutton,
+window.cover-bg-active list row.playing popover label,
+window.cover-bg-active list row.playing popover modelbutton,
+window.cover-bg-active .queue-row.playing popover label,
+window.cover-bg-active .queue-row.playing popover modelbutton {
+  color: @popover_fg_color;
 }
 
 /* Queue rows lose libadwaita's default :hover tint to the
-   "all listview rows transparent" rule above — restore a subtle
-   hover so the row visibly responds to the pointer in blur mode.
-   Use @view_fg_color for theme-neutral contrast (same approach as
-   the .playing rule); kept lower-opacity so it's clearly weaker
-   than the playing highlight. */
+   "all listview rows transparent" rule above. Restore a subtle hover so
+   the row responds to the pointer in blur mode. @view_fg_color gives
+   theme-neutral contrast, the same approach as the .playing rule. Lower
+   opacity keeps it weaker than the playing highlight. */
 window.cover-bg-active .queue-row:hover {
   background-color: alpha(@view_fg_color, 0.08);
 }
@@ -211,8 +266,8 @@ window.cover-bg-active .queue-row.playing:hover {
   background-color: alpha(@view_fg_color, 0.18);
 }
 
-/* Same fix for lyric lines — they're tap-to-seek and need the
-   pointer affordance, but the catch-all transparency above kills
+/* Same fix for lyric lines. They are tap-to-seek and need the pointer
+   affordance, but the catch-all transparency above kills
    the base hover defined in style.css. Slightly lighter than queue
    rows since lyrics are content, not a list of actions. */
 window.cover-bg-active .lyrics-line:hover {
@@ -555,12 +610,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast_overlay.set_child(self.bottom_sheet)
         self.set_content(self.toast_overlay)
 
-        # Two CSS providers for the cover-derived appearance — kept separate
-        # so toggling one doesn't clobber the other. We push them at
-        # PRIORITY_USER+1 so they win over ~/.config/gtk-4.0/gtk.css if the
-        # user happens to define their own @accent_color there.
+        # Two CSS providers for the cover-derived appearance, kept
+        # separate so toggling one leaves the other alone. Pushed at
+        # PRIORITY_USER+1 to win over the user's gtk.css.
         self._dynamic_bg_css = Gtk.CssProvider()
         self._dynamic_accent_css = Gtk.CssProvider()
+        # Third provider for tokens we compute from whichever accent is in
+        # force (see _refresh_derived_colors). Added last so it wins the
+        # tie against _dynamic_accent_css at the same priority.
+        self._derived_css = Gtk.CssProvider()
         priority = Gtk.STYLE_PROVIDER_PRIORITY_USER + 1
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), self._dynamic_bg_css, priority,
@@ -568,15 +626,35 @@ class MainWindow(Adw.ApplicationWindow):
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), self._dynamic_accent_css, priority,
         )
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), self._derived_css, priority,
+        )
+        # Set by _set_dynamic_accent while the cover-derived accent is
+        # active; None means libadwaita's own accent is in force.
+        self._accent_override = None
+        # (typical, worst-for-text) luminance of the blurred backdrop
+        # currently painted, measured by cover_effects; None when there
+        # isn't one.
+        self._blur_backdrop = None
+        self._refresh_derived_colors()
         self._last_cover_url = None
         # Hook metadata for the appearance pipeline (blur + dynamic accent).
         # Applied immediately if either pref is already on at startup.
         self.player.connect("metadata-changed", self._on_metadata_for_appearance)
-        # Re-blur on dark/light flips so the tint tracks the active theme.
+        # Re-blur on dark/light flips so the tint tracks the active theme,
+        # and re-derive the contrast-checked tokens whenever the scheme,
+        # the system accent, or the high-contrast preference changes.
+        # Each moves the background or the color measured against.
         try:
-            Adw.StyleManager.get_default().connect(
+            style_manager = Adw.StyleManager.get_default()
+            style_manager.connect(
                 "notify::dark", self._on_color_scheme_changed
             )
+            for prop in ("accent-color", "high-contrast"):
+                style_manager.connect(
+                    f"notify::{prop}",
+                    lambda *_: self._refresh_derived_colors(),
+                )
         except Exception:
             pass
         self._apply_appearance_prefs_initial()
@@ -737,50 +815,54 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_color_scheme_changed(self, *_):
         # libadwaita already animates @window_bg_color / @view_fg_color
         # crossfades on color-scheme change, but our dynamic accent +
-        # blur tint are computed in Python against the active scheme —
-        # so we have to re-run them ourselves, otherwise the chrome
-        # stays stuck on the previous scheme's values until the next
-        # track change.
+        # blur normalization run in Python against the active scheme.
+        # Re-run them, or the chrome stays on the old scheme's values
+        # until the next track change.
         prefs = self._read_appearance_prefs()
         if prefs["blurred_background"] and self._last_cover_url:
             self._update_blurred_background(self._last_cover_url)
         if prefs["dynamic_accent"] and self._last_cover_url:
+            # Recomputed against the new scheme; drop the old scheme's
+            # result first so nothing derives from it in the meantime
+            # (the cover color arrives on a worker thread).
+            self._accent_override = None
             self._update_dynamic_accent(self._last_cover_url)
-
-    def _blur_tint_for_scheme(self):
-        """Pick a tint color based on the active Adw color scheme. Dark
-        mode → black at high alpha for a moodier, more legible backdrop.
-        Light mode → white at moderate alpha so the result reads as a
-        light wash, not a dark band."""
-        try:
-            is_dark = Adw.StyleManager.get_default().get_dark()
-        except Exception:
-            is_dark = True
-        if is_dark:
-            return (0, 0, 0, 165)
-        return (255, 255, 255, 110)
+        self._refresh_derived_colors()
 
     def _update_blurred_background(self, thumb_url):
         from ui.cover_effects import get_blurred_cover
 
-        def _apply(path):
+        def _apply(path, backdrop):
             if not path or not os.path.exists(path):
+                # Fetch failed, or the cover has no color to show.
+                # Drop back to opaque chrome: translucent chrome over a
+                # flat gray field looks like mismatched patches.
+                self._blur_backdrop = None
+                self._deactivate_cover_bg()
+                self._refresh_derived_colors()
                 return False
+            self._blur_backdrop = backdrop
             self._set_blurred_background_css(path)
+            self._refresh_derived_colors()
             return False
 
-        get_blurred_cover(
-            thumb_url, tint=self._blur_tint_for_scheme(), callback=_apply
-        )
+        get_blurred_cover(thumb_url, dark=self._is_dark(), callback=_apply)
 
     def _set_blurred_background_css(self, path):
         """Compose the dynamic CSS for blurred-bg mode:
           1. The override stylesheet (_BLUR_OVERRIDE_CSS) that makes the
              chrome translucent. We bundle it into the same provider as
-             the bg image so it loads at PRIORITY_USER + 1 — high enough
+             the bg image so it loads at PRIORITY_USER + 1, high enough
              to override the user's ~/.config/gtk-4.0/gtk.css.
           2. The window's background-image rule pointing at the cached
-             blurred PNG.
+             blurred PNG, and the same image on the mobile sheet.
+
+        The sheet gets its own copy rather than going transparent. It
+        covers the page underneath, so clearing it shows the playlist
+        through the player. Its own crop of the blur keeps it opaque and
+        still shows the cover. The panel wash rides on top as a second
+        background layer, so the sheet keeps the tint the contrast
+        numbers were derived against.
         """
         # pathlib handles Windows drive letters + backslashes correctly
         # (file:///C:/...); urllib.quote would percent-escape the colon
@@ -793,6 +875,12 @@ class MainWindow(Adw.ApplicationWindow):
             "    background-size: cover;\n"
             "    background-position: center;\n"
             "}\n"
+            "window.cover-bg-active bottom-sheet > sheet {\n"
+            "    background-image: linear-gradient(@blur_panel_bg, @blur_panel_bg),\n"
+            f'                      url("{url}");\n'
+            "    background-size: cover;\n"
+            "    background-position: center;\n"
+            "}\n"
         )
         try:
             self._dynamic_bg_css.load_from_string(_BLUR_OVERRIDE_CSS + bg_rule)
@@ -800,80 +888,205 @@ class MainWindow(Adw.ApplicationWindow):
             print(f"[appearance] bg CSS load failed: {e}")
 
     def _clear_blurred_background(self):
+        had_backdrop = self._blur_backdrop is not None
+        self._blur_backdrop = None
         try:
             self._dynamic_bg_css.load_from_string("")
         except Exception:
             pass
+        if had_backdrop:
+            # The tokens from that backdrop describe nothing on screen
+            # now.
+            self._refresh_derived_colors()
 
     def _update_dynamic_accent(self, thumb_url):
         from ui.cover_effects import get_dominant_color
 
         def _apply(rgb):
             if not rgb:
+                # Featureless cover. Fall back to the theme accent
+                # rather than keeping the previous track's color.
+                self._clear_dynamic_accent()
                 return False
             self._set_dynamic_accent(rgb)
             return False
 
         get_dominant_color(thumb_url, callback=_apply)
 
-    def _set_dynamic_accent(self, rgb):
-        """Push an accent override into the dynamic accent CSS provider."""
-        r, g, b = rgb
-        # Clamp accent lightness against the active theme so the color
-        # stays legible: in dark mode we floor very dark colors (which
-        # blend into the bg), in light mode we cap very bright colors
-        # (which wash out against white). Done in HLS so hue/saturation
-        # are preserved — only the lightness shifts.
+    def _is_dark(self):
         try:
-            is_dark = Adw.StyleManager.get_default().get_dark()
+            return Adw.StyleManager.get_default().get_dark()
         except Exception:
-            is_dark = True
-        h, lit, s = colorsys.rgb_to_hls(r, g, b)
-        if is_dark:
-            lit = max(lit, 0.5)
-        else:
-            lit = min(lit, 0.45)
-        r, g, b = colorsys.hls_to_rgb(h, lit, s)
-        # Pick a high-contrast fg for chips/buttons — black on light accents,
-        # white on dark ones — using the standard luminance heuristic.
-        luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
-        fg = "black" if luminance > 0.6 else "white"
-        rgb_css = f"rgb({int(r*255)}, {int(g*255)}, {int(b*255)})"
-        # Bake a subtle accent wash into the standard bg color tokens so
-        # plain GTK surfaces (Adw.PreferencesDialog, popovers, dialogs)
-        # pick up the same cover-derived hue as the rest of the app
-        # instead of rendering as flat gray/white. Tint is kept small
-        # (~10%) — enough to feel cohesive, not enough to compete with
-        # the accent itself.
+            return True
+
+    def _contrast_target(self):
+        """Contrast ratio every derived text color has to clear. AA
+        normally, AAA under high contrast."""
+        try:
+            if Adw.StyleManager.get_default().get_high_contrast():
+                return color_utils.WCAG_AAA
+        except Exception:
+            pass
+        return color_utils.WCAG_AA
+
+    def _set_dynamic_accent(self, rgb):
+        """Push an accent override into the dynamic accent CSS provider.
+
+        libadwaita splits the accent: `accent_bg_color` fills buttons,
+        `accent_color` is the standalone text variant. The old code
+        overrode both with the raw cover color and lost the split, so a
+        pale-yellow cover painted near-invisible text.
+
+        Rebuilds both in OkLCh. The fill needs 3:1 as a shape, the
+        standalone variant needs to be readable as text.
+        """
+        is_dark = self._is_dark()
+        target = self._contrast_target()
+        # Bases libadwaita paints under the accent wash below.
         bg_base = "#242424" if is_dark else "#fafafa"
         view_base = "#1e1e1e" if is_dark else "#ffffff"
         card_base = "#363636" if is_dark else "#ffffff"
         sidebar_base = "#2e2e2e" if is_dark else "#ebebeb"
+
+        # 1. The fill. Keep inside a real accent's lightness band, then
+        #    separate the shape from the window behind it.
+        solid = color_utils.clamp_lightness(rgb, 0.45, 0.85)
+        solid = color_utils.ensure_contrast(
+            solid, color_utils.from_hex(bg_base), 3.0
+        )
+        # 2. The standalone text variant. The accent tints the view
+        #    background below, so mix it the same way first.
+        view_bg = color_utils.mix(
+            color_utils.from_hex(view_base), solid, 0.08
+        )
+        standalone = color_utils.ensure_contrast(solid, view_bg, target)
+        # 3. Label color for anything drawn on the fill.
+        fg = color_utils.best_foreground(solid)
+
+        solid_css = color_utils.to_css(solid)
+        # Wash a little accent into the bg tokens so plain GTK surfaces
+        # (dialogs, popovers) pick up the cover hue. Around 10% stays
+        # cohesive without competing with the accent.
         css = (
-            f"@define-color accent_color {rgb_css};\n"
-            f"@define-color accent_bg_color {rgb_css};\n"
-            f"@define-color accent_fg_color {fg};\n"
-            f"@define-color window_bg_color mix({bg_base}, {rgb_css}, 0.10);\n"
-            f"@define-color view_bg_color mix({view_base}, {rgb_css}, 0.08);\n"
-            f"@define-color card_bg_color mix({card_base}, {rgb_css}, 0.08);\n"
-            f"@define-color popover_bg_color mix({card_base}, {rgb_css}, 0.10);\n"
-            f"@define-color dialog_bg_color mix({bg_base}, {rgb_css}, 0.10);\n"
-            f"@define-color headerbar_bg_color mix({bg_base}, {rgb_css}, 0.10);\n"
-            f"@define-color sidebar_bg_color mix({sidebar_base}, {rgb_css}, 0.10);\n"
-            f"@define-color sidebar_backdrop_color mix({sidebar_base}, {rgb_css}, 0.10);\n"
-            f"@define-color secondary_sidebar_bg_color mix({sidebar_base}, {rgb_css}, 0.10);\n"
-            f"@define-color secondary_sidebar_backdrop_color mix({sidebar_base}, {rgb_css}, 0.10);\n"
+            f"@define-color accent_color {color_utils.to_css(standalone)};\n"
+            f"@define-color accent_bg_color {solid_css};\n"
+            f"@define-color accent_fg_color {color_utils.to_css(fg)};\n"
+            f"@define-color window_bg_color mix({bg_base}, {solid_css}, 0.10);\n"
+            f"@define-color view_bg_color mix({view_base}, {solid_css}, 0.08);\n"
+            f"@define-color card_bg_color mix({card_base}, {solid_css}, 0.08);\n"
+            f"@define-color popover_bg_color mix({card_base}, {solid_css}, 0.10);\n"
+            f"@define-color dialog_bg_color mix({bg_base}, {solid_css}, 0.10);\n"
+            f"@define-color headerbar_bg_color mix({bg_base}, {solid_css}, 0.10);\n"
+            f"@define-color sidebar_bg_color mix({sidebar_base}, {solid_css}, 0.10);\n"
+            f"@define-color sidebar_backdrop_color mix({sidebar_base}, {solid_css}, 0.10);\n"
+            f"@define-color secondary_sidebar_bg_color mix({sidebar_base}, {solid_css}, 0.10);\n"
+            f"@define-color secondary_sidebar_backdrop_color mix({sidebar_base}, {solid_css}, 0.10);\n"
         )
         try:
             self._dynamic_accent_css.load_from_string(css)
         except Exception as e:
             print(f"[appearance] dynamic accent CSS load failed: {e}")
+            return
+        self._accent_override = (solid, standalone, view_bg)
+        self._refresh_derived_colors()
 
     def _clear_dynamic_accent(self):
         try:
             self._dynamic_accent_css.load_from_string("")
         except Exception:
             pass
+        self._accent_override = None
+        self._refresh_derived_colors()
+
+    # ─── Colors derived from whichever accent is in force ──────────────
+
+    def _accent_in_force(self):
+        """`(solid, standalone, view_bg)` for the accent in force.
+
+        The cover-derived override, or libadwaita's own accent when
+        dynamic accent is off.
+        """
+        if self._accent_override is not None:
+            return self._accent_override
+        is_dark = self._is_dark()
+        view_bg = color_utils.from_hex("#1e1e1e" if is_dark else "#ffffff")
+        try:
+            accent = Adw.StyleManager.get_default().get_accent_color()
+            rgba = accent.to_rgba()
+            standalone_rgba = accent.to_standalone_rgba(is_dark)
+            solid = (rgba.red, rgba.green, rgba.blue)
+            standalone = (
+                standalone_rgba.red, standalone_rgba.green, standalone_rgba.blue
+            )
+        except Exception:
+            # No accent API on old libadwaita. Fall back to GNOME blue.
+            solid = color_utils.from_hex("#3584e4")
+            standalone = color_utils.from_hex(
+                "#81b7f5" if is_dark else "#1c71d8"
+            )
+        return solid, standalone, view_bg
+
+    def _refresh_derived_colors(self):
+        """Recompute the app color tokens needing to stay legible.
+
+        `@playing_fg` matters most. The old `hsl(from @accent_color h
+        100% 80%)` pinned lightness at 80%, fine on dark themes and
+        around 1.1:1 on light ones. Derive against the background the
+        label lands on instead.
+        """
+        solid, standalone, view_bg = self._accent_in_force()
+        # Boxed lists tint the .playing row hardest, at 0.18. The
+        # lighter 0.10 tint follows.
+        row_bg = color_utils.mix(view_bg, solid, 0.18)
+        target = self._contrast_target()
+        fg = color_utils.ensure_contrast(standalone, row_bg, target)
+
+        # Blurred-background mode. The row lifts off the normalized
+        # backdrop by BLUR_ROW_SEPARATION, and the label is checked
+        # against the composite.
+        is_dark = self._is_dark()
+        # Measured off the blur on screen. The constants cover the
+        # moment before it lands.
+        typical, worst = self._blur_backdrop or BLUR_BACKDROP[is_dark]
+        lightness, chroma, hue = color_utils.rgb_to_oklch(solid)
+        overlay = color_utils.overlay_for_contrast(
+            color_utils.gray(typical),
+            color_utils.oklch_to_rgb(lightness, chroma * BLUR_ROW_TINT, hue),
+            BLUR_ROW_OPACITY, BLUR_ROW_SEPARATION,
+        )
+        # Worst case: the band end moving the row toward the label's
+        # own lightness.
+        over_blur = color_utils.ensure_contrast(
+            standalone,
+            color_utils.mix(color_utils.gray(worst), overlay, BLUR_ROW_OPACITY),
+            target + BLUR_LABEL_HEADROOM,
+        )
+        panel = color_utils.overlay_for_contrast(
+            color_utils.gray(typical),
+            color_utils.oklch_to_rgb(lightness, chroma * BLUR_PANEL_TINT, hue),
+            BLUR_PANEL_OPACITY, BLUR_PANEL_SEPARATION, lighter=False,
+        )
+
+        def rgba(color, alpha):
+            r, g, b = (
+                int(round(min(1.0, max(0.0, c)) * 255)) for c in color
+            )
+            return f"rgba({r}, {g}, {b}, {alpha})"
+
+        try:
+            self._derived_css.load_from_string(
+                f"@define-color playing_fg {color_utils.to_css(fg)};\n"
+                f"@define-color playing_fg_over_blur "
+                f"{color_utils.to_css(over_blur)};\n"
+                f"@define-color playing_surface_over_blur "
+                f"{rgba(overlay, BLUR_ROW_OPACITY)};\n"
+                f"@define-color blur_panel_bg "
+                f"{rgba(panel, BLUR_PANEL_OPACITY)};\n"
+                f"@define-color blur_panel_bg_weak "
+                f"{rgba(panel, BLUR_PANEL_OPACITY * 0.7)};\n"
+            )
+        except Exception as e:
+            print(f"[appearance] derived color CSS load failed: {e}")
 
     def _on_track_error(self, player, video_id, title, reason):
         """Surface yt-dlp failures (video unavailable, region-locked, removed)

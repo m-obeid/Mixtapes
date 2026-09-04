@@ -17,10 +17,27 @@
 
 @define-color scrim_top mix(@window_bg_color, transparent, 0.4);
 @define-color scrim_mid mix(@window_bg_color, transparent, 0.8);
-@define-color row_hover alpha(@accent_color, 0.08);
-@define-color row_selected alpha(@accent_color, 0.12);
-@define-color playing_bg alpha(@accent_color, 0.1);
-@define-color playing_fg hsl(from @accent_color h 100% 80%);
+@define-color row_hover alpha(@accent_bg_color, 0.08);
+@define-color row_selected alpha(@accent_bg_color, 0.12);
+/* Row tints use @accent_bg_color, the solid accent, to keep the hue.
+   @accent_color is darkened in light mode and washes them out. */
+@define-color playing_bg alpha(@accent_bg_color, 0.1);
+/* Static fallback for the playing-row label, used before MainWindow
+   overrides it in _refresh_derived_colors. Mixing toward @view_fg_color
+   darkens on light themes and lightens on dark ones, which GTK has no
+   media query for. The old `hsl(... 100% 80%)` was a dark-mode value and
+   left light themes near 1.1:1. */
+@define-color playing_fg color-mix(in oklab, @accent_color, @view_fg_color 60%);
+/* Same label over the blurred cover, where the row is translucent and
+   the cover bleeds through. Mixed further for headroom. */
+@define-color playing_fg_over_blur color-mix(in oklab, @accent_color, @view_fg_color 78%);
+/* Translucent surface for the .playing row in blurred-background mode.
+   MainWindow replaces it with a derived value. */
+@define-color playing_surface_over_blur alpha(mix(@view_bg_color, @accent_bg_color, 0.35), 0.5);
+/* Translucent chrome panels in blurred-background mode. MainWindow
+   replaces these with derived values. */
+@define-color blur_panel_bg alpha(@window_bg_color, 0.35);
+@define-color blur_panel_bg_weak alpha(@window_bg_color, 0.25);
 
 .rounded {
   border-radius: 12px;
@@ -230,26 +247,48 @@ box.song-row.playing label {
   color: @playing_fg;
 }
 
-/* Boxed-list rows have libadwaita's opaque row bg which masks the
-   inner `box.song-row.playing` color. We mirror the .playing class
-   onto the surrounding `row` and tint that directly.
+/* Boxed-list rows carry libadwaita's opaque row bg, masking the inner
+   `box.song-row.playing` color. Mirror .playing onto the surrounding
+   `row`.
 
-   Note: GtkListBox's CSS node name is `list` (NOT `listbox`), and
-   GtkListBoxRow's is `row` (NOT `listboxrow`) — the obvious-looking
-   selectors silently match nothing. */
+   GtkListBox's node is `list`, not `listbox`. GtkListBoxRow's is `row`,
+   not `listboxrow`. The obvious selectors match nothing. */
 list row.playing {
-  background-color: alpha(@accent_color, 0.18);
+  background-color: alpha(@accent_bg_color, 0.18);
 }
 list row.playing label {
   color: @playing_fg;
 }
 
-/* Reset color for context menu popovers so they don't inherit playing color */
+/* The queue inside the mobile bottom sheet is one surface, not a content
+   view stacked on a window. Left alone the header bar paints
+   @headerbar_bg_color and the list paints @view_bg_color, which differ by
+   the accent wash (0.10 over #fafafa against 0.08 over #ffffff) and read
+   as two panels inside one sheet. Blurred mode already unifies them in
+   its own override, so this covers the plain case. */
+bottom-sheet .queue-panel {
+  background-color: @view_bg_color;
+}
+bottom-sheet .queue-panel toolbarview,
+bottom-sheet .queue-panel headerbar,
+bottom-sheet .queue-panel scrolledwindow,
+bottom-sheet .queue-panel listview {
+  background-color: transparent;
+}
+
+/* Reset color for context menu popovers. A popover parented to a row is
+   a CSS child of it and inherits the row color.
+
+   Both row shapes need covering: `box.song-row.playing` on ListView
+   pages, `list row.playing` on ListBox pages (Home, Explore, search).
+   Only the first was listed, so menus came up accent-tinted there. */
 box.song-row.playing popover label,
 box.song-row.playing popover modelbutton,
+list row.playing popover label,
+list row.playing popover modelbutton,
 popover.menu label,
 popover.menu modelbutton {
-  color: @theme_fg_color;
+  color: @popover_fg_color;
 }
 
 /* Image scaling */
