@@ -21,8 +21,19 @@ _IS_ONLINE_STATE = {
     "value": True,            # optimistic default — callers degrade gracefully if wrong
     "last_probe": 0.0,        # monotonic timestamp of last probe completion
     "probe_in_flight": False,
+    "notified": True,         # last value handed to the listeners below
 }
 _IS_ONLINE_PROBE_INTERVAL = 15.0   # how stale the cached value is allowed to get
+
+# Callbacks fired on the main loop whenever a probe observes a *change* in
+# connectivity. Gio.NetworkMonitor is not a reliable trigger on its own: it
+# stays silent for some transitions (notably under the Flatpak network
+# portal, over VPNs, and across suspend/resume) and reports a link as
+# available while DNS still fails. The probe is what requests actually see,
+# so the UI follows it.
+_ONLINE_LISTENERS = []
+# Callbacks waiting on the result of the probe currently in flight.
+_PROBE_WAITERS = []
 
 _FORCE_OFFLINE_CACHE = {"value": False, "expires": 0.0}
 _FORCE_OFFLINE_TTL = 10.0
@@ -48,6 +59,52 @@ def _check_force_offline():
     return result
 
 
+def add_online_listener(callback):
+    """Register ``callback(online: bool)``, invoked on the main loop each
+    time a probe flips the observed connectivity state."""
+    with _IS_ONLINE_LOCK:
+        if callback not in _ONLINE_LISTENERS:
+            _ONLINE_LISTENERS.append(callback)
+
+
+def remove_online_listener(callback):
+    with _IS_ONLINE_LOCK:
+        if callback in _ONLINE_LISTENERS:
+            _ONLINE_LISTENERS.remove(callback)
+
+
+def _notify_online_listeners(online):
+    with _IS_ONLINE_LOCK:
+        if online == _IS_ONLINE_STATE["notified"]:
+            return
+        _IS_ONLINE_STATE["notified"] = online
+        listeners = list(_ONLINE_LISTENERS)
+    for cb in listeners:
+        GLib.idle_add(cb, online)
+
+
+def _probe_worker():
+    import socket
+    try:
+        with socket.create_connection(
+            ("music.youtube.com", 443), timeout=2.0
+        ):
+            result = True
+    except OSError:
+        result = False
+    with _IS_ONLINE_LOCK:
+        _IS_ONLINE_STATE["value"] = result
+        _IS_ONLINE_STATE["last_probe"] = time.monotonic()
+        _IS_ONLINE_STATE["probe_in_flight"] = False
+        waiters = _PROBE_WAITERS[:]
+        del _PROBE_WAITERS[:]
+    # What callers of is_online() will see, force_offline included.
+    online = result and not _check_force_offline()
+    _notify_online_listeners(online)
+    for cb in waiters:
+        GLib.idle_add(cb, online)
+
+
 def _kick_online_probe(now):
     """Spawn a background probe if it's been a while since the last one
     and no probe is currently in flight."""
@@ -58,21 +115,29 @@ def _kick_online_probe(now):
             return
         _IS_ONLINE_STATE["probe_in_flight"] = True
 
-    def _probe():
-        import socket
-        try:
-            with socket.create_connection(
-                ("music.youtube.com", 443), timeout=2.0
-            ):
-                result = True
-        except OSError:
-            result = False
-        with _IS_ONLINE_LOCK:
-            _IS_ONLINE_STATE["value"] = result
-            _IS_ONLINE_STATE["last_probe"] = time.monotonic()
-            _IS_ONLINE_STATE["probe_in_flight"] = False
+    _is_online_threading.Thread(target=_probe_worker, daemon=True).start()
 
-    _is_online_threading.Thread(target=_probe, daemon=True).start()
+
+def probe_online_now(callback=None):
+    """Probe connectivity immediately, ignoring the staleness interval,
+    and hand the fresh result to ``callback`` on the main loop.
+
+    Use this instead of ``is_online()`` whenever a decision hinges on the
+    state having *just* changed — after a NetworkMonitor transition, or
+    after the force_offline pref is toggled. ``is_online()`` would answer
+    from a cache that can be up to ``_IS_ONLINE_PROBE_INTERVAL`` seconds
+    old, which is how "Back online" used to land on a page that promptly
+    redrew itself as offline. A probe already in flight is joined rather
+    than duplicated.
+    """
+    with _IS_ONLINE_LOCK:
+        if callback is not None:
+            _PROBE_WAITERS.append(callback)
+        if _IS_ONLINE_STATE["probe_in_flight"]:
+            return
+        _IS_ONLINE_STATE["probe_in_flight"] = True
+
+    _is_online_threading.Thread(target=_probe_worker, daemon=True).start()
 
 
 def is_online():

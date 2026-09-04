@@ -1,6 +1,7 @@
 import os
 import sys
 import threading
+import time
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -684,20 +685,76 @@ class MainWindow(Adw.ApplicationWindow):
         # 7. Initial Checks
         self.check_auth()
 
-        # Monitor network connectivity
-        self._was_online = None
+        # Monitor network connectivity.
+        #
+        # Two sources feed this. Gio.NetworkMonitor is fast but noisy: it
+        # emits in bursts while routes and DNS settle, and it calls a link
+        # "available" that can't resolve a name. The TCP probe in ui.utils
+        # is slower but authoritative, and it keeps running when the
+        # monitor stays silent. So the monitor only *triggers* a probe,
+        # and the probe decides. Toasts and page reloads fire once per
+        # real transition instead of once per emission.
+        from ui.utils import add_online_listener, is_online
+
+        self._net_online = is_online()
+        self._net_debounce_id = 0
+        self._last_net_poll = 0.0
         monitor = Gio.NetworkMonitor.get_default()
         monitor.connect("network-changed", self._on_network_changed)
+        add_online_listener(self._apply_network_state)
+        GLib.timeout_add_seconds(5, self._network_poll_tick)
 
     def _on_network_changed(self, monitor, available):
-        if available and self._was_online is False:
-            # Just came back online
+        # Coalesce the burst: act on the state that's still there 1.5 s
+        # after the last emission.
+        if self._net_debounce_id:
+            GLib.source_remove(self._net_debounce_id)
+        self._net_debounce_id = GLib.timeout_add(1500, self._settle_network_change)
+
+    def _settle_network_change(self):
+        from ui.utils import invalidate_is_online_cache, probe_online_now
+
+        self._net_debounce_id = 0
+        invalidate_is_online_cache()
+        probe_online_now()
+        return False
+
+    def _network_poll_tick(self):
+        """Backstop for transitions NetworkMonitor never reports (the
+        Flatpak portal, VPNs, suspend/resume). Probes every tick while
+        offline so recovery is picked up within ~5 s, and every ~30 s
+        while online. Each probe is one 2 s-timeout connect off-thread."""
+        from ui.utils import probe_online_now, remove_online_listener
+
+        if self.in_destruction():
+            remove_online_listener(self._apply_network_state)
+            return False
+        now = time.monotonic()
+        if self._net_online and now - self._last_net_poll < 30:
+            return True
+        self._last_net_poll = now
+        probe_online_now()
+        return True
+
+    def _adopt_network_state(self, online):
+        """Take a probe result as the current state without announcing it.
+        Used where the user caused the change and the UI is already being
+        redrawn, so a toast would be noise."""
+        self._net_online = bool(online)
+        return False
+
+    def _apply_network_state(self, online):
+        online = bool(online)
+        if online == self._net_online:
+            return False
+        self._net_online = online
+        if online:
             print("[NETWORK] Back online - refreshing library")
             self.add_toast("Back online")
             if hasattr(self, "library_page"):
                 self.library_page.load_library()
             if hasattr(self, "search_page"):
-                self.search_page.load_explore_data()
+                self.search_page.load_explore_data(force=True)
             if hasattr(self, "home_page"):
                 self.home_page.refresh()
             # Re-validate auth if needed
@@ -706,7 +763,7 @@ class MainWindow(Adw.ApplicationWindow):
             client = MusicClient()
             if not client.is_authenticated():
                 threading.Thread(target=self._revalidate_auth, daemon=True).start()
-        elif not available and self._was_online is not False:
+        else:
             print("[NETWORK] Went offline")
             self.add_toast("Offline - downloaded songs still available")
             # Grey out unavailable items
@@ -714,11 +771,11 @@ class MainWindow(Adw.ApplicationWindow):
                 self.library_page._apply_offline_state()
             # Show offline message on explore
             if hasattr(self, "search_page"):
-                self.search_page.load_explore_data()
+                self.search_page.load_explore_data(force=True)
             # Show offline message on home
             if hasattr(self, "home_page"):
                 self.home_page.refresh()
-        self._was_online = available
+        return False
 
     def _revalidate_auth(self):
         from api.client import MusicClient
@@ -2390,6 +2447,17 @@ class MainWindow(Adw.ApplicationWindow):
             os.makedirs(os.path.dirname(_prefs_path), exist_ok=True)
             with open(_prefs_path, "w") as f:
                 _json.dump(_prefs, f)
+            # is_online() caches the pref for 10 s. Without this the pages
+            # reloaded below would read the value we just replaced.
+            from ui.utils import invalidate_is_online_cache, probe_online_now
+
+            invalidate_is_online_cache()
+            if switch.get_active():
+                self._net_online = False
+            else:
+                # Resync against the real link. The reloads below already
+                # redraw every page, so adopt the result without a toast.
+                probe_online_now(self._adopt_network_state)
             if hasattr(self, "library_page"):
                 self.library_page._apply_offline_state()
                 self.library_page.load_library()
