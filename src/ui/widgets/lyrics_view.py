@@ -529,7 +529,7 @@ class LyricRow(Gtk.ListBoxRow):
         
         sung_rect = Graphene.Rect().init(0, 0, 0, 0)
         
-        MIN_GLOW_MS = 520
+        MIN_GLOW_MS = 600
         MAX_GLOW_MS = 1000
         
         for i, p in enumerate(parts):
