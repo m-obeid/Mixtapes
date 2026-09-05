@@ -613,7 +613,7 @@ window > windowhandle,
 .lyrics-line .lyrics-line-label {
   font-size: 1.4em;
   font-weight: 700;
-  color: mix(@accent_color, alpha(@accent_color, 0.1), 0.8);
+  color: alpha(@accent_color, 0.2);
   text-shadow: none;
 }
 
@@ -644,11 +644,11 @@ window > windowhandle,
 .lyrics-line .lyrics-line-sub {
   font-size: 0.98em;
   font-weight: 600;
-  color: mix(@accent_color, alpha(@accent_color, 0.1), 0.8);
+  color: alpha(@accent_color, 0.2);
 }
 
 .lyrics-line .lyrics-line-sub.active {
-  color: alpha(@accent_color, 0.78);
+  color: alpha(@accent_color, 0.8);
 }
 
 .lyrics-line .lyrics-line-sub.glow {
