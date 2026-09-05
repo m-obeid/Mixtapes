@@ -53,7 +53,7 @@ FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_DEFAULT = 0.7, 2.0, 1.0
 # How much bigger the active line is drawn than the resting ones. The
 # row's own height never changes, and a line with no slack to grow into
 # is capped to what fits, so this can be assertive by default.
-ACTIVE_SCALE_MIN, ACTIVE_SCALE_MAX, ACTIVE_SCALE_DEFAULT = 1.0, 1.4, 1.20
+ACTIVE_SCALE_MIN, ACTIVE_SCALE_MAX, ACTIVE_SCALE_DEFAULT = 1.0, 1.5, 1.3
 
 _lock = threading.Lock()
 _cache = None

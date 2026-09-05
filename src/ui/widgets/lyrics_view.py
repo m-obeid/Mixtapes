@@ -85,9 +85,9 @@ _EFFECT_SCALE = ("subtle", "full")
 _EFFECT_GLOW = ("full",)
 _EFFECT_BLUR = ("full",)
 
-_BLUR_START_DISTANCE = 2
+_BLUR_START_DISTANCE = 0
 _BLUR_PER_LINE = 0.65
-_BLUR_MAX = 2.6
+_BLUR_MAX = 3.5
 _EFFECT_LERP = 0.16
 
 # Scripts that a romanization actually helps with. Greek is left out on
@@ -297,96 +297,88 @@ def _normalize_parts(raw_parts):
     return out
 
 
-def _join_parts_markup(parts, alphas):
-    chunks = []
-    for i, part in enumerate(parts):
-        alpha = int(max(0.0, min(1.0, alphas[i])) * _PANGO_ALPHA_MAX)
-        chunks.append(
-            f"<span fgalpha='{alpha}'>{html.escape(part['text'])}</span>"
-        )
-        if part.get("space_after") and i < len(parts) - 1:
-            chunks.append(" ")
-    return "".join(chunks)
-
-
 class LyricRow(Gtk.ListBoxRow):
-    """A single lyric line. Always rendered with Pango markup so swapping
+    """
+    A single lyric line. Always rendered with Pango markup so swapping
     between active and inactive doesn't re-layout the label.
-
-    A line that carries a romanization, translation or background vocal
-    gets a second, dimmer label underneath. Both labels are built once at
-    construction, so the row's measured height is the same active and
-    inactive — that stability is what the autoscroll target depends on."""
+    """
 
     __gtype_name__ = "MixtapesLyricRow"
 
-    def __init__(self, line, line_idx, second_line_mode="auto",
+    def __init__(self, line, line_idx, second_line_mode="auto", 
                  effects=lyrics_prefs.EFFECTS_DEFAULT, sweep_end_ms=None,
                  sweep=True, active_scale=lyrics_prefs.ACTIVE_SCALE_DEFAULT):
         super().__init__()
         self.line_idx = line_idx
+        self.is_static = line.get("start") is None
         self.start_ms = int((line.get("start") or 0.0) * 1000)
         self.text = line.get("text") or ""
         self._effects = effects
-        self._can_scale = effects in _EFFECT_SCALE
-        self._can_glow = effects in _EFFECT_GLOW
-        self._can_blur = effects in _EFFECT_BLUR
+        self._second_line_mode = second_line_mode
+        
+        self._can_scale = (effects in _EFFECT_SCALE) and not self.is_static
+        self._can_glow = (effects in _EFFECT_GLOW) and not self.is_static
+        self._can_blur = (effects in _EFFECT_BLUR) and not self.is_static
         self._active_scale = active_scale
-        self._lerp = _LERP_SPEED if effects == "off" else _LERP_SPEED_EFFECTS
-        # Word-level parts (each {start, end, text}) if the source ships
-        # syllable / word timing. Empty means line-level only.
+        
+        base_lerp = _LERP_SPEED if effects == "off" else _LERP_SPEED_EFFECTS
+        self._lerp = base_lerp * 0.6
+        
         self.parts = _normalize_parts(line.get("parts"))
-        # No real word timing, but we know when the line starts and when
-        # it gives way to the next one. Spreading that span across the
-        # line's own words turns the single on/off step of a line-synced
-        # source into a highlight that travels through the line, which is
-        # what word-level sources look like. Skipped when effects are off,
-        # where the whole point is the plain original behaviour.
         self.swept = False
+        
         if not self.parts and sweep and line.get("start") is not None:
             synthetic = _synthesize_parts(self.text, self.start_ms, sweep_end_ms)
             if synthetic:
                 self.parts = synthetic
                 self.swept = True
+                
+        self._assign_byte_offsets(self.text, self.parts)
 
-        # Duets: Apple tags each line with the voice singing it, and the
-        # second voice (plus the parts they sing together) sits against
-        # the opposite edge. Only set when the source actually declares
-        # more than one agent, so single-voice tracks are unaffected.
         self.opposite_voice = line.get("align") == "end"
+        
         align = Gtk.Align.END if self.opposite_voice else Gtk.Align.START
-        justify = (
-            Gtk.Justification.RIGHT if self.opposite_voice
-            else Gtk.Justification.LEFT
-        )
+        justify = Gtk.Justification.RIGHT if self.opposite_voice else Gtk.Justification.LEFT
         xalign = 1.0 if self.opposite_voice else 0.0
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.set_child(box)
 
         self.label = Gtk.Label(
-            wrap=True,
+            wrap=True, 
             wrap_mode=Pango.WrapMode.WORD_CHAR,
-            justify=justify,
-            halign=align,
-            valign=Gtk.Align.CENTER,
+            justify=justify, 
+            halign=align, 
+            valign=Gtk.Align.CENTER, 
             xalign=xalign,
         )
         self.label.add_css_class("lyrics-line-label")
         box.append(self.label)
 
-        # ── Second line ───────────────────────────────────────────────
         sub_text, sub_parts = _second_line_for(line, second_line_mode)
         self.sub_text = sub_text or ""
         self.sub_parts = _normalize_parts(sub_parts) if sub_parts else []
+        
+        is_bg = (second_line_mode == "background") or \
+                (second_line_mode == "auto" and not line.get("romanization") and line.get("bg_text"))
+                
+        if not is_bg:
+            self.sub_parts = []
+        elif not self.sub_parts and self.sub_text and sweep and line.get("start") is not None:
+            synthetic_sub = _synthesize_parts(self.sub_text, self.start_ms, sweep_end_ms)
+            if synthetic_sub:
+                self.sub_parts = synthetic_sub
+                
+        self._assign_byte_offsets(self.sub_text, self.sub_parts)
+
         self.sub_label = None
         if self.sub_text:
             self.sub_label = Gtk.Label(
-                wrap=True,
+                wrap=True, 
                 wrap_mode=Pango.WrapMode.WORD_CHAR,
-                justify=justify,
-                halign=align,
-                valign=Gtk.Align.CENTER,
+                justify=justify, 
+                halign=align, 
+                valign=Gtk.Align.CENTER, 
                 xalign=xalign,
             )
             self.sub_label.add_css_class("lyrics-line-sub")
@@ -395,259 +387,582 @@ class LyricRow(Gtk.ListBoxRow):
         self.add_css_class("lyrics-line")
         self.set_selectable(True)
         self.set_activatable(True)
-        # Don't take keyboard focus. Selecting a row would otherwise pull
-        # focus onto it, and the ScrolledWindow's built-in scroll-on-focus
-        # behaviour would race with our own animated scroll — visible as
-        # the active line jumping back and forth.
         self.set_can_focus(False)
         self.set_focusable(False)
 
-        # Per-word alpha state. Each word has a current alpha that lerps
-        # toward a target on every frame tick. For line-only sources we
-        # synthesize a single "word" covering the whole line.
-        n = len(self.parts) or 1
-        base = _ALPHA_FUTURE_WORD if self.parts else _ALPHA_INACTIVE
-        self._word_alphas = [base] * n
-        self._word_targets = [base] * n
-
-        n_sub = len(self.sub_parts) or 1
-        self._sub_alphas = [_ALPHA_SUB_INACTIVE] * n_sub
-        self._sub_targets = [_ALPHA_SUB_INACTIVE] * n_sub
-
-        # Current playback position (ms) — drives the targets each tick.
-        # Set by the parent view; -1 means "not the active line".
         self._cursor_ms = -1
-        self._dirty = True
-        # "Full" effects: animated scale on the active line and blur that
-        # deepens with distance from it. Both live in the snapshot pass.
+        self._internal_cursor_ms = -1
+        self._wants_turn_off = False
+        
         self._scale = 1.0
         self._scale_target = 1.0
         self._blur = 0.0
         self._blur_target = 0.0
         self._distance = 99
-        self._glowing = False
-        self.add_tick_callback(self._on_tick)
-        self._render_markup()
-        self._render_sub_markup()
 
-    # The parent view pushes the current cursor position into the active
-    # row and (-1) into all others. The tick callback turns this into a
-    # per-word alpha target.
-    def set_cursor_ms(self, ms):
-        if ms == self._cursor_ms:
+        n = len(self.parts) or 1
+        n_sub = len(self.sub_parts) or 1
+        
+        self._word_alphas = [0.0] * n
+        self._word_targets = [0.0] * n
+        self._sub_alphas = [0.0] * n_sub
+        self._sub_targets = [0.0] * n_sub
+
+        self._recompute_targets()
+        self._dirty = True
+        self.add_tick_callback(self._on_tick)
+
+    def _assign_byte_offsets(self, text, parts):
+        if not text or not parts: 
             return
-        self._cursor_ms = ms
+            
+        text_bytes = text.encode('utf-8')
+        offset = 0
+        
+        for p in parts:
+            word_bytes = p["text"].encode('utf-8')
+            idx = text_bytes.find(word_bytes, offset)
+            
+            if idx >= 0:
+                p["byte_start"] = idx
+                p["byte_end"] = idx + len(word_bytes)
+                offset = p["byte_end"]
+            else:
+                p["byte_start"] = -1
+                p["byte_end"] = -1
+
+    def set_cursor_ms(self, ms):
+        if ms == self._cursor_ms and ms != -1: 
+            return
+        
+        if ms == -1:
+            self._wants_turn_off = True
+        else:
+            self._wants_turn_off = False
+            if self._cursor_ms < 0 or abs(self._cursor_ms - ms) > 1000:
+                self._internal_cursor_ms = ms
+            self._cursor_ms = ms
+            
+        self._recompute_effect_targets()
         self._recompute_targets()
 
     def set_distance(self, distance):
-        """How many lines away from the active one this row is. Only
-        consulted for the distance blur; a no-op otherwise."""
-        if distance == self._distance:
+        if distance == self._distance: 
             return
         self._distance = distance
         self._recompute_effect_targets()
 
-    def _word_alpha_for(self, part, ceiling, floor):
-        """Target alpha for one word at the current cursor.
-
-        With effects on, the word ramps in over a slice of the time it's
-        actually held, so a long vowel swells and a fast syllable snaps.
-        With effects off it flips straight to the ceiling the moment the
-        cursor reaches it, which is the original behaviour."""
-        if self._cursor_ms < part["start_ms"]:
-            return floor
-        if self._effects == "off":
-            return ceiling
-        held = max(0, part["end_ms"] - part["start_ms"])
-        fraction = _SWEEP_RAMP_FRACTION if self.swept else _WORD_RAMP_FRACTION
-        ramp = min(_WORD_RAMP_MAX_MS, max(_WORD_RAMP_MIN_MS,
-                                          held * fraction))
-        progress = min(1.0, (self._cursor_ms - part["start_ms"]) / ramp)
-        return floor + (ceiling - floor) * progress
-
-    def _recompute_targets(self):
-        is_active = self._cursor_ms >= 0
-
-        if not self.parts:
-            self._word_targets[0] = (
-                _ALPHA_ACTIVE if is_active else _ALPHA_INACTIVE
-            )
-        else:
-            for i, part in enumerate(self.parts):
-                self._word_targets[i] = (
-                    self._word_alpha_for(part, _ALPHA_ACTIVE, _ALPHA_FUTURE_WORD)
-                    if is_active else _ALPHA_FUTURE_WORD
-                )
-
-        if self.sub_label is not None:
-            if not self.sub_parts:
-                self._sub_targets[0] = (
-                    _ALPHA_SUB_ACTIVE if is_active else _ALPHA_SUB_INACTIVE
-                )
-            else:
-                for i, part in enumerate(self.sub_parts):
-                    self._sub_targets[i] = (
-                        self._word_alpha_for(
-                            part, _ALPHA_SUB_ACTIVE, _ALPHA_SUB_INACTIVE
-                        )
-                        if is_active else _ALPHA_SUB_INACTIVE
-                    )
-
-        self._set_glow(is_active and self._can_glow)
-        self._recompute_effect_targets()
-
-    def _set_glow(self, on):
-        if on == self._glowing:
-            return
-        self._glowing = on
-        # The glow is a CSS text-shadow so it can transition on its own
-        # clock without touching the Pango markup we re-render per frame.
-        if on:
-            self.label.add_css_class("lyrics-line-glow")
-        else:
-            self.label.remove_css_class("lyrics-line-glow")
-
     def _fitting_scale(self):
-        """The largest growth this line can take without running off the
-        edge of the row.
-
-        The labels wrap to the width they're given, so a line long enough
-        to fill the row has no room to grow into and any scale above 1
-        pushes it under the scroller's clip. Measuring the laid-out text
-        instead of assuming the configured scale always fits means short
-        lines still grow the full amount while long ones grow by however
-        much slack they actually have."""
-        if not self._can_scale:
+        if not self._can_scale: 
             return 1.0
+            
+        layout = self.label.get_layout()
+        
+        if layout and layout.get_line_count() > 1:
+            return 1.0
+            
         width = self.get_width()
-        if width <= 0:
+        if width <= 0: 
             return self._active_scale
-
-        # How far the content reaches from the edge the scale is anchored
-        # to. Both labels count: a romanization can be wider than the
-        # lyric above it.
-        reach = 0
-        for label in (self.label, self.sub_label):
-            if label is None:
-                continue
-            layout = label.get_layout()
-            if layout is None:
-                continue
+        
+        if layout:
             text_w = layout.get_pixel_size()[0]
-            if text_w <= 0:
-                continue
-            alloc = label.get_allocation()
-            if self.opposite_voice:
-                reach = max(reach, width - (alloc.x + alloc.width - text_w))
+            alloc = self.label.get_allocation()
+            
+            if not self.opposite_voice:
+                reach = alloc.x + text_w
             else:
-                reach = max(reach, alloc.x + text_w)
-
-        if reach <= 0:
-            return self._active_scale
-        return max(1.0, min(self._active_scale, width / reach))
+                reach = width - (alloc.x + alloc.width - text_w)
+                
+            if reach > 0:
+                return max(1.0, min(self._active_scale, width / reach))
+                
+        return self._active_scale
 
     def _recompute_effect_targets(self):
         is_active = self._cursor_ms >= 0
-        self._scale_target = (
-            self._fitting_scale() if (is_active and self._can_scale) else 1.0
-        )
+        self._scale_target = self._fitting_scale() if (is_active and self._can_scale) else 1.0
+        
         if not self._can_blur:
             self._blur_target = 0.0
             return
+            
         if is_active or self._distance < _BLUR_START_DISTANCE:
             self._blur_target = 0.0
         else:
-            self._blur_target = min(
-                _BLUR_MAX,
-                (self._distance - _BLUR_START_DISTANCE + 1) * _BLUR_PER_LINE,
-            )
+            self._blur_target = min(_BLUR_MAX, (self._distance - _BLUR_START_DISTANCE + 1) * _BLUR_PER_LINE)
+
+    def _word_alpha_for(self, part):
+        if self._cursor_ms < part["start_ms"]: 
+            return 0.0
+            
+        if self._effects == "off": 
+            return 1.0
+            
+        held = max(0, part["end_ms"] - part["start_ms"])
+        fraction = _SWEEP_RAMP_FRACTION if self.swept else _WORD_RAMP_FRACTION
+        ramp = min(_WORD_RAMP_MAX_MS, max(_WORD_RAMP_MIN_MS, held * fraction))
+        
+        return min(1.0, (self._cursor_ms - part["start_ms"]) / ramp)
+
+    def _recompute_targets(self):
+        is_active = self._cursor_ms >= 0
+        
+        if not self.parts:
+            self._word_targets[0] = 1.0 if is_active else 0.0
+        else:
+            for i, part in enumerate(self.parts):
+                self._word_targets[i] = self._word_alpha_for(part) if is_active else 0.0
+
+        if self.sub_label is not None:
+            if not self.sub_parts:
+                self._sub_targets[0] = 1.0 if is_active else 0.0
+            else:
+                for i, part in enumerate(self.sub_parts):
+                    self._sub_targets[i] = self._word_alpha_for(part) if is_active else 0.0
+                    
+        self._dirty = True
+
+    def _get_sweep_state(self, cursor_ms, parts, layout):
+        if not parts or not layout: 
+            return -1, 0.0, Graphene.Rect().init(0, 0, 0, 0), None, 0.0, False
+        
+        sung_rect = Graphene.Rect().init(0, 0, 0, 0)
+        
+        MIN_GLOW_MS = 520
+        MAX_GLOW_MS = 1000
+        
+        for i, p in enumerate(parts):
+            b_start = p.get("byte_start", -1)
+            b_end = p.get("byte_end", -1)
+            if b_start < 0: 
+                continue
+            
+            pos_start = layout.index_to_pos(b_start)
+            pos_end = layout.index_to_pos(b_end)
+            
+            x_start = pos_start.x / Pango.SCALE
+            y_start = pos_start.y / Pango.SCALE
+            height = pos_start.height / Pango.SCALE
+            x_end = pos_end.x / Pango.SCALE
+            
+            if x_end <= x_start:
+                x_end = x_start + (pos_start.width / Pango.SCALE) * len(p["text"])
+                
+            if cursor_ms >= p["end_ms"]:
+                sung_rect = Graphene.Rect().init(x_end, y_start, 0, height)
+                
+            elif cursor_ms >= p["start_ms"]:
+                duration = max(1, p["end_ms"] - p["start_ms"])
+                progress = (cursor_ms - p["start_ms"]) / duration
+                
+                sweep_x_rel = x_start + (x_end - x_start) * progress
+                active_rect = Graphene.Rect().init(x_start, y_start, x_end - x_start, height)
+                
+                if duration >= MIN_GLOW_MS:
+                    is_long = True
+                    weight = min(1.0, (duration - MIN_GLOW_MS) / (MAX_GLOW_MS - MIN_GLOW_MS))
+                    
+                    smooth_curve = math.sin(progress * math.pi)
+                    glow = smooth_curve * (2.0 * weight)
+                else:
+                    is_long = False
+                    glow = 0.0
+                    
+                return i, sweep_x_rel, sung_rect, active_rect, glow, is_long
+            else:
+                break
+                
+        return -1, 0.0, sung_rect, None, 0.0, False
+
+    def _create_isolated_word_layout(self, context, font_desc, text, progress, is_long):
+        gl = Pango.Layout.new(context)
+        gl.set_text(text)
+        gl.set_font_description(font_desc)
+
+        if is_long:
+            attrs = Pango.AttrList.new()
+            N = len(text)
+            curr_byte = 0
+
+            for char_idx, char in enumerate(text):
+                char_bytes = char.encode('utf-8')
+                char_len = len(char_bytes)
+
+                delay = (char_idx / max(1, N)) * 0.5
+                t = progress * 1.5 - delay
+                t_clamped = max(0.0, min(1.0, t))
+                wave_val = math.sin(t_clamped * math.pi) * 3500
+
+                if wave_val > 5:
+                    attr = Pango.attr_rise_new(int(wave_val))
+                    attr.start_index = curr_byte
+                    attr.end_index = curr_byte + char_len
+                    attrs.insert(attr)
+
+                curr_byte += char_len
+
+            gl.set_attributes(attrs)
+            
+        return gl
+        
+    def _get_line_baseline(self, layout, byte_index):
+        """Finds the exact baseline of the line containing the specified byte."""
+        iter = layout.get_iter()
+        while True:
+            line = iter.get_line_readonly()
+            if line is not None and line.start_index <= byte_index < line.start_index + line.length:
+                return iter.get_baseline() / Pango.SCALE
+            if not iter.next_line():
+                break
+        return layout.get_baseline() / Pango.SCALE
+
+    def _update_alphas(self):
+        changed = False
+        is_active = self._cursor_ms >= 0
+
+        if is_active and self._effects != "off":
+            if self.parts:
+                for i, p in enumerate(self.parts):
+                    t = 1.0 if self._internal_cursor_ms > p["end_ms"] else 0.0
+                    if abs(self._word_alphas[i] - t) > 0.005:
+                        self._word_alphas[i] += (t - self._word_alphas[i]) * self._lerp
+                        changed = True
+            else:
+                t = 1.0
+                if abs(self._word_alphas[0] - t) > 0.005:
+                    self._word_alphas[0] += (t - self._word_alphas[0]) * self._lerp
+                    changed = True
+
+            if self.sub_label:
+                if self.sub_parts:
+                    for i, p in enumerate(self.sub_parts):
+                        t = 1.0 if self._internal_cursor_ms > p["end_ms"] else 0.0
+                        if abs(self._sub_alphas[i] - t) > 0.005:
+                            self._sub_alphas[i] += (t - self._sub_alphas[i]) * self._lerp
+                            changed = True
+                else:
+                    t = 1.0
+                    if abs(self._sub_alphas[0] - t) > 0.005:
+                        self._sub_alphas[0] += (t - self._sub_alphas[0]) * self._lerp
+                        changed = True
+
+        else:
+            for i in range(len(self.parts) if self.parts else 1):
+                target = self._word_targets[i]
+                if abs(self._word_alphas[i] - target) > 0.005:
+                    self._word_alphas[i] += (target - self._word_alphas[i]) * self._lerp
+                    changed = True
+                    
+            if self.sub_label:
+                if not self.sub_parts:
+                    target = self._sub_targets[0]
+                    if abs(self._sub_alphas[0] - target) > 0.005:
+                        self._sub_alphas[0] += (target - self._sub_alphas[0]) * self._lerp
+                        changed = True
+                else:
+                    for i in range(len(self.sub_parts)):
+                        target = self._sub_targets[i]
+                        if abs(self._sub_alphas[i] - target) > 0.005:
+                            self._sub_alphas[i] += (target - self._sub_alphas[i]) * self._lerp
+                            changed = True
+
+        if changed or getattr(self, "_dirty", False):
+            self._render_markup()
+            self._render_sub_markup()
+            self._dirty = False
 
     def _on_tick(self, _widget, _frame_clock):
+        current_time = GLib.get_monotonic_time() / 1000.0
+        delta = current_time - getattr(self, "_last_tick_time", current_time)
+        self._last_tick_time = current_time
+
         changed = False
-        for i, target in enumerate(self._word_targets):
-            cur = self._word_alphas[i]
-            if abs(cur - target) > 0.002:
-                self._word_alphas[i] = cur + (target - cur) * self._lerp
+
+        if self._wants_turn_off:
+            end_bound = 0
+            if self.parts: 
+                end_bound = max(end_bound, self.parts[-1]["end_ms"])
+            if self.sub_parts: 
+                end_bound = max(end_bound, self.sub_parts[-1]["end_ms"])
+            
+            if delta > 250:
+                self._internal_cursor_ms = end_bound + 1
+            
+            if self._internal_cursor_ms > end_bound or self._internal_cursor_ms < self.start_ms:
+                self._cursor_ms = -1
+                self._internal_cursor_ms = -1
+                self._wants_turn_off = False
+                self._recompute_effect_targets()
+                self._recompute_targets()
                 changed = True
-        if changed or self._dirty:
-            self._render_markup()
+            else:
+                if delta < 100: 
+                    self._internal_cursor_ms += delta
+                changed = True
+        else:
+            if self._cursor_ms >= 0:
+                if delta > 250:
+                    self._internal_cursor_ms = self._cursor_ms
+                elif self._internal_cursor_ms < self._cursor_ms + 250:
+                    self._internal_cursor_ms += delta
+                changed = True
 
-        sub_changed = False
-        if self.sub_label is not None:
-            for i, target in enumerate(self._sub_targets):
-                cur = self._sub_alphas[i]
-                if abs(cur - target) > 0.002:
-                    self._sub_alphas[i] = cur + (target - cur) * self._lerp
-                    sub_changed = True
-            if sub_changed or self._dirty:
-                self._render_sub_markup()
+        self._update_alphas()
 
-        self._dirty = False
-
-        # Scale and blur are drawn, not laid out, so they need an explicit
-        # redraw rather than a markup rebuild.
-        redraw = False
-        for attr, target_attr in (("_scale", "_scale_target"),
-                                  ("_blur", "_blur_target")):
+        for attr, target_attr in (("_scale", "_scale_target"), ("_blur", "_blur_target")):
             cur = getattr(self, attr)
             target = getattr(self, target_attr)
-            if abs(cur - target) > 0.002:
-                setattr(self, attr, cur + (target - cur) * _EFFECT_LERP)
-                redraw = True
-        if redraw:
+            if abs(cur - target) > 0.001:
+                setattr(self, attr, cur + (target - cur) * (_EFFECT_LERP * 0.6))
+                changed = True
+
+        if getattr(self, "_dirty", False):
+            self.queue_draw()
+        elif changed or self._cursor_ms >= 0:
             self.queue_draw()
 
         # Keep ticking — cheap when no alphas are in motion.
         return GLib.SOURCE_CONTINUE
 
+    def _get_css_colors(self, label):
+        ctx = label.get_style_context()
+        c_in = ctx.get_color()
+        
+        ctx.save()
+        ctx.add_class("active")
+        c_act = ctx.get_color()
+        
+        ctx.remove_class("active")
+        ctx.add_class("glow")
+        c_glow = ctx.get_color()
+        ctx.restore()
+        
+        return c_in, c_act, c_glow
+
+    def _lerp_color(self, c1, c2, t):
+        c = Gdk.RGBA()
+        c.red = c1.red + (c2.red - c1.red) * t
+        c.green = c1.green + (c2.green - c1.green) * t
+        c.blue = c1.blue + (c2.blue - c1.blue) * t
+        c.alpha = c1.alpha + (c2.alpha - c1.alpha) * t
+        return c
+
+    def _color_to_markup(self, color, text):
+        r = int(color.red * 255)
+        g = int(color.green * 255)
+        b = int(color.blue * 255)
+        a = max(1, int(color.alpha * 65535))
+        return f"<span color='#{r:02x}{g:02x}{b:02x}' fgalpha='{a}'>{html.escape(text)}</span>"
+
     def _render_markup(self):
+        c_in, c_act, _ = self._get_css_colors(self.label)
+        
+        if self._effects == "off":
+            c = c_in if self._cursor_ms < 0 else c_act
+            self.label.set_markup(self._color_to_markup(c, self.text))
+            return
+
         if not self.parts:
-            alpha = int(
-                max(0.0, min(1.0, self._word_alphas[0])) * _PANGO_ALPHA_MAX
-            )
-            markup = f"<span fgalpha='{alpha}'>{html.escape(self.text)}</span>"
+            t = max(0.0, min(1.0, self._word_alphas[0]))
+            c = self._lerp_color(c_in, c_act, t)
+            self.label.set_markup(self._color_to_markup(c, self.text))
         else:
-            markup = _join_parts_markup(self.parts, self._word_alphas)
-        self.label.set_markup(markup)
+            chunks = []
+            for i, part in enumerate(self.parts):
+                t = max(0.0, min(1.0, self._word_alphas[i]))
+                c = self._lerp_color(c_in, c_act, t)
+                chunks.append(self._color_to_markup(c, part["text"]))
+                if part.get("space_after") and i < len(self.parts) - 1:
+                    chunks.append(" ")
+                    
+            self.label.set_markup("".join(chunks))
 
     def _render_sub_markup(self):
-        if self.sub_label is None:
+        if self.sub_label is None: 
             return
+            
+        c_in, c_act, _ = self._get_css_colors(self.sub_label)
+        
+        if self._effects == "off":
+            c = c_in if self._cursor_ms < 0 else c_act
+            self.sub_label.set_markup(self._color_to_markup(c, self.sub_text))
+            return
+
         if not self.sub_parts:
-            alpha = int(
-                max(0.0, min(1.0, self._sub_alphas[0])) * _PANGO_ALPHA_MAX
-            )
-            markup = (
-                f"<span fgalpha='{alpha}'>{html.escape(self.sub_text)}</span>"
-            )
+            t = max(0.0, min(1.0, self._sub_alphas[0]))
+            c = self._lerp_color(c_in, c_act, t)
+            self.sub_label.set_markup(self._color_to_markup(c, self.sub_text))
         else:
-            markup = _join_parts_markup(self.sub_parts, self._sub_alphas)
-        self.sub_label.set_markup(markup)
+            chunks = []
+            for i, part in enumerate(self.sub_parts):
+                t = max(0.0, min(1.0, self._sub_alphas[i]))
+                c = self._lerp_color(c_in, c_act, t)
+                chunks.append(self._color_to_markup(c, part["text"]))
+                if part.get("space_after") and i < len(self.sub_parts) - 1:
+                    chunks.append(" ")
+                    
+            self.sub_label.set_markup("".join(chunks))
+
+    def _render_layer(self, snapshot, label, text, parts):
+        layout = label.get_layout()
+        alloc = label.get_allocation()
+        row_w = self.get_width()
+        
+        if not layout or not parts: 
+            return
+        
+        c_in, c_act, c_glow = self._get_css_colors(label)
+        active_idx, sweep_x_rel, sung_rect, active_rect, glow_int, is_long = self._get_sweep_state(
+            self._internal_cursor_ms, parts, layout
+        )
+        
+        progress = 0.0
+        if active_idx >= 0:
+            p = parts[active_idx]
+            duration = max(1, p["end_ms"] - p["start_ms"])
+            progress = (self._internal_cursor_ms - p["start_ms"]) / duration
+            
+        layout_width, layout_height = layout.get_pixel_size()
+        x_offset = alloc.x + (alloc.width - layout_width) * label.get_xalign()
+        y_offset = alloc.y + (alloc.height - layout_height) * label.get_yalign()
+        
+        context = label.get_pango_context()
+
+        base_layout = Pango.Layout.new(context)
+        base_layout.set_text(text)
+        base_layout.set_font_description(layout.get_font_description())
+        base_layout.set_width(layout.get_width())
+        base_layout.set_alignment(layout.get_alignment())
+        base_layout.set_wrap(layout.get_wrap())
+
+        clip_top = alloc.y - 60
+        clip_bottom = alloc.height + 120
+
+        def draw_clipped_base(x, y, w, h, color):
+            if w <= 0 or h <= 0: return
+            snapshot.push_clip(Graphene.Rect().init(x, y, w, h))
+            snapshot.save()
+            snapshot.translate(Graphene.Point().init(x_offset, y_offset))
+            snapshot.append_layout(base_layout, color)
+            snapshot.restore()
+            snapshot.pop()
+
+        if not active_rect:
+            if self._internal_cursor_ms < parts[0]["start_ms"]:
+                draw_clipped_base(0, clip_top, row_w, clip_bottom - clip_top, c_in)
+            else:
+                sx = x_offset + sung_rect.origin.x
+                sy = y_offset + sung_rect.origin.y
+                sh = sung_rect.size.height
+                
+                draw_clipped_base(0, clip_top, row_w, sy - clip_top, c_act)         
+                draw_clipped_base(0, sy, sx, sh, c_act)                             
+                draw_clipped_base(sx, sy, row_w - sx, sh, c_in)                     
+                draw_clipped_base(0, sy + sh, row_w, clip_bottom - (sy + sh), c_in) 
+            return
+
+        # Absolute coordinates of the word
+        ax = x_offset + active_rect.origin.x
+        ay = y_offset + active_rect.origin.y
+        aw = active_rect.size.width
+        ah = active_rect.size.height
+        sweep_abs_x = x_offset + sweep_x_rel
+
+        draw_clipped_base(0, clip_top, row_w, ay - clip_top, c_act)
+        draw_clipped_base(0, ay + ah, row_w, clip_bottom - (ay + ah), c_in)
+
+        draw_clipped_base(0, ay, ax, ah, c_act)                         
+        draw_clipped_base(ax + aw, ay, row_w - (ax + aw), ah, c_in)     
+
+        active_text = parts[active_idx]["text"]
+        iso_layout = self._create_isolated_word_layout(
+            context, layout.get_font_description(), active_text, progress, is_long
+        )
+
+        active_byte_start = parts[active_idx].get("byte_start", 0)
+        base_baseline = self._get_line_baseline(base_layout, active_byte_start)
+        base_baseline_y = y_offset + base_baseline
+        
+        iso_ascent = iso_layout.get_baseline() / Pango.SCALE
+        iso_draw_y = base_baseline_y - iso_ascent
+
+        if self._can_glow and glow_int > 0:
+            snapshot.save()
+            snapshot.translate(Graphene.Point().init(ax, iso_draw_y))
+            snapshot.push_blur(14.0 * glow_int)
+            snapshot.append_layout(iso_layout, c_glow)
+            snapshot.pop()
+            snapshot.restore()
+
+            snapshot.save()
+            snapshot.translate(Graphene.Point().init(ax, iso_draw_y))
+            snapshot.push_blur(4.0 * glow_int)
+            snapshot.append_layout(iso_layout, c_in)
+            snapshot.pop()
+            snapshot.restore()
+
+        clip_y = iso_draw_y - 20
+        clip_h = ah + 40
+
+        if sweep_abs_x < ax + aw:
+            snapshot.push_clip(Graphene.Rect().init(max(ax, sweep_abs_x), clip_y, (ax + aw) - max(ax, sweep_abs_x), clip_h))
+            snapshot.save()
+            snapshot.translate(Graphene.Point().init(ax, iso_draw_y))
+            snapshot.append_layout(iso_layout, c_in)
+            snapshot.restore()
+            snapshot.pop()
+
+        if sweep_abs_x > ax:
+            snapshot.push_clip(Graphene.Rect().init(ax, clip_y, sweep_abs_x - ax, clip_h))
+            snapshot.save()
+            snapshot.translate(Graphene.Point().init(ax, iso_draw_y))
+            snapshot.append_layout(iso_layout, c_act)
+            snapshot.restore()
+            snapshot.pop()
 
     def do_snapshot(self, snapshot):
         scaling = abs(self._scale - 1.0) > 0.002
         blurring = self._blur > 0.02
-        if not scaling and not blurring:
-            Gtk.ListBoxRow.do_snapshot(self, snapshot)
-            return
+        is_active = self._internal_cursor_ms >= 0 and self._effects != "off"
 
-        if blurring:
+        if is_active:
+            if self.parts: 
+                self.label.set_opacity(0.0)
+            if self.sub_label and self.sub_parts: 
+                self.sub_label.set_opacity(0.0)
+        else:
+            self.label.set_opacity(1.0)
+            if self.sub_label: 
+                self.sub_label.set_opacity(1.0)
+
+        if blurring: 
             snapshot.push_blur(self._blur)
+            
         if scaling:
-            # Anchor at the edge the line is aligned to, vertically
-            # centred, so growing keeps the first character pinned instead
-            # of sliding the line sideways. A duet's opposite-voice lines
-            # are anchored on the right, so they grow from there.
             height = self.get_height()
             anchor_x = float(self.get_width()) if self.opposite_voice else 0.0
+            
             snapshot.save()
             snapshot.translate(Graphene.Point().init(anchor_x, height / 2.0))
             snapshot.scale(self._scale, self._scale)
             snapshot.translate(Graphene.Point().init(-anchor_x, -height / 2.0))
+
         Gtk.ListBoxRow.do_snapshot(self, snapshot)
-        if scaling:
+
+        if is_active:
+            try:
+                if self.parts:
+                    self._render_layer(snapshot, self.label, self.text, self.parts)
+                if self.sub_label and self.sub_parts:
+                    self._render_layer(snapshot, self.sub_label, self.sub_text, self.sub_parts)
+            except Exception:
+                pass
+
+        if scaling: 
             snapshot.restore()
-        if blurring:
+            
+        if blurring: 
             snapshot.pop()
 
 
