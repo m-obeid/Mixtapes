@@ -621,8 +621,16 @@ window > windowhandle,
   color: @accent_color;
 }
 
-.lyrics-line .lyrics-line-label.glow {
-  color: @accent_color;
+@media (prefers-color-scheme: light) {
+    .lyrics-line .lyrics-line-label.glow {
+      color: mix(@accent_bg_color, white, 0.25);
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .lyrics-line .lyrics-line-label.glow {
+      color: @accent_bg_color;
+    }
 }
 
 /* Instrumental marker. The dots are painted in the snapshot pass, so all
