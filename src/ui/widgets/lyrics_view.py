@@ -416,6 +416,33 @@ class LyricRow(Gtk.ListBoxRow):
         self._dirty = True
         self.add_tick_callback(self._on_tick)
 
+    def reset_state(self):
+        self._cursor_ms = -1
+        self._internal_cursor_ms = -1
+        self._wants_turn_off = False
+        self._scale = 1.0
+        self._scale_target = 1.0
+        self._blur = 0.0
+        self._blur_target = 0.0
+        self._distance = 99
+
+        n = len(self.parts) or 1
+        n_sub = len(self.sub_parts) or 1
+        self._word_alphas = [0.0] * n
+        self._word_targets = [0.0] * n
+        self._sub_alphas = [0.0] * n_sub
+        self._sub_targets = [0.0] * n_sub
+
+        self.label.set_opacity(1.0)
+        if self.sub_label is not None:
+            self.sub_label.set_opacity(1.0)
+
+        self._last_tick_time = GLib.get_monotonic_time() / 1000.0
+        self._dirty = False
+        self._render_markup()
+        self._render_sub_markup()
+        self.queue_draw()
+
     def _assign_byte_offsets(self, text, parts):
         if not text or not parts: 
             return
@@ -1073,6 +1100,14 @@ class InterludeRow(Gtk.ListBoxRow):
         self._cursor_ms = -1
         self._t0 = time.monotonic()
         self.add_tick_callback(self._on_tick)
+
+    def reset_state(self):
+        self._cursor_ms = -1
+        self._alphas = [_ALPHA_FUTURE_WORD] * _INTERLUDE_DOTS
+        self._targets = [_ALPHA_FUTURE_WORD] * _INTERLUDE_DOTS
+        self._swell = [0.0] * _INTERLUDE_DOTS
+        self._t0 = time.monotonic()
+        self.queue_draw()
 
     def set_cursor_ms(self, ms):
         if ms == self._cursor_ms:
@@ -2069,6 +2104,14 @@ class LyricsView(Gtk.Box):
             new_idx = self._index_for_position(pos)
             self._active_idx = new_idx
             return
+
+        pending_start = getattr(self, "_seek_pending_start", None)
+        if pending_start is not None:
+            if abs(pos - pending_start) > 1.5:
+                if time.monotonic() - getattr(self, "_seek_pending_time", 0.0) < 0.6:
+                    return
+            self._seek_pending_start = None
+
         idx = self._index_for_position(pos)
         ms = int(pos * 1000)
 
@@ -2250,6 +2293,17 @@ class LyricsView(Gtk.Box):
 
     # ── Row management ────────────────────────────────────────────────────
 
+    def _reset_all_rows(self):
+        if self._lit_interlude is not None:
+            self._lit_interlude.reset_state()
+            self._lit_interlude = None
+        for r in self._row_for_line.values():
+            r.reset_state()
+        for r in self._interlude_rows:
+            r.reset_state()
+        self._lit_idx = -1
+        self._active_idx = -1
+
     def _clear_rows(self):
         # Every row is about to go, so no row is lit any more. Leaving a
         # stale index here would suppress the next activation's clear.
@@ -2421,6 +2475,20 @@ class LyricsView(Gtk.Box):
             return
         start = (row.start_ms or 0) / 1000.0
         if self.player.duration > 0:
+            self._user_scrolled_at = 0.0
+            self._seek_pending_start = start
+            self._seek_pending_time = time.monotonic()
+
+            self._reset_all_rows()
+
+            ms = int(start * 1000)
+            self._last_pos = start
+
+            if isinstance(row, LyricRow):
+                self._activate_row(row.line_idx, cursor_ms=ms)
+            elif isinstance(row, InterludeRow):
+                self._enter_interlude(row, ms)
+
             self.player.seek(start)
 
     def _scroll_to_row(self, row):
