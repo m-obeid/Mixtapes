@@ -565,7 +565,8 @@ window > windowhandle,
 .lyrics-split > .sidebar-pane,
 .lyrics-split > .sidebar-pane > .background,
 .lyrics-split > .content-pane,
-.lyrics-split > .content-pane > .background {
+.lyrics-split > .content-pane > .background,
+.lyrics-split > .background {
   background: none;
   background-color: transparent;
   box-shadow: none;
@@ -591,7 +592,10 @@ window > windowhandle,
 .lyrics-line:focus,
 .lyrics-line:selected,
 .lyrics-line:checked {
-  padding: 6px 8px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  padding-right: 16px;
+  padding-left: 16px;
   border-radius: 8px;
   background: none;
   background-color: transparent;
@@ -601,36 +605,39 @@ window > windowhandle,
   min-height: 0;
 }
 
+.lyrics-line.opposite-voice {
+  padding-left: 120px;
+}
+
+.lyrics-line.lead-voice {
+  padding-right: 120px;
+}
+
+.lyrics-line .lyrics-line-label,
+.lyrics-line .lyrics-line-sub {
+  transition: color 600ms cubic-bezier(0.65, 0, 0.35, 1);
+}
+
 /* Subtle hover so the user gets a clickable affordance — these rows
    are tap-to-seek targets, but the default minimalist treatment made
    them feel like static text. Kept low-opacity so it doesn't fight
    the Pango alpha fade that carries the actual active-line state. */
 .lyrics-line:hover {
-  padding: 6px 8px;
-  border-radius: 8px;
   background-color: alpha(@view_fg_color, 0.06);
-  box-shadow: none;
-  border: none;
-  outline: none;
-  min-height: 0;
 }
 
 .lyrics-line .lyrics-line-label {
-  font-size: 1.4em;
   font-weight: 700;
-  color: @accent_color;
-  /* The glow below is a shadow transition; declaring the resting state
-     here (rather than only on .lyrics-line-glow) gives GTK both ends of
-     the animation, so the halo fades out as well as in. */
-  text-shadow: 0 0 0 alpha(@accent_color, 0);
-  transition: text-shadow 280ms ease-out;
+  color: alpha(@accent_color, 0.2);
+  text-shadow: none;
 }
 
-/* Active-line halo. Soft and accent-tinted so it reads as the line
-   lighting up rather than as a hard outline — at 1.4em bold the text is
-   heavy enough that a tight shadow just looks like a rendering fault. */
-.lyrics-line .lyrics-line-label.lyrics-line-glow {
-  text-shadow: 0 0 18px alpha(@accent_color, 0.45);
+.lyrics-line .lyrics-line-label.active {
+  color: @accent_color;
+}
+
+.lyrics-line .lyrics-line-label.glow {
+  color: mix(@accent_color, white, 0.05);
 }
 
 /* Instrumental marker. The dots are painted in the snapshot pass, so all
@@ -640,14 +647,18 @@ window > windowhandle,
   color: @accent_color;
 }
 
-/* Second line: romanization, translation or background vocals. Smaller
-   and lighter than the lead so it supports the line above instead of
-   competing with it. Per-glyph opacity still comes from Pango alpha —
-   this only sets the type. */
+
 .lyrics-line .lyrics-line-sub {
-  font-size: 0.98em;
-  font-weight: 600;
+  font-weight: 500;
+  color: alpha(@accent_color, 0.2);
+}
+
+.lyrics-line .lyrics-line-sub.active {
   color: @accent_color;
+}
+
+.lyrics-line .lyrics-line-sub.glow {
+  color: mix(@accent_color, white, 0.05);
 }
 
 /* Floating overlay controls: the lyrics toggle on the cover art and the
