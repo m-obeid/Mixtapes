@@ -156,7 +156,7 @@ _FONT_CSS_SCALE = None
 
 # Matches the resting sizes in style.css, which these multiply.
 _BASE_FONT_EM = 1.82
-_SUB_FONT_EM = 1.2
+_SUB_FONT_EM = 1.16
 
 
 def apply_font_scale(force=False):
@@ -385,6 +385,10 @@ class LyricRow(Gtk.ListBoxRow):
             box.append(self.sub_label)
 
         self.add_css_class("lyrics-line")
+        if self.opposite_voice:
+            self.add_css_class("opposite-voice")
+        else:
+            self.add_css_class("lead-voice")
         self.set_selectable(True)
         self.set_activatable(True)
         self.set_can_focus(False)
@@ -455,28 +459,6 @@ class LyricRow(Gtk.ListBoxRow):
     def _fitting_scale(self):
         if not self._can_scale: 
             return 1.0
-            
-        layout = self.label.get_layout()
-        
-        if layout and layout.get_line_count() > 1:
-            return 1.0
-            
-        width = self.get_width()
-        if width <= 0: 
-            return self._active_scale
-        
-        if layout:
-            text_w = layout.get_pixel_size()[0]
-            alloc = self.label.get_allocation()
-            
-            if not self.opposite_voice:
-                reach = alloc.x + text_w
-            else:
-                reach = width - (alloc.x + alloc.width - text_w)
-                
-            if reach > 0:
-                return max(1.0, min(self._active_scale, width / reach))
-                
         return self._active_scale
 
     def _recompute_effect_targets(self):
@@ -817,11 +799,20 @@ class LyricRow(Gtk.ListBoxRow):
 
     def _render_layer(self, snapshot, label, text, parts):
         layout = label.get_layout()
+        if not layout or not parts: 
+            return
+        
         alloc = label.get_allocation()
         row_w = self.get_width()
         
-        if not layout or not parts: 
-            return
+        success, pt = label.compute_point(self, Graphene.Point().init(0, 0))
+        base_x = pt.x if success else alloc.x
+        base_y = pt.y if success else alloc.y
+        
+        lx, ly = label.get_layout_offsets()
+        
+        x_offset = base_x + lx
+        y_offset = base_y + ly
         
         c_in, c_act, c_glow = self._get_css_colors(label)
         active_idx, sweep_x_rel, sung_rect, active_rect, glow_int, is_long = self._get_sweep_state(
@@ -834,10 +825,6 @@ class LyricRow(Gtk.ListBoxRow):
             duration = max(1, p["end_ms"] - p["start_ms"])
             progress = (self._internal_cursor_ms - p["start_ms"]) / duration
             
-        layout_width, layout_height = layout.get_pixel_size()
-        x_offset = alloc.x + (alloc.width - layout_width) * label.get_xalign()
-        y_offset = alloc.y + (alloc.height - layout_height) * label.get_yalign()
-        
         context = label.get_pango_context()
 
         base_layout = Pango.Layout.new(context)

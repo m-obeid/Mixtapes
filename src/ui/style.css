@@ -591,7 +591,10 @@ window > windowhandle,
 .lyrics-line:focus,
 .lyrics-line:selected,
 .lyrics-line:checked {
-  padding: 14px 16px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  padding-right: 16px;
+  padding-left: 16px;
   border-radius: 8px;
   background: none;
   background-color: transparent;
@@ -600,6 +603,15 @@ window > windowhandle,
   outline: none;
   min-height: 0;
 }
+
+.lyrics-line.opposite-voice {
+  padding-left: 120px;
+}
+
+.lyrics-line.lead-voice {
+  padding-right: 120px;
+}
+
 
 /* Subtle hover so the user gets a clickable affordance — these rows
    are tap-to-seek targets, but the default minimalist treatment made
@@ -611,7 +623,6 @@ window > windowhandle,
 
 
 .lyrics-line .lyrics-line-label {
-  font-size: 1.4em;
   font-weight: 700;
   color: alpha(@accent_color, 0.2);
   text-shadow: none;
@@ -635,8 +646,7 @@ window > windowhandle,
 
 
 .lyrics-line .lyrics-line-sub {
-  font-size: 0.98em;
-  font-weight: 600;
+  font-weight: 500;
   color: alpha(@accent_color, 0.2);
 }
 
