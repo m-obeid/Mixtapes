@@ -188,7 +188,9 @@ def _is_cjk_char(ch):
     """Scripts written without spaces between words."""
     o = ord(ch)
     return (
-        0x3040 <= o <= 0x30FF      # Hiragana + Katakana
+        0x1100 <= o <= 0x11FF      # Hangul Jamo
+        or 0x3040 <= o <= 0x30FF   # Hiragana + Katakana
+        or 0x3130 <= o <= 0x318F   # Hangul Compatibility Jamo
         or 0x3400 <= o <= 0x4DBF   # CJK extension A
         or 0x4E00 <= o <= 0x9FFF   # CJK unified ideographs
         or 0xAC00 <= o <= 0xD7AF   # Hangul syllables
@@ -584,17 +586,40 @@ class LyricRow(Gtk.ListBoxRow):
                 
         return -1, 0.0, sung_rect, None, 0.0, False
 
-    def _create_isolated_word_layout(self, context, font_desc, text, progress, is_long):
+    def _create_aligned_word_layout(self, context, original_layout, full_text, active_part, progress, is_long, color):
         gl = Pango.Layout.new(context)
-        gl.set_text(text)
-        gl.set_font_description(font_desc)
+        gl.set_text(full_text)
+        gl.set_font_description(original_layout.get_font_description())
+        gl.set_width(original_layout.get_width())
+        gl.set_alignment(original_layout.get_alignment())
+        gl.set_wrap(original_layout.get_wrap())
+
+        attrs = Pango.AttrList.new()
+        b_start = active_part.get("byte_start", 0)
+        full_byte_len = len(full_text.encode('utf-8'))
+        b_end = active_part.get("byte_end", full_byte_len)
+
+        r = int(color.red * 65535)
+        g = int(color.green * 65535)
+        b = int(color.blue * 65535)
+        a = int(color.alpha * 65535)
+
+        attr_c = Pango.attr_foreground_new(r, g, b)
+        attr_c.start_index = b_start
+        attr_c.end_index = b_end
+        attrs.insert(attr_c)
+
+        attr_a = Pango.attr_foreground_alpha_new(a)
+        attr_a.start_index = b_start
+        attr_a.end_index = b_end
+        attrs.insert(attr_a)
 
         if is_long:
-            attrs = Pango.AttrList.new()
-            N = len(text)
-            curr_byte = 0
+            word_text = active_part["text"]
+            N = len(word_text)
+            curr_byte = b_start
 
-            for char_idx, char in enumerate(text):
+            for char_idx, char in enumerate(word_text):
                 char_bytes = char.encode('utf-8')
                 char_len = len(char_bytes)
 
@@ -604,15 +629,15 @@ class LyricRow(Gtk.ListBoxRow):
                 wave_val = math.sin(t_clamped * math.pi) * 3500
 
                 if wave_val > 5:
-                    attr = Pango.attr_rise_new(int(wave_val))
-                    attr.start_index = curr_byte
-                    attr.end_index = curr_byte + char_len
-                    attrs.insert(attr)
+                    attr_rise = Pango.attr_rise_new(int(wave_val))
+                    attr_rise.start_index = curr_byte
+                    attr_rise.end_index = curr_byte + char_len
+                    attrs.insert(attr_rise)
 
                 curr_byte += char_len
 
-            gl.set_attributes(attrs)
-            
+        gl.set_attributes(attrs)
+        
         return gl
         
     def _get_line_baseline(self, layout, byte_index):
@@ -887,7 +912,6 @@ class LyricRow(Gtk.ListBoxRow):
                 draw_clipped_base(0, sy + sh, row_w, clip_bottom - (sy + sh), c_in) 
             return
 
-        # Absolute coordinates of the word
         ax = x_offset + active_rect.origin.x
         ay = y_offset + active_rect.origin.y
         aw = active_rect.size.width
@@ -896,55 +920,127 @@ class LyricRow(Gtk.ListBoxRow):
 
         draw_clipped_base(0, clip_top, row_w, ay - clip_top, c_act)
         draw_clipped_base(0, ay + ah, row_w, clip_bottom - (ay + ah), c_in)
-
-        draw_clipped_base(0, ay, ax, ah, c_act)                         
-        draw_clipped_base(ax + aw, ay, row_w - (ax + aw), ah, c_in)     
+        draw_clipped_base(0, ay, ax, ah, c_act)                          
+        draw_clipped_base(ax + aw, ay, row_w - (ax + aw), ah, c_in)      
 
         active_text = parts[active_idx]["text"]
-        iso_layout = self._create_isolated_word_layout(
-            context, layout.get_font_description(), active_text, progress, is_long
-        )
+        b_start = parts[active_idx].get("byte_start", 0)
+        full_byte_len = len(text.encode('utf-8'))
+        b_end = parts[active_idx].get("byte_end", full_byte_len)
+        N = len(active_text)
 
-        active_byte_start = parts[active_idx].get("byte_start", 0)
-        base_baseline = self._get_line_baseline(base_layout, active_byte_start)
-        base_baseline_y = y_offset + base_baseline
+        def create_word_only_layout(color):
+            gl = Pango.Layout.new(context)
+            gl.set_text(text)
+            gl.set_font_description(layout.get_font_description())
+            gl.set_width(layout.get_width())
+            gl.set_alignment(layout.get_alignment())
+            gl.set_wrap(layout.get_wrap())
+
+            attrs = Pango.AttrList.new()
+            
+            r = int(color.red * 65535)
+            g = int(color.green * 65535)
+            b = int(color.blue * 65535)
+            a = int(color.alpha * 65535)
+
+            attr_c = Pango.attr_foreground_new(r, g, b)
+            attr_c.start_index = b_start
+            attr_c.end_index = b_end
+            attrs.insert(attr_c)
+
+            attr_a = Pango.attr_foreground_alpha_new(a)
+            attr_a.start_index = b_start
+            attr_a.end_index = b_end
+            attrs.insert(attr_a)
+
+            if b_start > 0:
+                attr_hide1 = Pango.attr_foreground_alpha_new(0)
+                attr_hide1.start_index = 0
+                attr_hide1.end_index = b_start
+                attrs.insert(attr_hide1)
+                
+            if b_end < full_byte_len:
+                attr_hide2 = Pango.attr_foreground_alpha_new(0)
+                attr_hide2.start_index = b_end
+                attr_hide2.end_index = full_byte_len
+                attrs.insert(attr_hide2)
+
+            gl.set_attributes(attrs)
+            return gl
+
+        layout_in = create_word_only_layout(c_in)
+        layout_act = create_word_only_layout(c_act)
+        layout_glow = create_word_only_layout(c_glow) if (self._can_glow and glow_int > 0) else None
+
+        c_transparent = Gdk.RGBA()
+        c_transparent.alpha = 0.0
+
+        def draw_waving_word(colored_layout, apply_sweep_clip=False, is_active_color=False):
+            cb = b_start
+            for char_idx, char in enumerate(active_text):
+                char_bytes = char.encode('utf-8')
+                char_len = len(char_bytes)
+                
+                pos = layout.index_to_pos(cb)
+                cx = pos.x / Pango.SCALE
+                cw = pos.width / Pango.SCALE
+                
+                if cw <= 0:
+                    cb += char_len
+                    continue
+                    
+                wave_val = 0.0
+                if is_long:
+                    delay = (char_idx / max(1, N)) * 0.5
+                    t = progress * 1.5 - delay
+                    t_clamped = max(0.0, min(1.0, t))
+                    wave_val = math.sin(t_clamped * math.pi) * 3.5
+                    
+                char_abs_x = x_offset + cx
+                clip_x = char_abs_x
+                clip_w = cw
+                
+                if apply_sweep_clip:
+                    if is_active_color:
+                        if char_abs_x >= sweep_abs_x:
+                            cb += char_len
+                            continue
+                        clip_w = min(cw, sweep_abs_x - char_abs_x)
+                    else:
+                        if char_abs_x + cw <= sweep_abs_x:
+                            cb += char_len
+                            continue
+                        if sweep_abs_x > char_abs_x:
+                            diff = sweep_abs_x - char_abs_x
+                            clip_x += diff
+                            clip_w -= diff
+                            
+                if clip_w > 0:
+                    char_clip = Graphene.Rect().init(clip_x, clip_top, clip_w, clip_bottom - clip_top)
+                    snapshot.push_clip(char_clip)
+                    snapshot.save()
+                    snapshot.translate(Graphene.Point().init(x_offset, y_offset - wave_val))
+                    snapshot.append_layout(colored_layout, c_transparent)
+                    snapshot.restore()
+                    snapshot.pop()
+                    
+                cb += char_len
+
+        draw_waving_word(layout_in, apply_sweep_clip=True, is_active_color=False)
         
-        iso_ascent = iso_layout.get_baseline() / Pango.SCALE
-        iso_draw_y = base_baseline_y - iso_ascent
-
-        if self._can_glow and glow_int > 0:
+        draw_waving_word(layout_act, apply_sweep_clip=True, is_active_color=True)
+        
+        if layout_glow:
             snapshot.save()
-            snapshot.translate(Graphene.Point().init(ax, iso_draw_y))
             snapshot.push_blur(10.0 * glow_int)
-            snapshot.append_layout(iso_layout, c_glow)
+            draw_waving_word(layout_glow, apply_sweep_clip=True, is_active_color=True)
             snapshot.pop()
-            snapshot.restore()
-
-            snapshot.save()
-            snapshot.translate(Graphene.Point().init(ax, iso_draw_y))
+            
             snapshot.push_blur(6.0 * glow_int)
-            snapshot.append_layout(iso_layout, c_in)
+            draw_waving_word(layout_in, apply_sweep_clip=True, is_active_color=True)
             snapshot.pop()
             snapshot.restore()
-
-        clip_y = iso_draw_y - 20
-        clip_h = ah + 40
-
-        if sweep_abs_x < ax + aw:
-            snapshot.push_clip(Graphene.Rect().init(max(ax, sweep_abs_x), clip_y, (ax + aw) - max(ax, sweep_abs_x), clip_h))
-            snapshot.save()
-            snapshot.translate(Graphene.Point().init(ax, iso_draw_y))
-            snapshot.append_layout(iso_layout, c_in)
-            snapshot.restore()
-            snapshot.pop()
-
-        if sweep_abs_x > ax:
-            snapshot.push_clip(Graphene.Rect().init(ax, clip_y, sweep_abs_x - ax, clip_h))
-            snapshot.save()
-            snapshot.translate(Graphene.Point().init(ax, iso_draw_y))
-            snapshot.append_layout(iso_layout, c_act)
-            snapshot.restore()
-            snapshot.pop()
 
     def do_snapshot(self, snapshot):
         scaling = abs(self._scale - 1.0) > 0.002
