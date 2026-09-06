@@ -538,7 +538,7 @@ class LyricRow(Gtk.ListBoxRow):
 
     def _get_sweep_state(self, cursor_ms, parts, layout):
         if not parts or not layout: 
-            return -1, 0.0, Graphene.Rect().init(0, 0, 0, 0), None, 0.0, False
+            return -1, 0.0, Graphene.Rect().init(0, 0, 0, 0), None, 0.0, False, 0.0
         
         sung_rect = Graphene.Rect().init(0, 0, 0, 0)
         
@@ -578,15 +578,17 @@ class LyricRow(Gtk.ListBoxRow):
                     
                     smooth_curve = math.sin(progress * math.pi)
                     glow = smooth_curve * (2.0 * weight)
+                    wave_amp = 2.0 + (5.5 * weight)
                 else:
                     is_long = False
                     glow = 0.0
+                    wave_amp = 0.0
                     
-                return i, sweep_x_rel, sung_rect, active_rect, glow, is_long
+                return i, sweep_x_rel, sung_rect, active_rect, glow, is_long, wave_amp
             else:
                 break
                 
-        return -1, 0.0, sung_rect, None, 0.0, False
+        return -1, 0.0, sung_rect, None, 0.0, False, 0.0
 
     def _create_aligned_word_layout(self, context, original_layout, full_text, active_part, progress, is_long, color):
         gl = Pango.Layout.new(context)
@@ -750,7 +752,7 @@ class LyricRow(Gtk.ListBoxRow):
             if self._cursor_ms >= 0 and not self.is_paused:
                 if delta > 250:
                     self._internal_cursor_ms = self._cursor_ms
-                elif self._internal_cursor_ms < self._cursor_ms + 150:
+                elif self._internal_cursor_ms < self._cursor_ms:
                     self._internal_cursor_ms += delta
                 changed = True
 
@@ -867,7 +869,7 @@ class LyricRow(Gtk.ListBoxRow):
         y_offset = base_y + ly
         
         c_in, c_act, c_glow = self._get_css_colors(label)
-        active_idx, sweep_x_rel, sung_rect, active_rect, glow_int, is_long = self._get_sweep_state(
+        active_idx, sweep_x_rel, sung_rect, active_rect, glow_int, is_long, wave_amp = self._get_sweep_state(
             self._internal_cursor_ms, parts, layout
         )
         
@@ -995,7 +997,7 @@ class LyricRow(Gtk.ListBoxRow):
                     delay = (char_idx / max(1, N)) * 0.5
                     t = progress * 1.5 - delay
                     t_clamped = max(0.0, min(1.0, t))
-                    wave_val = math.sin(t_clamped * math.pi) * 3.5
+                    wave_val = math.sin(t_clamped * math.pi) * wave_amp
                     
                 char_abs_x = x_offset + cx
                 clip_x = char_abs_x
@@ -2223,6 +2225,12 @@ class LyricsView(Gtk.Box):
             self._lit_interlude = None
             # Force the next activation to re-scroll onto the vocal line.
             self._active_idx = -1
+
+        if idx >= 0:
+            line_data = self._lines[idx]
+            line_end = line_data.get("end")
+            if line_end is not None and pos >= line_end:
+                idx = -1
 
         if idx != self._active_idx:
             self._log(1, f"progression pos={pos:.2f}s -> idx changed "
