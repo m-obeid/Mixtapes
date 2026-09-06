@@ -155,8 +155,8 @@ _FONT_CSS_PROVIDER = None
 _FONT_CSS_SCALE = None
 
 # Matches the resting sizes in style.css, which these multiply.
-_BASE_FONT_EM = 1.4
-_SUB_FONT_EM = 0.98
+_BASE_FONT_EM = 1.82
+_SUB_FONT_EM = 1.2
 
 
 def apply_font_scale(force=False):
@@ -679,6 +679,17 @@ class LyricRow(Gtk.ListBoxRow):
 
         changed = False
 
+        c_in, c_act, _ = self._get_css_colors(self.label)
+        color_state = (
+            round(c_in.red, 3), round(c_in.green, 3), round(c_in.blue, 3),
+            round(c_act.red, 3), round(c_act.green, 3), round(c_act.blue, 3)
+        )
+        
+        if getattr(self, "_last_color_state", None) != color_state:
+            self._last_color_state = color_state
+            self._dirty = True
+            changed = True
+
         if self._wants_turn_off:
             end_bound = 0
             if self.parts: 
@@ -890,14 +901,14 @@ class LyricRow(Gtk.ListBoxRow):
         if self._can_glow and glow_int > 0:
             snapshot.save()
             snapshot.translate(Graphene.Point().init(ax, iso_draw_y))
-            snapshot.push_blur(14.0 * glow_int)
+            snapshot.push_blur(10.0 * glow_int)
             snapshot.append_layout(iso_layout, c_glow)
             snapshot.pop()
             snapshot.restore()
 
             snapshot.save()
             snapshot.translate(Graphene.Point().init(ax, iso_draw_y))
-            snapshot.push_blur(4.0 * glow_int)
+            snapshot.push_blur(6.0 * glow_int)
             snapshot.append_layout(iso_layout, c_in)
             snapshot.pop()
             snapshot.restore()
