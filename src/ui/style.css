@@ -637,7 +637,7 @@ window > windowhandle,
 }
 
 .lyrics-line .lyrics-line-label.glow {
-  color: mix(@accent_bg_color, white, 0.05);
+  color: mix(@accent_color, white, 0.05);
 }
 
 /* Instrumental marker. The dots are painted in the snapshot pass, so all
@@ -658,7 +658,7 @@ window > windowhandle,
 }
 
 .lyrics-line .lyrics-line-sub.glow {
-  color: mix(@accent_bg_color, white, 0.05);
+  color: mix(@accent_color, white, 0.05);
 }
 
 /* Floating overlay controls: the lyrics toggle on the cover art and the

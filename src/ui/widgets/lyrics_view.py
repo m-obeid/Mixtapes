@@ -399,6 +399,7 @@ class LyricRow(Gtk.ListBoxRow):
         self._cursor_ms = -1
         self._internal_cursor_ms = -1
         self._wants_turn_off = False
+        self.is_paused = False
         
         self._scale = 1.0
         self._scale_target = 1.0
@@ -422,6 +423,7 @@ class LyricRow(Gtk.ListBoxRow):
         self._cursor_ms = -1
         self._internal_cursor_ms = -1
         self._wants_turn_off = False
+        self.is_paused = False
         self._scale = 1.0
         self._scale_target = 1.0
         self._blur = 0.0
@@ -641,7 +643,6 @@ class LyricRow(Gtk.ListBoxRow):
         return gl
         
     def _get_line_baseline(self, layout, byte_index):
-        """Finds the exact baseline of the line containing the specified byte."""
         iter = layout.get_iter()
         while True:
             line = iter.get_line_readonly()
@@ -730,26 +731,26 @@ class LyricRow(Gtk.ListBoxRow):
                 end_bound = max(end_bound, self.parts[-1]["end_ms"])
             if self.sub_parts: 
                 end_bound = max(end_bound, self.sub_parts[-1]["end_ms"])
-            
-            if delta > 250:
-                self._internal_cursor_ms = end_bound + 1
-            
-            if self._internal_cursor_ms > end_bound or self._internal_cursor_ms < self.start_ms:
-                self._cursor_ms = -1
-                self._internal_cursor_ms = -1
-                self._wants_turn_off = False
-                self._recompute_effect_targets()
-                self._recompute_targets()
-                changed = True
-            else:
-                if delta < 100: 
-                    self._internal_cursor_ms += delta
-                changed = True
+            if not self.is_paused:
+                if delta > 250:
+                    self._internal_cursor_ms = end_bound + 1
+                
+                if self._internal_cursor_ms > end_bound or self._internal_cursor_ms < self.start_ms:
+                    self._cursor_ms = -1
+                    self._internal_cursor_ms = -1
+                    self._wants_turn_off = False
+                    self._recompute_effect_targets()
+                    self._recompute_targets()
+                    changed = True
+                else:
+                    if delta < 100: 
+                        self._internal_cursor_ms += delta
+                    changed = True
         else:
-            if self._cursor_ms >= 0:
+            if self._cursor_ms >= 0 and not self.is_paused:
                 if delta > 250:
                     self._internal_cursor_ms = self._cursor_ms
-                elif self._internal_cursor_ms < self._cursor_ms + 250:
+                elif self._internal_cursor_ms < self._cursor_ms + 150:
                     self._internal_cursor_ms += delta
                 changed = True
 
@@ -767,7 +768,6 @@ class LyricRow(Gtk.ListBoxRow):
         elif changed or self._cursor_ms >= 0:
             self.queue_draw()
 
-        # Keep ticking — cheap when no alphas are in motion.
         return GLib.SOURCE_CONTINUE
 
     def _get_css_colors(self, label):
@@ -2277,6 +2277,15 @@ class LyricsView(Gtk.Box):
                 self._activate_row(self._index_for_position(pos), cursor_ms=ms)
 
     def _on_state_changed(self, player, state):
+        is_paused = (state == "paused")
+
+        for row in self._row_for_line.values():
+            row.is_paused = is_paused
+            
+        for row in self._interlude_rows:
+            if hasattr(row, "is_paused"):
+                row.is_paused = is_paused
+
         if state == "stopped" and not self.player.current_video_id:
             self._current_video_id = None
             self._lines = []
