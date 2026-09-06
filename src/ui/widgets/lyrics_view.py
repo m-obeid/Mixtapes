@@ -578,7 +578,7 @@ class LyricRow(Gtk.ListBoxRow):
                     
                     smooth_curve = math.sin(progress * math.pi)
                     glow = smooth_curve * (2.0 * weight)
-                    wave_amp = 2.0 + (5.5 * weight)
+                    wave_amp = 2.0 + (4.5 * weight)
                 else:
                     is_long = False
                     glow = 0.0
