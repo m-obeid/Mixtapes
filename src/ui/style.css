@@ -565,7 +565,8 @@ window > windowhandle,
 .lyrics-split > .sidebar-pane,
 .lyrics-split > .sidebar-pane > .background,
 .lyrics-split > .content-pane,
-.lyrics-split > .content-pane > .background {
+.lyrics-split > .content-pane > .background,
+.lyrics-split > .background {
   background: none;
   background-color: transparent;
   box-shadow: none;

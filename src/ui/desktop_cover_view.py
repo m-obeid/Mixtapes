@@ -222,6 +222,7 @@ class DesktopCoverView(Adw.Bin):
         self._lyrics_intent = False
         self._suppress_intent_sync = False
         self.split.connect("notify::show-sidebar", self._on_show_sidebar_changed)
+        self.split.connect("notify::collapsed", self._on_collapsed_changed)
         # Push layout (sidebar steals real space) instead of overlay.
         # Overlay would float the lyrics on top of the cover, which we
         # don't want at any width above the collapse breakpoint.
@@ -240,7 +241,7 @@ class DesktopCoverView(Adw.Bin):
         self._bp_bin.set_size_request(150, 150)
         self._bp_bin.set_child(self.split)
         collapse_bp = Adw.Breakpoint.new(
-            Adw.BreakpointCondition.parse("max-width: 560px")
+            Adw.BreakpointCondition.parse("max-width: 720px")
         )
         collapse_bp.add_setter(self.split, "collapsed", True)
         self._bp_bin.add_breakpoint(collapse_bp)
@@ -255,11 +256,24 @@ class DesktopCoverView(Adw.Bin):
         # Keep the cover in sync with the currently-playing track.
         self.player.connect("metadata-changed", self._on_metadata_changed)
 
+        self._sync_cover_collapsed()
+
         # Restore the user's last lyrics-toggle state. The toggled handler
         # does all the work of attaching/detaching the panel.
         if bool(_load_pref("lyrics_shown_desktop", False)):
             self.lyrics_toggle.set_active(True)
         self._sync_lyrics_toggle_reveal()
+
+    def _on_collapsed_changed(self, *_):
+        self._sync_cover_collapsed()
+
+    def _sync_cover_collapsed(self):
+        if self.split.get_collapsed():
+            self.cover_img.set_visible(False)
+            self.visualizer.set_visible(False)
+        else:
+            self.cover_img.set_visible(True)
+            self.visualizer.set_visible(True)
 
     def _on_cover_enter(self, *_):
         self._pointer_over_cover = True
