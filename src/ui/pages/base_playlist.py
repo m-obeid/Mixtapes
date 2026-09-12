@@ -2,10 +2,11 @@ from gi.repository import Gtk, Adw, GObject, GLib, Pango, Gdk, Gio
 import threading
 import re
 from api.client import MusicClient
-from ui.utils import AsyncImage, LikeButton, get_yt_music_link, show_toast
+from ui.utils import AsyncImage, LikeButton, get_yt_music_link, show_toast, bind_weak_signal
 from ui.models.song import SongItem
 from ui.widgets.song_row import SongRowWidget
 from ui.util_classes import ScrolledWindow
+
 
 
 class BasePlaylistPage(Adw.Bin):
@@ -234,6 +235,7 @@ class BasePlaylistPage(Adw.Bin):
 
         self.songs_view = Gtk.ListView(model=self.selection_model, factory=factory)
         self.songs_view.add_css_class("boxed-list")
+        self.songs_view.add_css_class("songs-list")
         # Keyboard activation: Enter/Space on the focused row plays it. The
         # ListView's "activate" signal passes an int position, which
         # on_song_activated already handles (alongside the click-gesture path).
@@ -291,19 +293,7 @@ class BasePlaylistPage(Adw.Bin):
         # strong ref to self and the entire page (with its 1000-item ListStore,
         # widget tree, track lists, etc.) leaks every time the user opens a
         # playlist. After heavy navigation that pinned hundreds of MB.
-        self._player_metadata_handler = self.player.connect(
-            "metadata-changed", self._update_playing_indicator
-        )
-        self.connect("destroy", self._on_page_destroy)
-
-    def _on_page_destroy(self, widget):
-        hid = getattr(self, "_player_metadata_handler", None)
-        if hid is not None:
-            try:
-                self.player.disconnect(hid)
-            except Exception:
-                pass
-            self._player_metadata_handler = None
+        bind_weak_signal(player, "metadata-changed", self, self._update_playing_indicator)
 
     def _on_factory_setup(self, factory, list_item):
         widget = SongRowWidget(self.player, self.client)

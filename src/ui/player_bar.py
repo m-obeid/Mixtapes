@@ -12,14 +12,9 @@ class PlayerBar(Gtk.Box):
         self.on_artist_click = on_artist_click
         self.on_queue_click = on_queue_click
         self.on_album_click = on_album_click
-        self.add_css_class("background")  # Generic background
-        self.add_css_class("player-bar")  # Custom class for specific styling
-
-        # Load CSS for the player bar
+        self.add_css_class("player-bar")
         self._load_css()
 
-        # 1. Progress Bar on Top ("Roof")
-        # Scale
         self.scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL)
         self.scale.set_hexpand(True)
         self.scale.set_range(0, 100)
@@ -27,14 +22,12 @@ class PlayerBar(Gtk.Box):
         self.scale.connect("change-value", self.on_scale_change_value)
         self.append(self.scale)
 
-        # Scrolling to seek
         scroll_controller = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.VERTICAL
         )
         scroll_controller.connect("scroll", self.on_scale_scroll)
         self.scale.add_controller(scroll_controller)
 
-        # 2. Main Content Area (Horizontal)
         content_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         content_box.set_margin_top(8)
         content_box.set_margin_bottom(12)
@@ -42,7 +35,6 @@ class PlayerBar(Gtk.Box):
         content_box.set_margin_end(12)
         self.append(content_box)
 
-        # Cover Art
         from ui.utils import AsyncImage, LikeButton, MarqueeLabel
 
         self.cover_btn = Gtk.Button()
@@ -54,7 +46,6 @@ class PlayerBar(Gtk.Box):
         self.cover_img = AsyncImage(size=48, player=self.player)
         self.cover_img.set_pixel_size(48)
 
-        # Wrapper to clip cover art to rounded corners
         self.cover_wrapper = Gtk.Box()
         self.cover_wrapper.set_overflow(Gtk.Overflow.HIDDEN)
         self.cover_wrapper.add_css_class("player-bar-cover")
@@ -63,19 +54,14 @@ class PlayerBar(Gtk.Box):
         self.cover_btn.set_child(self.cover_wrapper)
         content_box.append(self.cover_btn)
 
-        # Metadata (Vertical)
         meta_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         meta_box.set_valign(Gtk.Align.CENTER)
         meta_box.set_hexpand(True)
-        meta_box.set_margin_top(0)  # Added as per instruction
+        meta_box.set_margin_top(0)
 
-        # Marquee so long titles scroll like the expanded/mobile player
-        # instead of just getting ellipsized into "Some really long…".
         self.title_label = MarqueeLabel()
         self.title_label.set_label("Not Playing")
         self.title_label.add_css_class("heading")
-        # MarqueeLabel internally exposes a Gtk.Label per copy; align them to
-        # start so the title hugs the left edge before scrolling.
         self.title_label.label1.set_halign(Gtk.Align.START)
         self.title_label.label2.set_halign(Gtk.Align.START)
 
@@ -87,39 +73,33 @@ class PlayerBar(Gtk.Box):
         self.artist_btn.connect("clicked", self._on_artist_btn_clicked)
 
         self.artist_label = Gtk.Label(label="")
-        self.artist_label.set_ellipsize(3)  # END
-        self.artist_label.set_width_chars(1)  # Allow shrinking fully
-        # No `max_width_chars` — only ellipsize when layout actually runs
-        # out of space, otherwise the label was being truncated even when
-        # the meta box had plenty of room.
+        self.artist_label.set_ellipsize(3)
+        self.artist_label.set_width_chars(1)
         self.artist_label.add_css_class("caption")
 
-        self.artist_btn.set_child(self.artist_label)
-
+        self.artists_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        self.artists_box.set_halign(Gtk.Align.START)
+        
         meta_box.append(self.title_label)
-        meta_box.append(self.artist_btn)
+        meta_box.append(self.artists_box)
 
         content_box.append(meta_box)
 
-        # Controls
         controls_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         controls_box.set_valign(Gtk.Align.CENTER)
 
-        # Timings Label
         self.timings_label = Gtk.Label(label="0:00 / 0:00")
         self.timings_label.add_css_class("caption")
         self.timings_label.set_valign(Gtk.Align.CENTER)
         self.timings_label.add_css_class("numeric")
         controls_box.append(self.timings_label)
 
-        # Previous
         self.prev_btn = Gtk.Button(icon_name="media-skip-backward-symbolic")
         self.prev_btn.set_valign(Gtk.Align.CENTER)
         self.prev_btn.add_css_class("flat")
         self.prev_btn.connect("clicked", lambda x: self.player.previous())
         controls_box.append(self.prev_btn)
 
-        # Play/Pause (with buffering spinner)
         self.play_btn = Gtk.Button()
         self.play_btn.set_valign(Gtk.Align.CENTER)
         self.play_btn.add_css_class("circular")
@@ -181,7 +161,6 @@ class PlayerBar(Gtk.Box):
 
         controls_box.append(self.volume_container)
 
-        # Queue Button
         self.queue_btn = Gtk.ToggleButton(icon_name="music-queue-symbolic")
         self.queue_btn.set_valign(Gtk.Align.CENTER)
         self.queue_btn.add_css_class("flat")
@@ -192,19 +171,12 @@ class PlayerBar(Gtk.Box):
 
         controls_box.append(self.queue_btn)
 
-        # Like Button (right side, always visible when track loaded).
-        # Square (not circular) here so it matches the other player-bar
-        # controls — LikeButton adds `circular` by default.
         self.like_btn = LikeButton(self.player.client, None)
         self.like_btn.remove_css_class("circular")
         self.like_btn.set_visible(False)
         self.like_btn.set_valign(Gtk.Align.CENTER)
         controls_box.append(self.like_btn)
 
-        # Overflow menu — when the bar narrows, like/queue/volume fold into
-        # this 3-dot button instead of disappearing outright. Hidden until
-        # _responsive_tick decides the bar's too small to show all controls
-        # inline.
         self.overflow_btn = Gtk.MenuButton(icon_name="view-more-symbolic")
         self.overflow_btn.set_valign(Gtk.Align.CENTER)
         self.overflow_btn.add_css_class("flat")
@@ -212,7 +184,6 @@ class PlayerBar(Gtk.Box):
         self.overflow_btn.set_visible(False)
         self._overflow_popover = Gtk.Popover()
         self.overflow_btn.set_popover(self._overflow_popover)
-        # Container that the responsive layout reparents controls into.
         self._overflow_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=6
         )
@@ -241,33 +212,27 @@ class PlayerBar(Gtk.Box):
         self.content_box = content_box
         self.controls_box = controls_box
 
-        # Connect signals
         self.player.connect("state-changed", self.on_state_changed)
         self.player.connect("progression", self.on_progression)
         self.player.connect("metadata-changed", self.on_metadata_changed)
         self.player.connect("volume-changed", self.on_volume_changed)
 
-        # Initial state sync
         self._is_buffering_spinner = False
         self.on_state_changed(self.player, self.player.get_state_string())
 
-        # Gestures for Expansion (Connected to content_box for wider hit area)
         self.is_compact = False
+        self._sheet_bar = False
 
-        # 1. The Drag Gesture (Strictly for swiping up)
         drag = Gtk.GestureDrag()
         drag.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
         drag.connect("drag-update", self.on_drag_update)
-        # We no longer connect drag-end!
         self.content_box.add_controller(drag)
 
-        # 2. The Click Gesture (Strictly for tapping the background)
         click = Gtk.GestureClick()
         click.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
         click.connect("released", self.on_bar_tapped)
         self.content_box.add_controller(click)
 
-        # 3. Horizontal swipe for next/previous track
         swipe = Gtk.GestureSwipe()
         swipe.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
         swipe.connect("swipe", self._on_swipe)
@@ -289,7 +254,16 @@ class PlayerBar(Gtk.Box):
 
     def set_compact(self, compact):
         self.is_compact = compact
+        # _responsive_tick stands down while compact, so anything it folded
+        # into the 3-dot popover at desktop widths would be stranded there
+        # (the like button, most visibly). Reset the width memo too, or the
+        # tick skips the frame we land back on a width it has already seen.
+        self._last_responsive_width = -1
         if compact:
+            for control in self._responsive_order():
+                self._set_control_location(control, inline=True)
+            self.overflow_btn.set_visible(False)
+
             self.add_css_class("compact")
             self.timings_label.set_visible(False)
             self.prev_btn.set_visible(False)
@@ -299,7 +273,6 @@ class PlayerBar(Gtk.Box):
             self.expand_btn.set_visible(False)
             self.scale.add_css_class("compact")
 
-            # Tighten mobile layout
             self.content_box.set_margin_start(10)
             self.content_box.set_margin_end(10)
             self.content_box.set_margin_top(10)
@@ -317,13 +290,28 @@ class PlayerBar(Gtk.Box):
             self.scale.remove_css_class("compact")
             self.like_btn.set_visible(bool(self.player.current_video_id))
 
-            # Desktop layout
             self.content_box.set_margin_start(10)
             self.content_box.set_margin_end(10)
             self.content_box.set_margin_top(10)
             self.content_box.set_margin_bottom(10)
             self.content_box.set_spacing(10)
             self.controls_box.set_spacing(10)
+
+    def set_sheet_bar(self, enabled):
+        """Tell the bar it is now AdwBottomSheet's bottom bar. The sheet
+        opens on click and follows the finger on a pull up by itself, so
+        our tap and vertical-drag handlers stand down rather than race its
+        swipe tracker. Horizontal swipe-to-skip stays: the tracker only
+        claims drags that go vertical.
+
+        A full-width bottom bar is flush to both window edges, so Adwaita
+        squares off the sheet's top corners and the bar keeps the shape it
+        already has. The class is only there for the seek bar (see CSS)."""
+        self._sheet_bar = enabled
+        if enabled:
+            self.add_css_class("sheet-bar")
+        else:
+            self.remove_css_class("sheet-bar")
 
     def set_expanded(self, expanded):
         """Flip the expand button's chevron — down when the cover view
@@ -367,7 +355,6 @@ class PlayerBar(Gtk.Box):
         for control, _ in candidates:
             self._set_control_location(control, inline=control not in overflow)
 
-        # The overflow button only appears when it actually buys space.
         self.overflow_btn.set_visible(bool(overflow))
         return True
 
@@ -426,14 +413,12 @@ class PlayerBar(Gtk.Box):
         adj = self.scale.get_adjustment()
         val = adj.get_value()
 
-        # 2 seconds per tick
         step = 2.0
         new_val = val - (dy * step)
 
         new_val = max(0, min(new_val, self.player.duration))
         adj.set_value(new_val)
 
-        # Debounce the seek and use non-flushing seek for smoothness
         if hasattr(self, "_scroll_seek_id") and self._scroll_seek_id:
             from gi.repository import GLib
 
@@ -445,7 +430,6 @@ class PlayerBar(Gtk.Box):
         return True
 
     def _do_scroll_seek(self, value):
-        # Using flush=True to ensure immediate response during scrolling
         self.player.seek(value, flush=True)
         self._scroll_seek_id = None
         return False
@@ -475,6 +459,13 @@ class PlayerBar(Gtk.Box):
         }
         .player-scale.compact {
             margin-top: -4px; /* Mobile: Pull even higher to remove perceived gap */
+        }
+        /* AdwBottomSheet clips its bottom bar to its own bounds, so the
+           negative margin above cut 3 of the seek bar's 4px away and left
+           it near-invisible and hard to grab. There is no gap to close
+           here anyway: the bar's top edge is the sheet's top edge. */
+        .player-bar.sheet-bar .player-scale.compact {
+            margin-top: 0px;
         }
         .player-scale trough {
             min-height: 4px; /* Slightly thicker */
@@ -514,7 +505,67 @@ class PlayerBar(Gtk.Box):
         self.current_title = title
         self.current_artist = artist
         self.title_label.set_label(title)
-        self.artist_label.set_label(artist)
+
+        while child := self.artists_box.get_first_child():
+            self.artists_box.remove(child)
+
+        track = None
+        if 0 <= player.current_queue_index < len(player.queue):
+            track = player.queue[player.current_queue_index]
+
+        artists_list = track.get("artists", []) if track else []
+
+        if artists_list and isinstance(artists_list, list):
+            for i, art in enumerate(artists_list):
+                if isinstance(art, dict):
+                    name = art.get("name", "")
+                    aid = art.get("id")
+                else:
+                    name = str(art)
+                    aid = None
+
+                btn = Gtk.Button()
+                btn.add_css_class("flat")
+                btn.add_css_class("link-btn")
+                btn.set_has_frame(False)
+                btn.set_cursor(Gdk.Cursor.new_from_name("pointer", None))
+
+                lbl = Gtk.Label(label=name)
+                lbl.add_css_class("caption")
+                btn.set_child(lbl)
+
+                if self.on_artist_click:
+                    btn.connect(
+                        "clicked",
+                        lambda _b, a_id=aid, a_name=name: self.on_artist_click(a_id, a_name),
+                    )
+
+                self.artists_box.append(btn)
+
+                if i < len(artists_list) - 1:
+                    sep = Gtk.Label(label=", ")
+                    sep.add_css_class("caption")
+                    self.artists_box.append(sep)
+        else:
+            name = artist or "Unknown Artist"
+            btn = Gtk.Button()
+            btn.add_css_class("flat")
+            btn.add_css_class("link-btn")
+            btn.set_has_frame(False)
+            btn.set_cursor(Gdk.Cursor.new_from_name("pointer", None))
+
+            lbl = Gtk.Label(label=name)
+            lbl.add_css_class("caption")
+            btn.set_child(lbl)
+
+            if self.on_artist_click:
+                btn.connect(
+                    "clicked",
+                    lambda _b, a_name=name: self.on_artist_click(None, a_name),
+                )
+
+            self.artists_box.append(btn)
+
         if thumbnail_url:
             self.cover_img.video_id = video_id
             self.cover_img.load_url(thumbnail_url)
@@ -527,7 +578,6 @@ class PlayerBar(Gtk.Box):
         else:
             self.like_btn.set_visible(False)
 
-        # Show spinner when a new track starts loading
         if video_id and self.player.duration <= 0:
             self._is_buffering_spinner = True
             self._play_stack.set_visible_child_name("spinner")
@@ -549,7 +599,6 @@ class PlayerBar(Gtk.Box):
             self._is_buffering_spinner = True
         elif state == "playing":
             if self.player.duration <= 0:
-                # Buffering - show spinner until we have a valid duration
                 self._is_buffering_spinner = True
                 self._play_stack.set_visible_child_name("spinner")
                 self.play_btn.set_sensitive(False)
@@ -562,7 +611,6 @@ class PlayerBar(Gtk.Box):
                 self.play_btn.set_sensitive(True)
         elif state in ("paused", "stopped"):
             if self._is_buffering_spinner and self.player.duration <= 0:
-                # Still buffering-keep spinner visible
 
                 return
             if state == "paused":
@@ -580,7 +628,6 @@ class PlayerBar(Gtk.Box):
         return f"{m}:{s:02d}"
 
     def on_progression(self, player, pos, dur):
-        # Don't update the scale if we're actively scrolling to avoid jitter
         if getattr(self, "_scroll_seek_id", None):
             return
         self.scale.set_range(0, dur)
@@ -612,7 +659,6 @@ class PlayerBar(Gtk.Box):
         self.volume_scale.set_value(display_volume)
         self._updating_volume = False
 
-        # Update Icon
         if muted or volume == 0:
             self.volume_btn.set_icon_name("audio-volume-muted-symbolic")
         elif volume < 0.33:
@@ -622,7 +668,6 @@ class PlayerBar(Gtk.Box):
         else:
             self.volume_btn.set_icon_name("audio-volume-high-symbolic")
 
-        # Update Icon
         if muted or volume == 0:
             self.volume_btn.set_icon_name("audio-volume-muted-symbolic")
         elif volume < 0.33:
@@ -633,9 +678,13 @@ class PlayerBar(Gtk.Box):
             self.volume_btn.set_icon_name("audio-volume-high-symbolic")
 
     def _on_swipe(self, gesture, vx, vy):
-        if self._skip_cooldown:
+        if not self.is_compact or self._skip_cooldown:
             return
-        if abs(vx) > abs(vy) and abs(vx) > 200:
+
+        if abs(vy) > 100 or abs(vy) > abs(vx) * 0.5:
+            return
+
+        if abs(vx) > 350:
             self._skip_cooldown = True
             if vx < 0:
                 self.player.next()
@@ -651,11 +700,14 @@ class PlayerBar(Gtk.Box):
         return False
 
     def on_drag_update(self, gesture, offset_x, offset_y):
-        # Trigger expansion immediately on upward drag
+        if self._sheet_bar:
+            return
         if self.is_compact and offset_y < -15:
             self.emit("expand-requested")
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
     def on_bar_tapped(self, gesture, n_press, x, y):
+        if self._sheet_bar:
+            return
         if self.is_compact:
             self.emit("expand-requested")

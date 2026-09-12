@@ -1,48 +1,21 @@
-from gi.repository import Gtk, Adw, GObject, GLib, Pango, Gdk, Gio
-import threading
 import re
-from ui.pages.base_playlist import BasePlaylistPage
-from ui.models.song import SongItem
+import threading
+from gi.repository import GLib, GObject
+from ui.pages.playlist import PlaylistPage
 
 
-class AlbumPage(BasePlaylistPage):
+class AlbumPage(PlaylistPage):
     def __init__(self, player, *args, **kwargs):
         super().__init__(player, *args, **kwargs)
-        # self.sort_row.set_visible(False)
+        self._is_album_view = True
 
     def load_album(self, album_id, initial_data=None):
-        if self.playlist_id != album_id:
-            self.playlist_id = album_id
-            self.playlist_title_text = ""
-            self.emit("header-title-changed", "")
+        self._is_album_view = True
+        self.load_playlist(album_id, initial_data=initial_data)
 
-            # Clear list
-            self.store.remove_all()
-            self.current_tracks = []
-            self.original_tracks = []
-
-        if initial_data:
-            self.playlist_title_text = initial_data.get("title", "")
-            self.playlist_name_label.set_label(self.playlist_title_text)
-            self.meta_label.set_label("Loading album...")
-            thumb = initial_data.get("thumb")
-            if thumb:
-                self.cover_img.load_url(thumb)
-            self.stack.set_visible_child_name("content")
-            self.content_spinner.set_visible(True)
-        else:
-            self.stack.set_visible_child_name("loading")
-            self.content_spinner.set_visible(False)
-
-        thread = threading.Thread(target=self._fetch_details)
-        thread.daemon = True
-        thread.start()
-
-    def _fetch_details(self):
+    def _fetch_playlist_details(self, playlist_id, is_incremental=False):
         try:
-            data = self.client.get_album(self.playlist_id)
-            # MPRE browse ids are internal. The audio playlist id is what
-            # radio and shareable links need.
+            data = self.client.get_album(playlist_id)
             self._audio_playlist_id = data.get("audioPlaylistId")
             title = data.get("title", "Unknown Album")
             description = data.get("description", "")
@@ -51,7 +24,6 @@ class AlbumPage(BasePlaylistPage):
             track_count = data.get("trackCount", len(tracks))
             year = data.get("year", "")
 
-            # Construct Meta
             artist_data = data.get("artists", [])
             parts = []
             for a in artist_data:
@@ -63,7 +35,6 @@ class AlbumPage(BasePlaylistPage):
                     parts.append(name)
             author = ", ".join(parts)
 
-            # Infer Album Type
             if track_count == 1:
                 album_type = "Single"
             elif 2 <= track_count <= 6:
@@ -81,21 +52,31 @@ class AlbumPage(BasePlaylistPage):
             song_text = "song" if track_count == 1 else "songs"
             meta2 = f"{track_count} {song_text}"
 
-            # High-Res Cover art hack
             if thumbnails:
                 for t in thumbnails:
                     if "url" in t:
                         t["url"] = re.sub(r"w\d+-h\d+", "w544-h544", t["url"])
-                # Propagate cover to tracks
-                for t in tracks:
-                    if not t.get("thumbnails"):
-                        t["thumbnails"] = thumbnails
+
+            album_thumb_url = thumbnails[-1]["url"] if thumbnails else None
+            for t in tracks:
+                if not t.get("thumbnails") and album_thumb_url:
+                    t["thumbnails"] = [{"url": album_thumb_url}]
+                if not t.get("thumb") and album_thumb_url:
+                    t["thumb"] = album_thumb_url
 
             GObject.idle_add(
-                self.update_ui, title, description, meta1, meta2, thumbnails, tracks
+                self.update_ui,
+                title,
+                description,
+                meta1,
+                meta2,
+                thumbnails,
+                tracks,
+                is_incremental,
+                track_count,
+                False,
             )
             self.is_fully_loaded = True
-
         except Exception as e:
             print(f"Error fetching album: {e}")
 
@@ -109,8 +90,18 @@ class AlbumPage(BasePlaylistPage):
         tracks,
         append=False,
         total_tracks=None,
+        is_owned=False,
     ):
         super().update_ui(
-            title, description, meta1, meta2, thumbnails, tracks, append, total_tracks
+            title,
+            description,
+            meta1,
+            meta2,
+            thumbnails,
+            tracks,
+            append,
+            total_tracks,
+            is_owned,
         )
-        # self.sort_row.set_visible(False)
+        self._is_album_view = True
+        self.sort_row.set_visible(False)

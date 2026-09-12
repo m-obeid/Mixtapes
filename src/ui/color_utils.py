@@ -203,6 +203,47 @@ def overlay_for_contrast(base, hue_source, alpha, target, lighter=True):
     return oklch_to_rgb(hi if lighter else lo, chroma, hue)
 
 
+def overlay_clear_of(base, hue_source, alpha, foreground, target):
+    """Overlay that still stands `target` contrast from `foreground` once
+    composited on `base` at `alpha`.
+
+    The counterpart to overlay_for_contrast: that one sizes an overlay by
+    how far it should sit from what's behind it, this one by how far it
+    has to stay from what's drawn on top. Takes `hue_source`'s hue and
+    chroma and moves only lightness, away from `foreground`, by the
+    smallest step that clears `target`. Returns `hue_source` untouched
+    when it already clears.
+    """
+    if contrast_ratio(mix(base, hue_source, alpha), foreground) >= target:
+        return hue_source
+
+    lightness, chroma, hue = rgb_to_oklch(hue_source)
+    darken = relative_luminance(foreground) > relative_luminance(
+        mix(base, hue_source, alpha)
+    )
+
+    # Unreachable this way: hand back the endpoint, which is the closest
+    # this hue gets.
+    extreme = 0.0 if darken else 1.0
+    if contrast_ratio(
+        mix(base, oklch_to_rgb(extreme, chroma, hue), alpha), foreground
+    ) < target:
+        return oklch_to_rgb(extreme, chroma, hue)
+
+    # Keep the bound that clears `target`, so the result stays as close to
+    # the accent as the contrast allows.
+    lo, hi = (0.0, lightness) if darken else (lightness, 1.0)
+    for _ in range(20):
+        mid = (lo + hi) / 2
+        composite = mix(base, oklch_to_rgb(mid, chroma, hue), alpha)
+        ok = contrast_ratio(composite, foreground) >= target
+        if darken:
+            lo, hi = (mid, hi) if ok else (lo, mid)
+        else:
+            lo, hi = (lo, mid) if ok else (mid, hi)
+    return oklch_to_rgb(lo if darken else hi, chroma, hue)
+
+
 def mix(base, other, amount):
     """Composite `other` over `base` at `amount` alpha, in sRGB.
 

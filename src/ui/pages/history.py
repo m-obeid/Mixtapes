@@ -271,6 +271,7 @@ class HistoryPage(Adw.Bin):
         listbox = Gtk.ListBox()
         listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         listbox.add_css_class("boxed-list")
+        listbox.add_css_class("songs-list")
         for t in tracks:
             row = self._make_row(t)
             if row is not None:
@@ -318,6 +319,8 @@ class HistoryPage(Adw.Bin):
         title_label.set_halign(Gtk.Align.START)
         title_label.set_ellipsize(Pango.EllipsizeMode.END)
         title_label.set_lines(1)
+        title_label.set_width_chars(1)
+        title_label.set_xalign(0.0)
         title_label.set_tooltip_text(title)
 
         title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -360,6 +363,8 @@ class HistoryPage(Adw.Bin):
         sub_label.set_halign(Gtk.Align.START)
         sub_label.set_ellipsize(Pango.EllipsizeMode.END)
         sub_label.set_lines(1)
+        sub_label.set_width_chars(1)
+        sub_label.set_xalign(0.0)
         sub_label.set_tooltip_text(subtitle or "")
         vb.append(sub_label)
 

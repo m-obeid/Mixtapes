@@ -102,9 +102,11 @@ class QueueRowWidget(Gtk.Box):
         # Update Indicator
         if item.is_playing:
             self.add_css_class("playing")
+            self.remove_css_class("flat")
             self.indicator_stack.set_visible_child_name("playing")
         else:
             self.remove_css_class("playing")
+            self.add_css_class("flat")
             self.indicator_lbl.set_label(str(item.index + 1))
             self.indicator_stack.set_visible_child_name("index")
 

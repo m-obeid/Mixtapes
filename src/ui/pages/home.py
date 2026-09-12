@@ -5,18 +5,43 @@ from gi.repository import Gtk, Adw, GObject, GLib, Pango, Gdk
 
 from api.client import MusicClient
 from ui.utils import (
-    AsyncImage, AsyncPicture, parse_item_metadata, is_online,
-    attach_playing_highlight,
+    AsyncImage, AsyncPicture, parse_item_metadata, is_online, bind_weak_signal
 )
 from ui.context_menu import show_item_menu
 from ui.widgets.scroll_box import HorizontalScrollBox
 from ui.util_classes import ScrolledWindow
+from ui.widgets.media_card import (
+    MediaCardWidget,
+    STRIP_SPACING,
+    STRIP_SPACING_COMPACT,
+)
 
-
-CARD_SIZE = 160
 SPEED_TILE_COVER = 56
 SONG_THUMB_SIZE = 56
+# AsyncImage.set_compact drops a thumbnail to 44 px on mobile.
+SPEED_TILE_COVER_COMPACT = 44
+SPEED_TILE_WIDTH = 280
+# A mobile tile fills the viewport up to this width and then stops growing,
+# so widening the window adds columns instead of fattening the tiles.
+SPEED_TILE_WIDTH_COMPACT = 320
+# Floor for a window narrower than the tile, where fitting beats filling.
+SPEED_TILE_WIDTH_COMPACT_MIN = 200
+# Cover spacing plus the tile padding the text column sits inside.
+SPEED_TILE_TEXT_INSET = 26
+SPEED_TILE_TEXT_INSET_COMPACT = 22
+# How much of the next column stays showing past the right edge on mobile,
+# which is what tells the reader the strip scrolls.
+SPEED_DIAL_PEEK = 32
 
+SPEED_DIAL_ROWS = 3
+SPEED_DIAL_ROWS_COMPACT = 4
+SPEED_DIAL_SPACING = 8
+
+# An ellipsised label reports its whole string as its natural width, and
+# Adw.WrapBox sizes every homogeneous column to its widest child. Capping the
+# natural width stops one long title from stretching each quick-pick column
+# past a phone viewport. Labels still fill whatever the tile allocates them.
+LABEL_NATURAL_MAX_CHARS = 12
 
 # ─── Helpers: kind detection / labelling ────────────────────────────────────
 
@@ -32,10 +57,6 @@ _VIDEO_SECTION_KEYS = (
 
 
 def _is_video_thumbnail(item):
-    """Songs use album-art covers (lh3.googleusercontent.com / yt3.ggpht.com);
-    music videos point at YouTube's i.ytimg.com/vi/{id}/ frames. The two URL
-    families are distinct enough to be a reliable kind hint when the raw
-    `videoType` annotation isn't available (continuation shelves)."""
     thumbs = item.get("thumbnails") or []
     for t in thumbs:
         url = (t.get("url") or "") if isinstance(t, dict) else ""
@@ -45,27 +66,14 @@ def _is_video_thumbnail(item):
 
 
 def _detect_kind(item, section_title=""):
-    """Classify a home-feed item into one of: song, video, album, playlist, artist.
-
-    Preference order:
-      1. ``videoType`` annotation (harvested from the raw home response by
-         ``client.get_home_full``). This is YT's own song/video flag and is
-         authoritative when present.
-      2. Section-title context (a shelf titled "Music videos" is videos).
-      3. Thumbnail URL family — ``i.ytimg.com/vi/...`` is a video frame,
-         ``lh3.googleusercontent.com/...`` is an album cover.
-      4. A conservative shape heuristic as a last resort.
-    """
     if not isinstance(item, dict):
         return None
 
     if item.get("videoId"):
         vtype = (item.get("videoType") or "").upper()
         if vtype:
-            # Songs that happen to live on YT as videos are tagged ATV.
             if vtype == "MUSIC_VIDEO_TYPE_ATV":
                 return "song"
-            # We don't surface podcast episodes in mixed shelves.
             if "PODCAST" in vtype or "EPISODE" in vtype:
                 return None
             return "video"
@@ -104,7 +112,6 @@ def _detect_kind(item, section_title=""):
 
 def _kind_word(kind, item):
     if kind == "album":
-        # ytmusicapi sets `type` to "Album"/"Single"/"EP" when known.
         return item.get("type") or "Album"
     return {
         "song": "Song",
@@ -151,17 +158,11 @@ _UNIT_RE = re.compile(
 
 
 def _playlist_detail(item):
-    """Return a meaningful sub-line for a playlist card, including units.
-
-    YT's `count` is just a number ("150"); the unit ("songs"/"views"/etc) lives
-    inside `description`. Pull the count-with-unit substring out when present.
-    """
     desc = (item.get("description") or "").strip()
     if desc:
         m = _UNIT_RE.search(desc)
         if m:
             return m.group(0)
-        # Fall back to the trailing subtitle segment.
         parts = [p.strip() for p in re.split(r"[•·]", desc) if p.strip()]
         if parts:
             return parts[-1]
@@ -222,7 +223,6 @@ def _song_detail(item):
 
 
 def _duration_str(item):
-    """Return a "M:SS" / "H:MM:SS" string for a song/video, or "" if unknown."""
     dur = item.get("duration")
     if dur:
         return str(dur)
@@ -249,11 +249,32 @@ def _detail_for(item, kind):
     return _song_detail(item)
 
 
+# ─── Highlight Helper: toggle playing & flat ───────────────────────────────
+
+def _attach_item_playing_state(widget, player, video_id, is_button=True):
+    """Monitors player state and toggles .playing / .flat dynamically."""
+    if not video_id:
+        return
+
+    def update_state(*args):
+        current_id = getattr(player, "current_video_id", None)
+        is_playing = bool(current_id and current_id == video_id)
+        if is_playing:
+            widget.add_css_class("playing")
+            if is_button:
+                widget.remove_css_class("flat")
+        else:
+            widget.remove_css_class("playing")
+            if is_button:
+                widget.add_css_class("flat")
+
+    update_state()
+    bind_weak_signal(player, "metadata-changed", widget, update_state)
+    bind_weak_signal(player, "state-changed", widget, update_state)
+
+
 # ─── Section ordering ───────────────────────────────────────────────────────
 
-# Per the user's requested order: speed dial first (carved from Quick picks),
-# then Library, Listen Again, Daily Discover, Forgotten Favorites, then the
-# rest of whatever YT Music returned.
 _PRIORITY = [
     ("library",      ["your library", "from your library"]),
     ("listen_again", ["listen again", "your favorites", "recent activity"]),
@@ -263,7 +284,6 @@ _PRIORITY = [
 
 
 def _classify_section(title):
-    """Return the priority bucket for a section title, or None if no match."""
     if not title:
         return None
     low = title.lower()
@@ -274,18 +294,12 @@ def _classify_section(title):
 
 
 def _section_icon(title):
-    """Pick a symbolic icon to render next to a section heading. Returns None
-    if no rule matches — we deliberately don't fall back to a generic icon,
-    since that makes unrelated shelves look like they share a category."""
     if not title:
         return None
     low = title.lower()
     rules = [
-        # "From your library" mirrors the Library tab icon (vinyl).
         (["from your library", "your library"], "media-optical-symbolic"),
         (["forgotten", "rediscover", "hidden gem"], "starred-symbolic"),
-        # Daily Discover / Discover Mix specifically — not the noisier
-        # "recommended X" / "based on X" shelves where compass is a stretch.
         (["daily discover", "discovery mix", "discover mix"], "compass2-symbolic"),
         (["listen again"], "media-playback-start-symbolic"),
         (["mix"], "media-playlist-shuffle-symbolic"),
@@ -322,6 +336,11 @@ class HomePage(Adw.Bin):
         self.player = player
         self.client = MusicClient()
         self._compact = False
+        self._speed_tiles = []
+        self._speed_wrap = None
+        self._speed_scroll = None
+        self._speed_tile_heights = None
+        self._speed_width_applied = None
         self._loaded = False
         self._loading = False
         self._retry_count = 0
@@ -373,9 +392,6 @@ class HomePage(Adw.Bin):
         if compact:
             self.add_css_class("compact")
             self.feed_box.set_spacing(20)
-            # Pull in page margins so two 160 px cards fit side by
-            # side at 360 px (the mobile breakpoint floor) without the
-            # second one getting clipped.
             self.feed_box.set_margin_start(6)
             self.feed_box.set_margin_end(6)
         else:
@@ -383,23 +399,23 @@ class HomePage(Adw.Bin):
             self.feed_box.set_spacing(28)
             self.feed_box.set_margin_start(12)
             self.feed_box.set_margin_end(12)
-        # Tighten the gap between cards in each horizontal strip
-        # (16 → 8 px in compact). The CSS `.compact .artist-horizontal-item`
-        # rule also halves the per-card hover padding, both contribute
-        # to keeping two cards visible on a 360 px viewport.
-        for strip in getattr(self, "_card_strips", []):
-            strip.set_spacing(8 if compact else 16)
-        # Walk the already-built feed and shrink each AsyncPicture
-        # thumbnail (56 → 44 px) to match Explore's compact behavior.
-        # Without this, the song-list rows in Quick Picks / Listen
-        # Again / etc. stay at their desktop size on mobile widths.
+        self._card_strips = [
+            s for s in getattr(self, "_card_strips", []) if s.get_parent() is not None
+        ]
+        for strip in self._card_strips:
+            strip.set_spacing(STRIP_SPACING_COMPACT if compact else STRIP_SPACING)
+        self._speed_tiles = [
+            e for e in getattr(self, "_speed_tiles", []) if e[0].get_parent() is not None
+        ]
+        self._speed_width_applied = None
+        self._apply_speed_tile_style(compact)
         self._propagate_compact(self.feed_box, compact)
+        # after _propagate_compact, which is what resizes the tile covers
+        self._sync_speed_dial_height(compact)
 
     def _propagate_compact(self, widget, compact):
-        """Recursively set compact mode on any descendant that exposes
-        set_compact — covers both AsyncPicture (song rows) and
-        AsyncImage (speed-dial tiles), so the quick-dial covers also
-        shrink to leave more room for text on mobile widths."""
+        if hasattr(widget, "has_css_class") and widget.has_css_class("home-section-header"):
+            return
         if hasattr(widget, "set_compact"):
             try:
                 widget.set_compact(compact)
@@ -432,9 +448,6 @@ class HomePage(Adw.Bin):
             GObject.idle_add(self._apply_home, None, "offline")
             return
         try:
-            # get_home_full attaches strapline thumbnails per shelf so we can
-            # show the seed item's cover (album/artist photo) next to "Based
-            # on …" headings — falls back to plain get_home internally.
             data = self.client.get_home_full(limit=25)
             GObject.idle_add(self._apply_home, data, None)
         except Exception as e:
@@ -499,6 +512,11 @@ class HomePage(Adw.Bin):
     # ─── Feed building ─────────────────────────────────────────────────────
 
     def _clear_feed(self):
+        self._speed_tiles = []
+        self._speed_wrap = None
+        self._speed_scroll = None
+        self._speed_tile_heights = None
+        self._speed_width_applied = None
         child = self.feed_box.get_first_child()
         while child:
             nxt = child.get_next_sibling()
@@ -514,23 +532,16 @@ class HomePage(Adw.Bin):
             s for s in sections
             if isinstance(s, dict)
             and s.get("contents")
-            # Drop podcast/show shelves outright — we don't render episodes
-            # and the rows end up looking empty otherwise.
             and not _is_podcast_section(s.get("title"))
         ]
-        # Also drop shelves whose contents collapse to nothing after kind
-        # filtering (e.g. all-episode rows).
         sections = [s for s in sections if any(_detect_kind(it, s.get("title") or "") for it in s["contents"])]
 
-        # ── 1. Speed dial ─────────────────────────────────────────────────
-        # Carve from "Quick picks", which is YT's most-personal/recent shelf.
-        # Falls back to the first available shelf if Quick picks isn't there.
         speed_items = []
         speed_consumed = None
         for sec in sections:
             title = (sec.get("title") or "").lower()
             if "quick pick" in title:
-                speed_items = sec["contents"][:8]
+                speed_items = sec["contents"]
                 speed_consumed = sec
                 break
         if speed_consumed is not None:
@@ -538,15 +549,14 @@ class HomePage(Adw.Bin):
         if not speed_items and sections:
             for sec in sections:
                 if _classify_section(sec.get("title")) == "listen_again":
-                    speed_items = sec["contents"][:8]
+                    speed_items = sec["contents"]
                     break
             else:
-                speed_items = sections[0]["contents"][:8]
+                speed_items = sections[0]["contents"]
 
         if speed_items:
             self._add_speed_dial(speed_items)
 
-        # ── 2. Reorder remaining sections per priority ────────────────────
         buckets = {b: None for b, _ in _PRIORITY}
         rest = []
         for sec in sections:
@@ -567,6 +577,10 @@ class HomePage(Adw.Bin):
             strapline = sec.get("strapline_thumbnail")
             self._add_section(title, contents, bucket, strapline_url=strapline)
 
+        # A feed built while the window is already narrow has never seen the
+        # breakpoint, so nothing has told these widgets they are compact.
+        self.set_compact_mode(self._is_compact_now())
+
     # ─── Section heading ───────────────────────────────────────────────────
 
     def _make_section_header(self, title, bucket=None, strapline_url=None):
@@ -574,12 +588,8 @@ class HomePage(Adw.Bin):
         header.set_halign(Gtk.Align.START)
         header.add_css_class("home-section-header")
 
-        # Prefer the YT-provided "based-on" cover (album/artist/playlist
-        # thumbnail tied to the shelf) when present — it's the same affordance
-        # the YouTube Music app uses to give context for these rows. Fall
-        # back to a curated symbolic icon, then to no icon at all.
         if strapline_url:
-            cover = AsyncImage(url=strapline_url, size=28, player=self.player)
+            cover = AsyncImage(url=strapline_url, size=30, player=self.player)
             wrapper = Gtk.Box()
             wrapper.set_overflow(Gtk.Overflow.HIDDEN)
             wrapper.add_css_class("home-section-cover")
@@ -614,15 +624,24 @@ class HomePage(Adw.Bin):
 
         section_box.append(self._make_section_header("Quick picks"))
 
-        flow = Gtk.FlowBox()
-        flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        flow.set_min_children_per_line(2)
-        flow.set_max_children_per_line(4)
-        flow.set_homogeneous(True)
-        flow.set_column_spacing(8)
-        flow.set_row_spacing(8)
-        flow.set_activate_on_single_click(True)
-        flow.connect("child-activated", self._on_speed_tile_activated)
+        scroll_box = HorizontalScrollBox()
+        self._speed_scroll = scroll_box
+        # A mobile tile is as wide as the viewport, and only the scrolled
+        # window's adjustment reports that: once the strip overflows, the wrap
+        # box itself is allocated the content width instead.
+        scroll_box.hadjustment.connect(
+            "changed", self._on_speed_viewport_changed, scroll_box
+        )
+
+        wrap = Adw.WrapBox(orientation=Gtk.Orientation.VERTICAL)
+        wrap.set_line_homogeneous(True)
+        wrap.set_line_spacing(SPEED_DIAL_SPACING)
+        wrap.set_child_spacing(SPEED_DIAL_SPACING)
+        wrap.set_valign(Gtk.Align.START)
+        self._speed_wrap = wrap
+        # A one-line title makes a shorter tile than a wrapped two-line one, so
+        # without this the rows step up and down across the columns.
+        self._speed_tile_heights = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.VERTICAL)
 
         section_title = "Quick picks"
         playable_pool = [it for it in items if _detect_kind(it, section_title) in ("song", "video")]
@@ -631,21 +650,88 @@ class HomePage(Adw.Bin):
             kind = _detect_kind(item, section_title)
             if not kind:
                 continue
-            tile = self._build_speed_tile(item, kind, playable_pool)
-            flow_child = Gtk.FlowBoxChild()
-            flow_child.set_focusable(True)
-            flow_child.item_data = item
-            flow_child.item_kind = kind
-            flow_child.queue_pool = playable_pool
-            flow_child.set_child(tile)
-            flow.append(flow_child)
 
-        section_box.append(flow)
+            tile = self._build_speed_tile(
+                item, kind, playable_pool,
+                on_clicked=lambda btn, it=item, k=kind, pool=playable_pool: self._activate_item(it, k, pool)
+            )
+            wrap.append(tile)
 
-    def _build_speed_tile(self, item, kind, playable_pool):
-        tile = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        scroll_box.set_content(wrap)
+        section_box.append(scroll_box)
+        self._sync_speed_dial_height()
+
+    def _sync_speed_dial_height(self, compact=None):
+        """Hold the dial to a whole number of rows.
+
+        Every tile is the same height, so the column can be measured off one
+        of them instead of leaving a strip of dead space under the last row."""
+        if self._speed_wrap is None or not self._speed_tiles:
+            return
+        if compact is None:
+            compact = self._is_compact_now()
+        rows = SPEED_DIAL_ROWS_COMPACT if compact else SPEED_DIAL_ROWS
+        row = self._speed_tiles[0][0].measure(Gtk.Orientation.VERTICAL, -1)[1]
+        self._speed_wrap.set_size_request(
+            -1, rows * row + (rows - 1) * SPEED_DIAL_SPACING
+        )
+
+    def _is_compact_now(self):
+        root = self.get_root()
+        if root is None:
+            return self._compact
+        return bool(getattr(root, "_is_compact", self._compact))
+
+    def _speed_tile_width(self, compact):
+        if not compact:
+            return SPEED_TILE_WIDTH
+        viewport = 0
+        if self._speed_scroll is not None:
+            viewport = int(self._speed_scroll.hadjustment.get_page_size())
+        if viewport <= 0:
+            return SPEED_TILE_WIDTH_COMPACT
+        return max(
+            SPEED_TILE_WIDTH_COMPACT_MIN,
+            min(SPEED_TILE_WIDTH_COMPACT, viewport - SPEED_DIAL_PEEK),
+        )
+
+    def _on_speed_viewport_changed(self, _adjustment, scroll_box):
+        # A dial torn down by _clear_feed can still emit on its way out
+        if scroll_box is not self._speed_scroll or not self._speed_tiles:
+            return
+        if not self._is_compact_now():
+            return
+        self._apply_speed_tile_style(True)
+
+    def _apply_speed_tile_style(self, compact, entries=None):
+        """Size the tiles and pick how many lines a title gets.
+
+        Mobile runs one tile per column at the full viewport width, wide
+        enough for a title on a single line. Cramming two lines in there is
+        what made the rows uneven before they were forced to one height."""
+        width = self._speed_tile_width(compact)
+        if entries is None:
+            if width == self._speed_width_applied:
+                return
+            self._speed_width_applied = width
+            entries = self._speed_tiles
+        cover = SPEED_TILE_COVER_COMPACT if compact else SPEED_TILE_COVER
+        inset = SPEED_TILE_TEXT_INSET_COMPACT if compact else SPEED_TILE_TEXT_INSET
+        for tile, text_col, title_label in entries:
+            tile.set_size_request(width, -1)
+            text_col.set_size_request(width - cover - inset, -1)
+            title_label.set_wrap(not compact)
+            title_label.set_lines(1 if compact else 2)
+
+    def _build_speed_tile(self, item, kind, playable_pool, on_clicked=None):
+        tile = Gtk.Button()
         tile.add_css_class("home-speed-tile")
-        tile.set_cursor(Gdk.Cursor.new_from_name("pointer", None))
+        tile.add_css_class("card")
+
+        compact = self._is_compact_now()
+
+        inner_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        tile.set_child(inner_box)
 
         thumb_url = (
             (item.get("thumbnails") or [{}])[-1].get("url")
@@ -659,44 +745,53 @@ class HomePage(Adw.Bin):
         wrapper.add_css_class("home-speed-cover")
         wrapper.set_valign(Gtk.Align.CENTER)
         wrapper.append(img)
-        tile.append(wrapper)
+        inner_box.append(wrapper)
 
-        # Title + kind subtitle stacked vertically next to the cover. Two
-        # short lines max so a row of 4 tiles still reads cleanly.
         text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         text_col.set_valign(Gtk.Align.CENTER)
         text_col.set_hexpand(True)
 
         title_label = Gtk.Label(label=item.get("title", "Unknown"))
-        title_label.set_halign(Gtk.Align.START)
+        title_label.set_halign(Gtk.Align.FILL)
+        title_label.set_xalign(0)
         title_label.set_ellipsize(Pango.EllipsizeMode.END)
-        title_label.set_lines(2)
-        title_label.set_wrap(True)
         title_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        title_label.set_width_chars(1)
+        title_label.set_max_width_chars(LABEL_NATURAL_MAX_CHARS)
         title_label.set_hexpand(True)
         title_label.add_css_class("home-speed-title")
         text_col.append(title_label)
 
-        # Speed tile: icon yes, kind word no — saves a chunk of width
-        # ("Song · ", "Video · " etc. ate ~6-8 chars otherwise) so the
-        # title + artist read better, especially in compact mode.
+        entry = (tile, text_col, title_label)
+        self._speed_tiles.append(entry)
+        self._apply_speed_tile_style(compact, [entry])
+        if self._speed_tile_heights is not None:
+            self._speed_tile_heights.add_widget(tile)
+
         text_col.append(
             self._build_kind_subtitle(
-                item, kind, dim=True, include_kind=True, include_kind_word=False
+                item, kind, dim=True, include_kind=True, include_kind_word=False,
+                constrain_width=True
             )
         )
-        tile.append(text_col)
+        inner_box.append(text_col)
+
+        if on_clicked:
+            tile.connect("clicked", lambda btn: on_clicked(tile))
 
         right = Gtk.GestureClick()
         right.set_button(3)
         right.connect("released", self._on_tile_right_click, tile, item, kind)
         tile.add_controller(right)
+
         lp = Gtk.GestureLongPress()
         lp.connect(
             "pressed",
             lambda g, x, y, t=tile, it=item, k=kind: self._on_tile_right_click(g, 1, x, y, t, it, k),
         )
         tile.add_controller(lp)
+
+        _attach_item_playing_state(tile, self.player, item.get("videoId"), is_button=False)
 
         return tile
 
@@ -716,9 +811,6 @@ class HomePage(Adw.Bin):
             self._make_section_header(title, bucket, strapline_url=strapline_url)
         )
 
-        # Heuristic: a section of mostly songs renders as a rich list. Mixed
-        # / card-friendly sections (albums, playlists, artists) render as a
-        # horizontal scroll of cards.
         song_count = sum(1 for it in items if _detect_kind(it, title) == "song")
         if song_count >= max(3, int(len(items) * 0.66)):
             self._add_song_list(section_box, items, bucket, section_title=title)
@@ -730,6 +822,7 @@ class HomePage(Adw.Bin):
     def _add_song_list(self, section_box, items, bucket=None, section_title=""):
         list_box = Gtk.ListBox()
         list_box.add_css_class("boxed-list")
+        list_box.add_css_class("songs-list")
         list_box.set_selection_mode(Gtk.SelectionMode.NONE)
         list_box.connect("row-activated", self._on_song_row_activated)
 
@@ -746,10 +839,8 @@ class HomePage(Adw.Bin):
             box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
             box.add_css_class("song-row")
             row.set_child(box)
-            # Light up the row while this track is the one playing —
-            # home rows are built ad-hoc (not SongRowWidget), so they
-            # need an explicit subscription to player metadata.
-            attach_playing_highlight(box, self.player, item.get("videoId"))
+
+            _attach_item_playing_state(row, self.player, item.get("videoId"), is_button=False)
 
             thumb_url = (
                 (item.get("thumbnails") or [{}])[-1].get("url")
@@ -777,6 +868,8 @@ class HomePage(Adw.Bin):
             title_lbl.set_halign(Gtk.Align.START)
             title_lbl.set_ellipsize(Pango.EllipsizeMode.END)
             title_lbl.set_lines(1)
+            title_lbl.set_width_chars(1)
+            title_lbl.set_xalign(0.0)
 
             title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
             title_box.append(title_lbl)
@@ -788,7 +881,7 @@ class HomePage(Adw.Bin):
                 title_box.append(explicit_badge)
 
             vbox.append(title_box)
-            vbox.append(self._build_kind_subtitle(item, kind, dim=True))
+            vbox.append(self._build_kind_subtitle(item, kind, dim=True, constrain_width=True))
             box.append(vbox)
 
             self._attach_context_menu(row, item, kind)
@@ -800,14 +893,19 @@ class HomePage(Adw.Bin):
 
     def _add_card_strip(self, section_box, items, bucket=None, section_title=""):
         scroll_box = HorizontalScrollBox()
-        h_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
-        h_box.set_margin_bottom(8)
-        # Track strips so set_compact_mode can tighten their gaps on
-        # mobile widths (default 16 px → 8 px in compact).
+        root = self.get_root()
+        compact = bool(getattr(root, "_is_compact", self._compact))
+        h_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=STRIP_SPACING_COMPACT if compact else STRIP_SPACING,
+        )
+        # On the scroll box, not the strip. Inside the scrolled window the
+        # margin is empty space the overlay scrollbar draws in, which reads as
+        # a stray line under the row.
+        scroll_box.set_margin_bottom(16)
         if not hasattr(self, "_card_strips"):
             self._card_strips = []
         self._card_strips.append(h_box)
-        h_box.set_spacing(8 if getattr(self, "_compact", False) else 16)
 
         for item in items:
             kind = _detect_kind(item, section_title)
@@ -821,107 +919,40 @@ class HomePage(Adw.Bin):
         section_box.append(scroll_box)
 
     def _build_card(self, item, kind, siblings, section_title=""):
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        card.add_css_class("artist-horizontal-item")
-        card.set_cursor(Gdk.Cursor.new_from_name("pointer", None))
-        card.item_data = item
+        card = MediaCardWidget(
+            item,
+            player=self.player,
+            title_lines=2,
+            on_clicked=lambda btn, it: self._on_card_clicked(btn)
+        )
         card.item_kind = kind
         card.queue_pool = [
             it for it in siblings if _detect_kind(it, section_title) in ("song", "video")
         ]
-
-        thumb_url = (
-            (item.get("thumbnails") or [{}])[-1].get("url")
-            if item.get("thumbnails") else None
-        )
-        img = AsyncImage(url=thumb_url, size=CARD_SIZE, player=self.player)
-        img.video_id = item.get("videoId") or item.get("playlistId") or item.get("browseId")
-
-        wrapper = Gtk.Box()
-        wrapper.set_overflow(Gtk.Overflow.HIDDEN)
-        wrapper.add_css_class("card")
-        wrapper.set_halign(Gtk.Align.CENTER)
-        wrapper.append(img)
-        card.append(wrapper)
-
-        title_lbl = Gtk.Label(label=item.get("title", ""))
-        title_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-        title_lbl.set_wrap(True)
-        title_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        title_lbl.set_lines(2)
-        title_lbl.set_justify(Gtk.Justification.LEFT)
-        title_lbl.set_halign(Gtk.Align.START)
-        title_clamp = Adw.Clamp(maximum_size=CARD_SIZE)
-        title_clamp.set_child(title_lbl)
-        card.append(title_clamp)
-
-        sub_widget = self._build_kind_subtitle(item, kind, dim=True, include_kind=True)
-        sub_clamp = Adw.Clamp(maximum_size=CARD_SIZE)
-        sub_clamp.set_child(sub_widget)
-        card.append(sub_clamp)
-
-        click = Gtk.GestureClick()
-        click.set_button(1)
-        click.connect("released", self._on_card_clicked, card)
-        card.add_controller(click)
-
+    
         right = Gtk.GestureClick()
         right.set_button(3)
         right.connect("released", self._on_card_right_click, card)
         card.add_controller(right)
-
+    
         lp = Gtk.GestureLongPress()
         lp.connect(
             "pressed",
             lambda g, x, y, c=card: self._on_card_right_click(g, 1, x, y, c),
         )
         card.add_controller(lp)
-
-        # Keyboard accessibility: these cards are plain Gtk.Box widgets driven
-        # by click gestures, so without this they were unreachable by Tab and
-        # un-activatable from the keyboard. Make them focusable, expose a label
-        # to assistive tech, and activate on Enter/Space (mirroring a click).
-        card.set_focusable(True)
-        card.update_property(
-            [Gtk.AccessibleProperty.LABEL], [item.get("title", "")]
-        )
-        key = Gtk.EventControllerKey()
-        key.connect("key-pressed", self._on_card_key, card)
-        card.add_controller(key)
-
         return card
-
-    def _on_card_key(self, controller, keyval, keycode, state, card):
-        if keyval in (
-            Gdk.KEY_Return,
-            Gdk.KEY_KP_Enter,
-            Gdk.KEY_ISO_Enter,
-            Gdk.KEY_space,
-            Gdk.KEY_KP_Space,
-        ):
-            self._activate_item(
-                card.item_data, card.item_kind, getattr(card, "queue_pool", None)
-            )
-            return True
-        return False
 
     # ─── Subtitle row with kind icon + detail ──────────────────────────────
 
     def _build_kind_subtitle(
-        self, item, kind, dim=True, include_kind=True, include_kind_word=None
+        self, item, kind, dim=True, include_kind=True, include_kind_word=None,
+        constrain_width=False
     ):
-        """Compact row: [kind-icon] [Kind label · detail], with optional
-        explicit badge inline. Used by both cards and song rows.
-
-        `include_kind` controls the icon. `include_kind_word` controls
-        whether the kind name ("Song", "Video", "Album") is repeated
-        in the text — useful for speed-dial tiles where the icon
-        already conveys kind and the redundant word eats text room.
-        Defaults to `include_kind` for backward compatibility."""
         if include_kind_word is None:
             include_kind_word = include_kind
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        row.set_halign(Gtk.Align.START)
+        row.set_halign(Gtk.Align.FILL if constrain_width else Gtk.Align.START)
 
         icon_name = _kind_icon(kind) if include_kind else None
         if icon_name:
@@ -954,6 +985,12 @@ class HomePage(Adw.Bin):
             label.set_halign(Gtk.Align.START)
             label.set_ellipsize(Pango.EllipsizeMode.END)
             label.set_lines(1)
+            label.set_width_chars(1)
+            if constrain_width:
+                label.set_halign(Gtk.Align.FILL)
+                label.set_xalign(0)
+                label.set_hexpand(True)
+                label.set_max_width_chars(LABEL_NATURAL_MAX_CHARS)
             label.add_css_class("caption")
             if dim:
                 label.add_css_class("dim-label")
@@ -963,8 +1000,8 @@ class HomePage(Adw.Bin):
 
     # ─── Activation ────────────────────────────────────────────────────────
 
-    def _on_card_clicked(self, gesture, n_press, x, y, card):
-        self._activate_item(card.item_data, card.item_kind, getattr(card, "queue_pool", None))
+    def _on_card_clicked(self, button):
+        self._activate_item(button.item_data, button.item_kind, getattr(button, "queue_pool", None))
 
     def _on_song_row_activated(self, listbox, row):
         self._activate_item(row.item_data, row.item_kind, getattr(row, "queue_pool", None))
@@ -1005,10 +1042,6 @@ class HomePage(Adw.Bin):
             return
 
     def _play_with_radio(self, item, queue_pool):
-        """Build the queue from this section's playable siblings and start at
-        the clicked song. After the section runs out, an auto-fetched radio
-        based on the last sibling's videoId is appended (and turns into a
-        truly infinite mix). See player.play_then_radio."""
         tracks = []
         start_index = 0
 
@@ -1041,10 +1074,8 @@ class HomePage(Adw.Bin):
                 _artists_text(item),
                 thumb_url,
             )
-            # Single-track activation: still extend with radio based on it.
             seed = item.get("videoId")
             if seed and hasattr(self.player, "play_then_radio"):
-                # load_video already called set_queue; chain a radio on top.
                 self.player.play_then_radio(self.player.queue, 0, seed)
             return
 
@@ -1094,3 +1125,4 @@ class HomePage(Adw.Bin):
             client=self.client,
             prefix="row",
         )
+        

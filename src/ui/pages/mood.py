@@ -1,9 +1,16 @@
-from gi.repository import Gtk, Adw, GObject, GLib, Pango
+import json
 import threading
+from gi.repository import Adw, GLib, GObject, Gtk, Pango
 from api.client import MusicClient
-from ui.utils import AsyncImage
-from ui.context_menu import show_item_menu
+from ui.context_menu import MenuAction, show_item_menu
 from ui.util_classes import ScrolledWindow
+from ui.utils import AsyncImage, copy_to_clipboard, parse_item_metadata
+from ui.widgets.media_card import (
+    MediaCardWidget,
+    CardWrapLayout,
+    GRID_SPACING,
+    GRID_LINE_SPACING,
+)
 
 
 class MoodPage(Adw.Bin):
@@ -29,6 +36,9 @@ class MoodPage(Adw.Bin):
         self.scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.scrolled.set_vexpand(True)
 
+        vadjust = self.scrolled.get_vadjustment()
+        vadjust.connect("value-changed", self._on_scroll)
+
         # Content Box
         self.content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         self.content_box.set_margin_top(24)
@@ -36,21 +46,20 @@ class MoodPage(Adw.Bin):
         self.content_box.set_margin_start(24)
         self.content_box.set_margin_end(24)
 
-        # FlowBox for Grid (Reusing Discography aesthetics)
-        self.flow_box = Gtk.FlowBox()
+        # WrapBox centralizado
+        self.flow_box = Adw.WrapBox()
+        # Same layout as the library and discography grids.
+        self.flow_box.set_layout_manager(CardWrapLayout())
         self.flow_box.set_valign(Gtk.Align.START)
-        self.flow_box.set_max_children_per_line(5)
-        self.flow_box.set_min_children_per_line(2)
-        self.flow_box.set_selection_mode(Gtk.SelectionMode.NONE)
-        self.flow_box.set_column_spacing(0)
-        self.flow_box.set_row_spacing(0)
-        self.flow_box.set_homogeneous(True)
-        self.flow_box.set_activate_on_single_click(True)
-        self.flow_box.connect("child-activated", self.on_grid_child_activated)
+        self.flow_box.set_halign(Gtk.Align.FILL)
+        self.flow_box.set_align(0.5)
+        self.flow_box.set_line_homogeneous(False)
+        self.flow_box.set_line_spacing(GRID_LINE_SPACING)
+        self.flow_box.set_child_spacing(GRID_SPACING)
 
         self.content_box.append(self.flow_box)
 
-        # Loading Spinner — centered vertically when the grid is empty.
+        # Loading Spinner
         self._loading_wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._loading_wrap.set_vexpand(True)
         self._loading_wrap.set_valign(Gtk.Align.CENTER)
@@ -64,7 +73,6 @@ class MoodPage(Adw.Bin):
         self._loading_wrap.set_visible(False)
         self.content_box.append(self._loading_wrap)
 
-        # Clamp for consistent width
         self.clamp = Adw.Clamp()
         self.clamp.set_maximum_size(1024)
         self.clamp.set_tightening_threshold(600)
@@ -75,11 +83,28 @@ class MoodPage(Adw.Bin):
 
         self.set_child(self.main_box)
 
+    def set_compact_mode(self, compact):
+        if compact:
+            self.add_css_class("compact")
+            self.content_box.set_spacing(12)
+            self.content_box.set_margin_start(12)
+            self.content_box.set_margin_end(12)
+        else:
+            self.remove_css_class("compact")
+            self.content_box.set_spacing(16)
+            self.content_box.set_margin_start(24)
+            self.content_box.set_margin_end(24)
+    
+        child = self.flow_box.get_first_child()
+        while child:
+            if hasattr(child, "set_compact_mode"):
+                child.set_compact_mode(compact)
+            child = child.get_next_sibling()
+
     def load_mood(self, params, title):
         self.params = params
         self.title = title
 
-        # Clear existing items
         self.items = []
         child = self.flow_box.get_first_child()
         while child:
@@ -94,11 +119,17 @@ class MoodPage(Adw.Bin):
         query = text.lower().strip()
         child = self.flow_box.get_first_child()
         while child:
-            if hasattr(child, "item_data"):
-                title = child.item_data.get("title", "").lower()
+            data = getattr(child, "item_data", None)
+            if data:
+                title = data.get("title", "").lower()
                 child.set_visible(not query or query in title)
             child = child.get_next_sibling()
 
+    def _on_scroll(self, vadjust):
+        if vadjust.get_value() > 50:
+            self.emit("header-title-changed", self.title)
+        else:
+            self.emit("header-title-changed", "")
 
     def _load_data(self):
         if self._is_loading:
@@ -127,74 +158,74 @@ class MoodPage(Adw.Bin):
 
         threading.Thread(target=fetch_func, daemon=True).start()
 
+    def _make_card(self, item):
+        card = MediaCardWidget(
+            item,
+            player=self.player,
+            title_lines=1,
+            on_clicked=lambda btn, it: self.on_card_clicked(btn)
+        )
+    
+        gesture = Gtk.GestureClick()
+        gesture.set_button(3)
+        gesture.connect("pressed", self.on_grid_right_click, child if 'child' in locals() else card)
+        card.add_controller(gesture)
+    
+        lp = Gtk.GestureLongPress()
+        lp.connect(
+            "pressed",
+            lambda g, x, y, c=card: self.on_grid_right_click(g, 1, x, y, c),
+        )
+        card.add_controller(lp)
+        return card
+
     def _render_items(self, items):
         for item in items:
-            thumb_url = (
-                item.get("thumbnails", [])[-1]["url"]
-                if item.get("thumbnails")
-                else None
-            )
+            card = self._make_card(item)
+            self.flow_box.append(card)
 
-            item_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-            item_box.item_data = item
+    def on_card_clicked(self, button):
+        if hasattr(button, "item_data"):
+            self._activate_item_data(button.item_data)
 
-            img = AsyncImage(url=thumb_url, size=140)
-
-            wrapper = Gtk.Box()
-            wrapper.set_overflow(Gtk.Overflow.HIDDEN)
-            wrapper.add_css_class("card")
-            wrapper.set_halign(Gtk.Align.CENTER)
-            wrapper.append(img)
-
-            item_box.append(wrapper)
-
-            lbl = Gtk.Label(label=item.get("title", ""))
-            lbl.set_ellipsize(Pango.EllipsizeMode.END)
-            lbl.set_wrap(True)
-            lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            lbl.set_lines(2)
-            lbl.set_justify(Gtk.Justification.LEFT)
-            lbl.set_halign(Gtk.Align.START)
-
-            text_clamp = Adw.Clamp(maximum_size=140)
-            text_clamp.set_child(lbl)
-            item_box.append(text_clamp)
-
-            self.flow_box.append(item_box)
-
-            gesture = Gtk.GestureClick()
-            gesture.set_button(3)
-            gesture.connect("pressed", self.on_grid_right_click, item_box)
-            item_box.add_controller(gesture)
-
-            # Long Press for touch
-            lp = Gtk.GestureLongPress()
-            lp.connect(
-                "pressed",
-                lambda g, x, y, ib=item_box: self.on_grid_right_click(g, 1, x, y, ib),
-            )
-            item_box.add_controller(lp)
-
-    def on_grid_child_activated(self, flowbox, child):
-        box = child.get_child()
-        if not hasattr(box, "item_data"):
-            return
-
-        item = box.item_data
-        playlist_id = item.get("playlistId")
+    def _activate_item_data(self, item):
+        playlist_id = item.get("playlistId") or item.get("browseId")
+        video_id = item.get("videoId")
 
         if playlist_id:
-             self.open_playlist_callback(playlist_id)
+            initial_data = {
+                "title": item.get("title", ""),
+                "thumb": (item.get("thumbnails", [{}])[-1] or {}).get("url")
+                if item.get("thumbnails")
+                else None,
+            }
+            try:
+                self.open_playlist_callback(playlist_id, initial_data)
+            except TypeError:
+                self.open_playlist_callback(playlist_id)
+        elif video_id:
+            app = Gtk.Application.get_default()
+            window = app.get_active_window()
+            if window and hasattr(window, "player"):
+                window.player.play_tracks([item])
 
     def on_grid_right_click(self, gesture, n_press, x, y, item_box):
         if not hasattr(item_box, "item_data"):
             return
+        data = item_box.item_data
         show_item_menu(
             item_box,
             x,
             y,
-            item_box.item_data,
+            data,
             player=self.player,
             client=self.client,
             prefix="item",
+            extras=[
+                MenuAction(
+                    "Copy JSON (Debug)",
+                    lambda d=data: copy_to_clipboard(json.dumps(d, indent=2)),
+                    section="debug",
+                )
+            ],
         )

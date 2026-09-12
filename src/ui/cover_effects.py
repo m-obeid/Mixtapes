@@ -208,6 +208,24 @@ def _ensure_image_bytes(url):
     since YouTube only generates maxres/sd for high-res uploads."""
     if not url:
         return None
+
+    # Downloaded tracks and local playlists hand us `file://` covers, which
+    # requests has no adapter for. Read those off disk and skip the thumb
+    # cache: the bytes are already local, and the blur cache still keys off
+    # the same URL. The `?m=<mtime>` cache-buster from
+    # utils.local_playlist_cover_url has to come off the path first.
+    if url.startswith("file://"):
+        path = url[len("file://"):]
+        q = path.rfind("?")
+        if q != -1:
+            path = path[:q]
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except OSError as e:
+            print(f"[cover_effects] local cover read failed: {e}")
+            return None
+
     data = read_thumb_cache(url)
     if data:
         return data

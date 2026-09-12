@@ -15,29 +15,21 @@
                sans-serif;
 }
 
-@define-color scrim_top mix(@window_bg_color, transparent, 0.4);
-@define-color scrim_mid mix(@window_bg_color, transparent, 0.8);
-@define-color row_hover alpha(@accent_bg_color, 0.08);
-@define-color row_selected alpha(@accent_bg_color, 0.12);
-/* Row tints use @accent_bg_color, the solid accent, to keep the hue.
-   @accent_color is darkened in light mode and washes them out. */
-@define-color playing_bg alpha(@accent_bg_color, 0.1);
-/* Static fallback for the playing-row label, used before MainWindow
-   overrides it in _refresh_derived_colors. Mixing toward @view_fg_color
-   darkens on light themes and lightens on dark ones, which GTK has no
-   media query for. The old `hsl(... 100% 80%)` was a dark-mode value and
-   left light themes near 1.1:1. */
+/* Static fallbacks for the tokens MainWindow recomputes per cover in
+   _refresh_derived_colors. Needed so the rules below still parse before
+   the derived provider loads; GTK drops a declaration naming a color it
+   cannot resolve. */
+/* Playing-row label. @accent_color is tuned against the plain view
+   background and lands under 4:1 on the accent-tinted playing row, which
+   is what made the label read as muddy. Mix toward @view_fg_color:
+   lightens on dark themes, darkens on light ones, which GTK has no media
+   query for. */
 @define-color playing_fg color-mix(in oklab, @accent_color, @view_fg_color 60%);
-/* Same label over the blurred cover, where the row is translucent and
-   the cover bleeds through. Mixed further for headroom. */
-@define-color playing_fg_over_blur color-mix(in oklab, @accent_color, @view_fg_color 78%);
-/* Translucent surface for the .playing row in blurred-background mode.
-   MainWindow replaces it with a derived value. */
-@define-color playing_surface_over_blur alpha(mix(@view_bg_color, @accent_bg_color, 0.35), 0.5);
-/* Translucent chrome panels in blurred-background mode. MainWindow
-   replaces these with derived values. */
-@define-color blur_panel_bg alpha(@window_bg_color, 0.35);
-@define-color blur_panel_bg_weak alpha(@window_bg_color, 0.25);
+/* Checked toggle in a toggle group. Opaque in light mode by default,
+   which punches a solid white hole through the blurred cover. */
+@define-color toggle_checked_bg @card_bg_color;
+/* Sidebar pane over the blurred cover, before the measured value lands. */
+@define-color blur_sidebar_bg alpha(@sidebar_bg_color, 0.16);
 
 .rounded {
   border-radius: 12px;
@@ -113,8 +105,27 @@
   border-radius: 12px 12px 0 0;
 }
 
-/* Reset default hover/selection for playlist view rows 
-   where we use our custom .song-row inside */
+/* Controls filled with the solid accent. The knob is white in every
+   scheme, so a cover that hands the app a bright accent puts a white knob
+   on a near-white track: the yellow-green cover measured 1.4:1 between
+   the two, and the switch read as permanently mid-animation.
+   @accent_fg_color is the label color the accent already picked for
+   itself, so the knob flips to black exactly when white stops working. */
+switch:checked > slider {
+  background-color: @accent_fg_color;
+}
+
+/* A scale's knob rides the boundary between the accent highlight and the
+   empty trough, so it cannot take one fill and contrast with both. Ring
+   it instead. The ring is invisible while @accent_fg_color is white (a
+   white knob on a dark or mid accent already separates) and appears only
+   on the bright accents that need it. Outline, not box-shadow, so
+   libadwaita's elevation on the knob survives. */
+scale > trough > slider {
+  outline: 1px solid alpha(@accent_fg_color, 0.5);
+  outline-offset: -1px;
+}
+
 listview.playlist-view > row,
 listview.playlist-view > row:hover,
 listview.playlist-view > row:selected,
@@ -124,7 +135,6 @@ listview.playlist-view > row:focus:selected {
   background: none;
   border: none;
   box-shadow: none;
-  outline: none;
 }
 
 /* Keyboard focus ring for song rows. The reset above clears the row's own
@@ -132,10 +142,6 @@ listview.playlist-view > row:focus:selected {
    Tab navigation with no visible indicator. Draw the ring on the rounded
    inner box instead. :focus-visible keeps it keyboard-only — a mouse click
    focuses the row without flashing a ring. */
-listview.playlist-view > row:focus-visible box.song-row {
-  outline: 2px solid @accent_color;
-  outline-offset: -2px;
-}
 
 .sort-dropdown > button:not(:hover):not(:active) {
   background: none;
@@ -168,7 +174,6 @@ listview.playlist-view > row:focus-visible box.song-row {
 
 
 
-/* List View Reset */
 listview.playlist-view,
 listview.playlist-view > row,
 .list-item-bin {
@@ -178,7 +183,6 @@ listview.playlist-view > row,
   border: none;
 }
 
-/* Ensure the inner ListBoxRow also doesn't have a background */
 listview.playlist-view > row > listboxrow,
 listboxrow.song-row-wrapper {
   background: transparent;
@@ -187,17 +191,10 @@ listboxrow.song-row-wrapper {
   box-shadow: none;
 }
 
-/* Song Row Base Styling */
-box.song-row {
-  border-radius: 10px;
-  transition: background-color 200ms ease;
+box.song-row, .song-row-button {
+  border-radius: 12px;
   min-height: 56px;
-  padding: 6px 8px; /* Reduced padding and height */
-}
-
-/* Only apply custom hover in the main playlist/search list views */
-listview.playlist-view box.song-row:hover {
-  background-color: @row_hover;
+  padding: 8px;
 }
 
 /* While a view is actively scrolling, freeze the hover-background fades.
@@ -207,15 +204,6 @@ listview.playlist-view box.song-row:hover {
    class is added/removed by suppress_hover_while_scrolling(); a still pointer
    (genuine hover) keeps the fade. Selectors are kept specific enough to win
    the cascade over the base transition rules they mirror. */
-.is-scrolling box.song-row,
-.is-scrolling .artist-horizontal-item,
-.is-scrolling .home-speed-tile,
-.is-scrolling row,
-.is-scrolling .card,
-.is-scrolling box.song-row button,
-.is-scrolling box.song-row image {
-  transition: none;
-}
 
 /* Freezing the *fade* still left an instant per-row repaint as each row's
    :hover background flipped on/off under the moving content. Blank the hover
@@ -232,19 +220,40 @@ listview.playlist-view box.song-row:hover {
   background-color: transparent;
 }
 
-/* Selected indicator (multi-select) */
-box.song-row.selected {
-  background-color: @row_selected;
+list,
+list > row,
+listbox,
+listboxrow {
+  min-width: 0;
 }
 
-/* Playing indicator */
+list > row label,
+listboxrow label {
+  min-width: 0;
+}
+
+.playing {
+  color: @playing_fg;
+}
+
+/* `.accent` and `.dim-label` set their own color, so they ignore the
+   inherited `.playing` one. The indicator icon follows the label, and the
+   artist line keeps enough of the lift to stay readable on the tinted
+   row. */
+.playing .accent {
+  color: @playing_fg;
+}
+.playing .dim-label {
+  color: alpha(@playing_fg, 0.7);
+  opacity: 1;
+}
+
+.cover-desktop {
+  border-radius: 18px;
+}
+
 box.song-row.playing {
-  color: @playing_fg;
-  background-color: @playing_bg;
-}
-
-box.song-row.playing label {
-  color: @playing_fg;
+  background-color: alpha(mix(@accent_bg_color, #ffffff60, 0.1), 0.3);
 }
 
 /* Boxed-list rows carry libadwaita's opaque row bg, masking the inner
@@ -265,8 +274,15 @@ list row.playing label {
    @headerbar_bg_color and the list paints @view_bg_color, which differ by
    the accent wash (0.10 over #fafafa against 0.08 over #ffffff) and read
    as two panels inside one sheet. Blurred mode already unifies them in
-   its own override, so this covers the plain case. */
-bottom-sheet .queue-panel {
+   its own override, so this covers the plain case.
+
+   `:not(.sidebar)` is what keeps it off the desktop queue. BottomSheet
+   wraps the whole window (`bottom_sheet.set_content(self.split_view)`),
+   so `bottom-sheet .queue-panel` matches the split view's sidebar too and
+   was painting it @view_bg_color: 1.04 against the content pane in light
+   and 1.06 in dark, inverted, which is why the sidebar was invisible.
+   ExpandedPlayer builds its own QueuePanel and never adds `.sidebar`. */
+bottom-sheet .queue-panel:not(.sidebar) {
   background-color: @view_bg_color;
 }
 bottom-sheet .queue-panel toolbarview,
@@ -274,6 +290,18 @@ bottom-sheet .queue-panel headerbar,
 bottom-sheet .queue-panel scrolledwindow,
 bottom-sheet .queue-panel listview {
   background-color: transparent;
+}
+
+/* The view switcher moves out of AdwToolbarView and into the bottom
+   sheet's bottom bar on compact, which costs it the flattening Adwaita
+   applies to `toolbarview > .bottom-bar actionbar`. Left alone it paints
+   the actionbar's own headerbar background plus an `inset 0 1px` shade,
+   and that shade is the seam that shows up between the mini player and
+   the tabs. Paint the background here instead and drop the shade. */
+.sheet-bottom-bar actionbar > revealer > box {
+  background-color: @headerbar_bg_color;
+  box-shadow: none;
+  padding-top: 6px;
 }
 
 /* Reset color for context menu popovers. A popover parented to a row is
@@ -291,58 +319,71 @@ popover.menu modelbutton {
   color: @popover_fg_color;
 }
 
-/* Image scaling */
-picture.song-img {
+/* A tooltip for a widget inside a popover is parented into that popover,
+   so the reset above reaches the tooltip's own label and repaints it
+   @popover_fg_color. Adwaita gives a tooltip a fixed dark scrim in both
+   schemes and sets `color: white` on the tooltip node, which the label
+   only inherits, and an inherited value always loses to a rule that
+   matches the label directly. In dark mode @popover_fg_color happens to
+   be white so nothing looked wrong; in light mode it is near-black, and
+   the theme-switcher tooltips came out black on the dark scrim.
+
+   Three elements and a class out-ranks `popover.menu label`, and the
+   tooltip's box is part of GtkTooltipWindow's template, so it is always
+   there to match. */
+tooltip.background box label {
+  color: #ffffff;
+}
+
+picture.song-img, .song-img, label.song-index {
   min-width: 56px;
   min-height: 56px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
-/* Compact mode */
-.compact box.song-row {
+.compact box.song-row, .compact .song-row-button {
   min-height: 44px;
-  padding: 4px 8px;
+  padding: 6px;
 }
 
-.compact picture.song-img {
+.compact picture.song-img, .compact .song-img, .compact label.song-index {
   min-width: 44px;
   min-height: 44px;
 }
 
+.song-download-icon {
+    /* Stops kept close to the accent. At white 0.5 / black 0.45 the tile
+       spanned 0.41 in OkLCh lightness and bottomed out near black, so it
+       read as a dark slab rather than an accent-colored one. 0.28 / 0.18
+       spans 0.19 and stays the accent from top to bottom. */
+    background: linear-gradient(
+      135deg,
+      mix(var(--accent-bg-color), white, 0.28) 0%,
+      var(--accent-bg-color) 50%,
+      mix(var(--accent-bg-color), black, 0.18) 100%
+    );
+    color: @accent_fg_color;
+}
+
+.song-download-icon image {
+    -gtk-icon-size: 28px;
+}
+
+.compact .song-download-icon image {
+    -gtk-icon-size: 22px;
+}
+
 .compact box.song-row label {
-  font-size: 0.95em; /* Larger compact font */
+  font-size: 0.95em;
 }
 
 listview.playlist-view > row:disabled {
   opacity: 1;
 }
 
-/* Horizontal Grid Item Hover */
 .artist-horizontal-item {
-  padding: 8px;
-  border-radius: 12px;
-  transition: background-color 200ms ease;
-}
-
-/* Compact (mobile) reduces per-card hover padding so two 160 px cards
-   still fit side by side at 360 px page width without clipping. */
-.compact .artist-horizontal-item {
-  padding: 4px;
-}
-
-.artist-horizontal-item:hover {
-  background-color: @row_hover;
-}
-
-.artist-horizontal-item:active {
-  background-color: alpha(currentColor, 0.15);
-}
-
-/* Keyboard focus ring for the home horizontal cards (now focusable). Follows
-   the item's 12px radius; keyboard-only so mouse clicks don't flash a ring. */
-.artist-horizontal-item:focus-visible {
-  outline: 2px solid @accent_color;
-  outline-offset: -2px;
+  padding: 10px;
+  border-radius: 16px;
 }
 
 .explicit-badge {
@@ -377,48 +418,35 @@ listview.playlist-view > row:disabled {
   font-weight: 800;
 }
 
-.home-section-icon {
-  opacity: 0.85;
-}
-
-.home-kind-icon {
-  opacity: 0.7;
-}
-
 /* Spotify-style speed-dial tile: thumbnail on the left, title on the right. */
 .home-speed-tile {
-  padding: 6px 12px 6px 6px;
-  border-radius: 8px;
-  background-color: alpha(currentColor, 0.06);
-  min-height: 64px;
-  transition: background-color 150ms ease;
-}
-
-/* In compact (mobile) layout the page surfaces more tiles per screen
-   if each one is shorter. The 44 px cover already shrinks via
-   AsyncImage.set_compact, so the row is comfortable at ~52 px tall
-   with tighter padding. */
-.compact .home-speed-tile {
-  padding: 4px 10px 4px 4px;
-  min-height: 52px;
+  padding: 8px;
+  border-radius: 12px;
+  background-color: @card_bg_color;
+  background-image: none;
+  transition: background-color 200ms cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .home-speed-tile:hover {
-  background-color: alpha(currentColor, 0.12);
+  background-color: mix(@card_bg_color, @card_fg_color, 0.07);
+  background-image: none;
 }
 
-flowboxchild:active .home-speed-tile,
 .home-speed-tile:active {
-  background-color: alpha(currentColor, 0.18);
+  background-color: mix(@card_bg_color, @card_fg_color, 0.14);
+  background-image: none;
+}
+
+/* In compact (mobile) layout a tile is one full-width row, so it can hold a
+   whole title on one line and stay short. The 44 px cover comes from
+   AsyncImage.set_compact, which puts the row at ~56 px with this padding. */
+.compact .home-speed-tile {
+  padding: 6px;
 }
 
 flowboxchild {
   padding: 0;
   border-radius: 8px;
-}
-
-flowboxchild:focus {
-  outline: none;
 }
 
 /* Keyboard focus ring for grid tiles (library cards, quick-pick tiles).
@@ -427,11 +455,10 @@ flowboxchild:focus {
    it isn't clipped by neighbouring tiles. */
 flowboxchild:focus-visible {
   outline: 2px solid @accent_color;
-  outline-offset: -2px;
 }
 
 .home-speed-cover {
-  border-radius: 4px;
+  border-radius: 8px;
 }
 
 .home-speed-title {
@@ -439,9 +466,60 @@ flowboxchild:focus-visible {
   font-size: 0.95em;
 }
 
+.library-card {
+  border-radius: 16px;
+  padding: 10px;
+}
+
+/* Floors only. MediaCardWidget sets the real cover size with a size request,
+   which a grid may pull under 150 to fit one more column per row. GTK takes
+   the larger of the two, so anything near 150 here blocks that. */
+.card-cover {
+  border-radius: 12px;
+  margin-bottom: 8px;
+  min-width: 100px;
+  min-height: 100px;
+}
+
+.card-cover-img {
+  min-width: 100px;
+  min-height: 100px;
+  -gtk-icon-size: 150px;
+}
+
+.compact .card-cover-img {
+  -gtk-icon-size: 130px;
+}
+
+.card-download-icon {
+    border-radius: 12px;
+    min-width: 100px;
+    min-height: 100px;
+    /* Stops kept close to the accent. At white 0.5 / black 0.45 the tile
+       spanned 0.41 in OkLCh lightness and bottomed out near black, so it
+       read as a dark slab rather than an accent-colored one. 0.28 / 0.18
+       spans 0.19 and stays the accent from top to bottom. */
+    background: linear-gradient(
+      135deg,
+      mix(var(--accent-bg-color), white, 0.28) 0%,
+      var(--accent-bg-color) 50%,
+      mix(var(--accent-bg-color), black, 0.18) 100%
+    );
+    color: @accent_fg_color;
+    -gtk-icon-size: 72px;
+}
+
+.compact .card-download-icon {
+    -gtk-icon-size: 60px;
+}
+
 /* Header strapline cover (album/artist photo for "Based on X" rows). */
 .home-section-cover {
-  border-radius: 4px;
+  border-radius: 6px;
+}
+
+.playlist-view row {
+    border-radius: 12px;
 }
 
 /* The full cover-bg-active stylesheet now lives in window.py's
@@ -460,10 +538,6 @@ flowboxchild:focus-visible {
 .expanded-player adwviewswitcher {
   background-color: transparent;
   padding: 4px;
-}
-
-.expanded-player adwviewswitcher button {
-  border-radius: 8px;
 }
 
 /* Volume Button & Popover */
@@ -497,14 +571,30 @@ flowboxchild:focus-visible {
   margin-bottom: 24px;
 }
 
-/* Sidebar (Nautilus-like). GTK's OverlaySplitView draws its own separator
-   between panes, so we explicitly clear the border Adwaita's default
-   `.sidebar` styling adds (which was designed for left-docked sidebars). */
 .sidebar {
-  background-color: @window_bg_color;
   border-left: none;
   border-right: none;
   transition: background-color 300ms ease;
+}
+
+/* The queue sidebar's surface.
+
+   Nautilus and the Adwaita demo put their sidebar next to @view_bg_color,
+   where @sidebar_bg_color stands 1.244 in dark and 1.191 in light. Our
+   content pane paints @window_bg_color instead, and against that the same
+   token only reaches 1.172 / 1.141, which is why the pane reads as part
+   of the page here and not there.
+
+   Mixing 2% of @window_fg_color into it restores 1.245 / 1.192. The
+   direction comes free: @window_fg_color is white on dark themes and
+   black on light ones, so one rule lifts in dark and deepens in light,
+   which GTK has no media query for.
+
+   Needs both classes to out-rank `.queue-panel`'s transparent rule below
+   and libadwaita's `.background`, which is why the bare `.sidebar` above
+   never painted anything. */
+.queue-panel.sidebar {
+  background-color: mix(@sidebar_bg_color, @window_fg_color, 0.02);
 }
 
 /* Crossfade on dark/light scheme switch — GTK doesn't animate
@@ -596,7 +686,7 @@ window > windowhandle,
   padding-bottom: 14px;
   padding-right: 16px;
   padding-left: 16px;
-  border-radius: 8px;
+  border-radius: 12px;
   background: none;
   background-color: transparent;
   box-shadow: none;
@@ -702,4 +792,22 @@ window > windowhandle,
    text is legible even though it isn't interactive. */
 .lyrics-line-static > label {
   opacity: 0.9;
+}
+
+/* Liked button */
+.liked-button {
+  color: @accent_color;
+}
+
+.disliked-button {
+    color: @destructive_color;
+}
+
+/* Mobile player bars, nudged past the transport row's baseline the way
+   .cover-visualizer does on the desktop cover view. The drawn band is
+   pinned to the bottom of the controls overlay, so the shift is what puts
+   daylight between the bars and the buttons sitting on top of them.
+   main_box keeps a 24px bottom margin, which absorbs the offset. */
+.player-visualizer {
+  transform: translateY(10px);
 }

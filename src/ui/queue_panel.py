@@ -136,6 +136,7 @@ class QueueRowWidget(Gtk.Box):
 
         if item.is_playing:
             self.add_css_class("playing")
+            self.remove_css_class("flat")
             if item.is_paused:
                 self.indicator_icon.set_from_icon_name("media-playback-start-symbolic")
             else:
@@ -143,7 +144,7 @@ class QueueRowWidget(Gtk.Box):
             self.indicator_stack.set_visible_child_name("playing")
         else:
             self.remove_css_class("playing")
-            # For non-playing items, we just show the index
+            self.add_css_class("flat")
             self.indicator_lbl.set_label(str(item.index + 1))
             self.indicator_stack.set_visible_child_name("index")
 

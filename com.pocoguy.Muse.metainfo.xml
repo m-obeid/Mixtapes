@@ -92,6 +92,52 @@
 
   <releases>
 
+    <release version="2026-09-12.0" date="2026-09-12">
+      <description>
+        <p>A release aimed at small screens. The mini player is now a drawer you pull up with your finger, every card in the app comes from one template so pages line up at any width, and a long run of memory work cuts what the interface holds on to while you browse.</p>
+        <ul>
+          <li>The mini player is a pullable drawer. Drag it up and the player follows your finger, snapping open or back when you let go. Tapping it still works</li>
+          <li>The player drawer shows the visualizer, and its Player, Queue and Lyrics views switch through a toggle group</li>
+          <li>Search tabs scroll sideways on narrow windows, so every category stays reachable</li>
+          <li>The bottom sheet picks up the blurred cover background</li>
+          <li>Cards resize in compact mode instead of holding their desktop footprint</li>
+          <li>Fix: tapping the mini player to expand it no longer skips the track</li>
+          <li>Fix: list rows no longer overflow the viewport on narrow windows, and icons stop changing size when the window turns compact</li>
+          <li>Fix: media cards had broken sizing in compact mode</li>
+          <li>Redesigned desktop cover view, with a dislike button beside like</li>
+          <li>Fix: the desktop cover view closes itself when the queue is cleared, and its loading spinner appears again</li>
+          <li>Every music card now comes from one base template, so sizes, spacing and labels match across Home, Library, Search and Explore</li>
+          <li>Search returns more results, groups them better, and marks the category each one came from</li>
+          <li>Row titles get two lines before they ellipsize</li>
+          <li>Fix: broken grid layout, cards stretched across rows holding few items, and items clipped by their container</li>
+          <li>Fix: row outlines in the playlist view are rounded rather than square, and interface elements separate more visibly</li>
+          <li>Fix: the accent color variable had no effect, so themed elements ignored the accent you picked</li>
+          <li>Fix: dead light and dark toggles</li>
+          <li>Fix: quick pick tiles take their width and colors from your theme</li>
+          <li>Fix: rows lost their hover highlight while the blurred background was on</li>
+          <li>Fix: blur and tint failed for downloaded tracks and local playlists, whose covers live on disk rather than behind a URL</li>
+          <li>The like button is a heart, filled with your accent when active, and its state is shared everywhere the track appears</li>
+          <li>Like status is tracked in one place, so liking a song updates the player bar, the queue and the list at once</li>
+          <li>Individual artists on a track are separate links</li>
+          <li>Downloads moved into the library</li>
+          <li>Fix: playback desync on artist pages, along with the player bar links and the playing highlight</li>
+          <li>Fix: downloaded tracks keep their artist, album and like status</li>
+          <li>Emphasized lyrics glow, with the wave sized to how long the word is held, and colors fade between states instead of snapping</li>
+          <li>Fix: mixed-language lyric lines no longer sit off their baseline</li>
+          <li>Fix: clicking to seek resets every lyric line's state and animation</li>
+          <li>Fix: lyric progression holds while paused, long lines stop overflowing their container, and the background stays transparent in the collapsed window</li>
+          <li>Fix: the second lyric line defaults to Auto again, and the source picker button is more discreet</li>
+          <li>Fix: a large memory leak when opening playlists</li>
+          <li>Views release their thumbnail textures once they unmap or stay hidden, and navigation cleans up and collects behind itself</li>
+          <li>Image loading handles concurrency and cancellation properly, so covers stop fetching when you leave a page</li>
+          <li>Backdrop blur is gone. Scrolling is smoother and the search bar is transparent</li>
+          <li>Fix: the visualizer failed to appear, and separately appeared when it should not</li>
+          <li>Fix: song rows are no longer selectable or activatable, so they stop staying highlighted after a click</li>
+          <li>Ko-fi and GitHub Sponsors links</li>
+        </ul>
+      </description>
+    </release>
+
     <release version="2026-09-04.0" date="2026-09-04">
       <description>
         <p>A ground-up rework of lyrics: pick which providers to search and in what order, read a romanization or translation under each line, follow word by word timing, and step in yourself when a track matches the wrong song. Plus scrobbling to Last.fm and ListenBrainz, a GNOME HIG primary menu, and a long run of memory and performance work.</p>

@@ -5,11 +5,7 @@ import os
 from gi.repository import Gtk, GLib
 
 
-_PREFS_PATH = os.path.join(
-    os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
-    "muse",
-    "prefs.json",
-)
+_PREFS_PATH = os.path.join(GLib.get_user_data_dir(), "muse", "prefs.json")
 
 
 def _load_pref(key, default):
@@ -318,19 +314,30 @@ class Visualizer(Gtk.DrawingArea):
     # ─── Drawing ───────────────────────────────────────────────────────────
 
     def _accent_color(self):
-        try:
-            ok, color = self.get_style_context().lookup_color("accent_color")
-        except Exception:
-            ok, color = False, None
-        if ok and color is not None:
-            return color.red, color.green, color.blue
+        """Bar color: @visualizer_bar when MainWindow has derived one,
+        else the plain accent.
+
+        The derived value is the accent held far enough from the color of
+        the transport buttons and time labels, which are drawn on top of
+        the bars. A bright cover otherwise puts light text over a peak
+        that is almost as light.
+        """
+        ctx = self.get_style_context()
+        for name in ("visualizer_bar", "accent_color"):
+            try:
+                ok, color = ctx.lookup_color(name)
+            except Exception:
+                continue
+            if ok and color is not None:
+                return color.red, color.green, color.blue
         return 0.42, 0.34, 0.85
 
     # Faint baseline so the row is always visible. Active bars use a wide
     # alpha sweep (ACTIVE_ALPHA_MIN at level ~0 up to 1.0 at peak) so the
     # color fade clearly tracks bar height — short = dim, tall = bright.
-    IDLE_ALPHA = 0.18
-    ACTIVE_ALPHA_MIN = 0.35
+    IDLE_ALPHA = 0.08
+    ACTIVE_ALPHA_MIN = 0.15
+    ACTIVE_ALPHA_MAX = 0.6
 
     def _draw(self, _area, cr, width, height):
         if width <= 0 or height <= 0:
@@ -356,7 +363,7 @@ class Visualizer(Gtk.DrawingArea):
                 # range — a bar at level 0.25 already lands at alpha ~0.65,
                 # not the ~0.5 a linear curve would give. Means small peaks
                 # are clearly distinguishable from the idle baseline.
-                alpha = self.ACTIVE_ALPHA_MIN + (1.0 - self.ACTIVE_ALPHA_MIN) * (clamped ** 0.5)
+                alpha = self.ACTIVE_ALPHA_MIN + (self.ACTIVE_ALPHA_MAX - self.ACTIVE_ALPHA_MIN) * (clamped ** 0.5)
             else:
                 alpha = self.IDLE_ALPHA
             cr.set_source_rgba(r, g, b, alpha)

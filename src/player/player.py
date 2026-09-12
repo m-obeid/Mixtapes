@@ -1165,18 +1165,20 @@ class Player(GObject.Object):
 
     def _normalize_track_metadata(self, track):
         """Resolve a queue entry's ytmusicapi-shaped fields into the
-        normalized strings the UI / MPRIS / Discord all consume. Persists
-        the normalized values back onto the queue dict so callers that
-        re-read it (like-button fallback, history page, the gapless
-        finisher) see the same strings the player already emitted.
-
-        Returns ``(video_id, title, artist, thumb, like_status)``.
-        """
+        normalized strings the UI / MPRIS / Discord all consume."""
         video_id = str(track.get("videoId") or "")
         title = str(track.get("title") or "Unknown")
         artist = track.get("artist", "")
         thumb = track.get("thumb")
         like_status = str(track.get("likeStatus") or "INDIFFERENT")
+
+        if hasattr(self.client, "get_known_like_status") and hasattr(self.client, "set_known_like_status"):
+            known = self.client.get_known_like_status(video_id)
+            if known is not None:
+                like_status = known
+                track["likeStatus"] = known
+            else:
+                self.client.set_known_like_status(video_id, like_status)
 
         if not artist and track.get("artists"):
             artist = ", ".join(
@@ -1197,6 +1199,7 @@ class Player(GObject.Object):
         track["artist"] = artist
         track["title"] = title
         track["thumb"] = thumb
+
         return video_id, title, artist, thumb, like_status
 
     def _play_current_index(self):

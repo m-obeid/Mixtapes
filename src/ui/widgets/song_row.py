@@ -310,10 +310,12 @@ class SongRowWidget(Gtk.Box):
     def _apply_playing_state(self, is_playing):
         if is_playing:
             self.row.add_css_class("playing")
+            self.row.remove_css_class("flat")
             self.playing_indicator.set_visible(True)
             self._start_animation()
         else:
             self.row.remove_css_class("playing")
+            self.row.add_css_class("flat")
             self.playing_indicator.set_visible(False)
             self._stop_animation()
 

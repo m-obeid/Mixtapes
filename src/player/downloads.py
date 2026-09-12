@@ -132,6 +132,7 @@ def set_folder_structure(structure):
     _save_prefs(prefs)
     return True
 
+
 def use_songs_subdir():
     return _get_prefs().get("use_songs_subdir", False)
 
@@ -140,6 +141,7 @@ def set_use_songs_subdir(enabled: bool):
     prefs = _get_prefs()
     prefs["use_songs_subdir"] = bool(enabled)
     _save_prefs(prefs)
+
 
 def _build_download_dir(music_dir, artist_str, album, structure):
     """Build the destination directory based on the chosen folder structure.
@@ -244,8 +246,6 @@ def _rewrite_db_paths_after_rename(music_dir, old_root, new_root):
         conn = sqlite3.connect(db_path)
         old_prefix = old_root + os.sep
         new_prefix = new_root + os.sep
-        # substr-based prefix match: avoids LIKE's _ / % wildcards matching
-        # unrelated chars in user paths (e.g. /home/john_doe/...).
         for column in ("file_path", "cover_path"):
             conn.execute(
                 f"UPDATE downloads "
@@ -268,12 +268,10 @@ def _rename_legacy_playlists_dir(music_dir):
         return
     if os.path.exists(new):
         try:
-            # Same inode == case-insensitive FS; nothing to do.
             if os.path.samefile(old, new):
                 return
         except OSError:
             pass
-        # Distinct directories both present — don't merge automatically.
         print(
             f"[MIGRATION] Both {old} and {new} exist; leaving legacy "
             f"playlists folder in place."
@@ -303,13 +301,6 @@ class DownloadDB:
         os.makedirs(db_dir, exist_ok=True)
         self._db_path = os.path.join(db_dir, "library.db")
         self._lock = threading.Lock()
-        # In-memory {video_id: file_path} of downloaded tracks. is_downloaded()
-        # is on the song-row bind path, so hitting SQLite per row was stalling
-        # the UI when opening large playlists. The cached path lets us still
-        # detect out-of-band file deletions with a single stat() per call,
-        # which is far cheaper than the locked SQLite query it replaces.
-        # Kept in sync by add_download() and remove_download() — every DB
-        # mutation flows through this class.
         self._id_cache = {}
         self._id_cache_lock = threading.Lock()
         self._init_db()
@@ -328,6 +319,7 @@ class DownloadDB:
                     video_id TEXT PRIMARY KEY,
                     title TEXT,
                     artist TEXT,
+                    artist_id TEXT,
                     album TEXT,
                     album_id TEXT,
                     track_number INTEGER,
@@ -337,9 +329,16 @@ class DownloadDB:
                     thumbnail_url TEXT,
                     downloaded_at TEXT,
                     file_size INTEGER,
-                    format TEXT
+                    format TEXT,
+                    like_status TEXT
                 )
             """)
+            for col in ("artist_id TEXT", "like_status TEXT"):
+                try:
+                    conn.execute(f"ALTER TABLE downloads ADD COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS library_cache (
                     playlist_id TEXT PRIMARY KEY,
@@ -351,7 +350,6 @@ class DownloadDB:
                     meta_json TEXT
                 )
             """)
-            # For DBs created before meta_json existed:
             try:
                 conn.execute("ALTER TABLE library_cache ADD COLUMN meta_json TEXT")
             except sqlite3.OperationalError:
@@ -380,9 +378,6 @@ class DownloadDB:
             path = self._id_cache.get(video_id)
         if not path:
             return False
-        # Stat the file so out-of-band deletions (file manager, `rm`) are
-        # reflected without a DB roundtrip. If the file is gone, evict from
-        # the cache and DB so the dl-icon flips off and stays off.
         if os.path.exists(path):
             return True
         self._evict_missing(video_id)
@@ -422,25 +417,23 @@ class DownloadDB:
 
     def add_download(self, video_id, title, artist, album, album_id,
                      track_number, duration_seconds, file_path, cover_path,
-                     thumbnail_url, file_size, fmt):
+                     thumbnail_url, file_size, fmt, artist_id=None, like_status=None):
         with self._lock:
             conn = self._connect()
             conn.execute("""
                 INSERT OR REPLACE INTO downloads
-                (video_id, title, artist, album, album_id, track_number,
+                (video_id, title, artist, artist_id, album, album_id, track_number,
                  duration_seconds, file_path, cover_path, thumbnail_url,
-                 downloaded_at, file_size, format)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (video_id, title, artist, album, album_id, track_number,
+                 downloaded_at, file_size, format, like_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (video_id, title, artist, artist_id or "", album, album_id or "", track_number,
                   duration_seconds, file_path, cover_path, thumbnail_url,
-                  time.strftime("%Y-%m-%dT%H:%M:%S"), file_size, fmt))
+                  time.strftime("%Y-%m-%dT%H:%M:%S"), file_size, fmt, like_status or "INDIFFERENT"))
             conn.commit()
             conn.close()
         if video_id and file_path:
             with self._id_cache_lock:
                 self._id_cache[video_id] = file_path
-            # Drop any cached "this track isn't downloaded" answer so the row
-            # picks up the fresh embedded cover on next bind.
             try:
                 from ui.utils import invalidate_local_cover
                 invalidate_local_cover(video_id)
@@ -504,35 +497,13 @@ class DownloadDB:
         try:
             conn.execute("ALTER TABLE library_cache ADD COLUMN meta_json TEXT")
         except sqlite3.OperationalError:
-            pass  # already exists
+            pass
 
     def cache_playlist(self, playlist_id, title, author, track_count, tracks, meta=None):
-        """Cache a playlist's track listing + rich metadata for offline
-        browsing and optimistic render on next open.
-
-        The cache is a prefetch — it must never regress. If an entry
-        already exists with MORE tracks than the incoming write, we keep
-        the existing one. That protects against partial fetches (e.g. an
-        initial limit=200 call overwriting a previously-stored full 810
-        track set). Callers that genuinely want to shrink the cache
-        (after a playlist edit) should explicitly invalidate first.
-
-        `meta` is an optional dict. If provided it's JSON-serialized into
-        the `meta_json` column and should contain fields like `description`,
-        `year`, `privacy`, `duration_seconds`, `thumbnails`, and
-        `author_raw` (the original artist-dict list)."""
-
-        # RDTMAK playlist are mixes, which always updates and changes
-        # no need to cache, the next fetch will be completely different
         if playlist_id.startswith("RDTMAK"):
             print(f"[CLIENT] cache_playlist: reject caching, playlist {playlist_id} is a mix that always changes")
             return
 
-        # Never write the cache when offline — offline responses are
-        # themselves reconstructed from the cache, and persisting them
-        # would trigger the regression guard for legitimately-shrunken
-        # data (playlist edits) and overwrite meta fields with stale
-        # values.
         try:
             from ui.utils import is_online as _is_online
             if not _is_online():
@@ -544,11 +515,6 @@ class DownloadDB:
             conn = self._connect()
             self._ensure_meta_json_column(conn)
 
-            # Regression check — look up what's already cached. Use the
-            # stored ``track_count`` column instead of parsing the
-            # tracks_json blob; the previous code burned 50-100 ms in
-            # ``json.loads`` over ~1000 tracks just to learn a count we
-            # already wrote to disk.
             existing_count = 0
             try:
                 row = conn.execute(
@@ -561,12 +527,6 @@ class DownloadDB:
                 existing_count = 0
 
             new_count = len(tracks) if tracks else 0
-            # The guard exists so a partial fetch (limit=200) can't clobber
-            # a full previously-cached set. But when track_count tells us
-            # the new fetch IS the full playlist (e.g. the user just
-            # deleted tracks on the YT web app and the live fetch returns
-            # a smaller-but-complete list), we should accept it — otherwise
-            # the user has to manually refresh to see external edits.
             is_full_fetch = (
                 track_count is not None and new_count >= int(track_count)
             )
@@ -597,10 +557,6 @@ class DownloadDB:
             conn.close()
 
     def invalidate_playlist_cache(self, playlist_id):
-        """Drop a playlist's cache row entirely. Callers that shrink the
-        playlist (delete songs, remove playlist from library) should call
-        this before writing a smaller entry — cache_playlist() ignores
-        regression writes otherwise."""
         if not playlist_id:
             return
         with self._lock:
@@ -614,11 +570,6 @@ class DownloadDB:
                 conn.close()
 
     def get_cached_playlist(self, playlist_id):
-        """Get cached playlist data. Returns dict or None. Dict has the
-        standard columns plus `tracks` (list) and `meta` (dict)."""
-
-        # RDTMAK playlist are mixes, which always updates and changes
-        # no point getting from cache, the fetched will be completely different
         if playlist_id.startswith("RDTMAK"):
             print(f"[CLIENT] get_cached_playlist: reject caching, playlist {playlist_id} is a mix that always changes")
             return None
@@ -645,7 +596,6 @@ class DownloadDB:
             return None
 
     def get_all_cached_playlists(self):
-        """Get all cached playlists for offline library browsing."""
         with self._lock:
             conn = self._connect()
             conn.row_factory = sqlite3.Row
@@ -656,7 +606,6 @@ class DownloadDB:
             return [dict(r) for r in rows]
 
     def cache_library_playlists(self, playlists):
-        """Cache the list of library playlists (not their tracks)."""
         with self._lock:
             conn = self._connect()
             conn.execute("""
@@ -678,7 +627,6 @@ class DownloadDB:
             conn.close()
 
     def get_cached_library_playlists(self):
-        """Get cached library playlists list for offline browsing."""
         with self._lock:
             conn = self._connect()
             try:
@@ -693,8 +641,6 @@ class DownloadDB:
             return None
 
     def cache_history(self, tracks):
-        """Cache the listening-history track list so HistoryPage can
-        render instantly on next open while the fresh fetch runs."""
         try:
             from ui.utils import is_online as _is_online
             if not _is_online():
@@ -722,7 +668,6 @@ class DownloadDB:
             conn.close()
 
     def get_cached_history(self):
-        """Return cached history tracks, or None if nothing is cached."""
         with self._lock:
             conn = self._connect()
             try:
@@ -737,9 +682,6 @@ class DownloadDB:
             return None
 
     def remove_from_history_cache(self, video_id):
-        """Drop a single track from the cached history list. Used after
-        a user removes a history entry so the cache doesn't resurrect
-        the removed track on the next cold open."""
         if not video_id:
             return
         cached = self.get_cached_history()
@@ -764,7 +706,6 @@ class DownloadDB:
                 conn.close()
 
     def cache_library_albums(self, albums):
-        """Cache the list of library albums."""
         with self._lock:
             conn = self._connect()
             conn.execute("""
@@ -786,7 +727,6 @@ class DownloadDB:
             conn.close()
 
     def get_cached_library_albums(self):
-        """Get cached library albums list for offline browsing."""
         with self._lock:
             conn = self._connect()
             try:
@@ -801,7 +741,6 @@ class DownloadDB:
             return None
 
     def cache_library_artists(self, artists):
-        """Cache the list of library subscriptions."""
         with self._lock:
             conn = self._connect()
             conn.execute("""
@@ -823,7 +762,6 @@ class DownloadDB:
             conn.close()
 
     def get_cached_library_artists(self):
-        """Get cached library artists for offline browsing."""
         with self._lock:
             conn = self._connect()
             try:
@@ -840,7 +778,6 @@ class DownloadDB:
     # ── Uploads cache ────────────────────────────────────────────────────────
 
     def cache_uploads(self, albums, artists):
-        """Cache the list of uploaded albums + artists."""
         with self._lock:
             conn = self._connect()
             conn.execute("""
@@ -864,7 +801,6 @@ class DownloadDB:
             conn.close()
 
     def get_cached_uploads(self):
-        """Returns (albums, artists) lists from cache, or (None, None)."""
         with self._lock:
             conn = self._connect()
             try:
@@ -886,12 +822,12 @@ class DownloadManager(GObject.Object):
     """Manages song downloads with metadata tagging."""
 
     __gsignals__ = {
-        "progress": (GObject.SignalFlags.RUN_FIRST, None, (int, int, str)),  # done, total, current_title
+        "progress": (GObject.SignalFlags.RUN_FIRST, None, (int, int, str)),
         "complete": (GObject.SignalFlags.RUN_FIRST, None, ()),
-        "item-done": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, str)),  # video_id, success, message
-        "item-progress": (GObject.SignalFlags.RUN_FIRST, None, (str, float)),  # video_id, fraction 0.0-1.0
-        "item-queued": (GObject.SignalFlags.RUN_FIRST, None, (str,)),  # video_id
-        "download-removed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),  # video_id
+        "item-done": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, str)),
+        "item-progress": (GObject.SignalFlags.RUN_FIRST, None, (str, float)),
+        "item-queued": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "download-removed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self, client):
@@ -904,13 +840,11 @@ class DownloadManager(GObject.Object):
         self._downloading = False
         self._total = 0
         self._done = 0
-        self._pending_playlists = []  # [{id, title, tracks, thumb_url}]
+        self._pending_playlists = []
         self._sweep_stale_tmp_dirs()
 
     @staticmethod
     def _sweep_stale_tmp_dirs():
-        """Clean up mkdtemp debris from prior crashes. Skips anything touched
-        within TMP_STALE_SECONDS so a parallel running instance isn't disturbed."""
         import shutil
         import tempfile
         tmp_root = tempfile.gettempdir()
@@ -936,7 +870,6 @@ class DownloadManager(GObject.Object):
         return self.db.is_downloaded(video_id)
 
     def is_queued(self, video_id):
-        """Check if a video is currently in the download queue."""
         with self._lock:
             return any(q["videoId"] == video_id for q in self._queue)
 
@@ -944,15 +877,12 @@ class DownloadManager(GObject.Object):
         return self.db.get_local_path(video_id)
 
     def queue_track(self, track, album_title=None, album_id=None, track_number=None):
-        """Add a track to the download queue."""
         vid = track.get("videoId")
         if not vid:
             return
-        # Skip if already downloaded
         if self.db.is_downloaded(vid):
             return
 
-        # Get album from the track itself, not the playlist name
         track_album = ""
         track_album_id = ""
         if isinstance(track.get("album"), dict):
@@ -961,33 +891,39 @@ class DownloadManager(GObject.Object):
         elif isinstance(track.get("album"), str):
             track_album = track["album"]
 
+        artist_id = ""
+        artists_data = track.get("artists", [])
+        if artists_data and isinstance(artists_data, list) and isinstance(artists_data[0], dict):
+            artist_id = artists_data[0].get("id", "") or ""
+        elif track.get("artist_id"):
+            artist_id = track.get("artist_id", "")
+
         item = {
             "videoId": vid,
             "title": track.get("title", "Unknown"),
             "artists": track.get("artists", []),
-            "album": track_album,  # Real album, not playlist name
+            "artist_id": artist_id,
+            "album": track_album,
             "album_id": track_album_id or album_id or "",
-            "playlist_title": album_title or "",  # Keep playlist name separately for m3u8
+            "playlist_title": album_title or "",
             "track_number": track_number,
             "duration_seconds": track.get("duration_seconds", 0),
             "thumbnails": track.get("thumbnails", []),
             "thumbnail_url": track.get("thumbnails", [{}])[-1].get("url", "") if track.get("thumbnails") else track.get("thumb", ""),
+            "likeStatus": track.get("likeStatus") or track.get("like_status") or "INDIFFERENT",
         }
 
         with self._lock:
-            # Avoid duplicates in queue
             if not any(q["videoId"] == vid for q in self._queue):
                 self._queue.append(item)
                 self._total += 1
                 GLib.idle_add(self.emit, "item-queued", vid)
 
     def queue_tracks(self, tracks, album_title=None, album_id=None):
-        """Queue multiple tracks (album/playlist)."""
         for i, t in enumerate(tracks):
             self.queue_track(t, album_title, album_id, track_number=i + 1)
 
     def start(self):
-        """Start processing the download queue."""
         if self._downloading:
             return
         if not self._queue:
@@ -998,7 +934,6 @@ class DownloadManager(GObject.Object):
         threading.Thread(target=self._process_queue, daemon=True).start()
 
     def _make_cookie_file(self):
-        """Create a temporary Netscape cookie file from ytmusicapi auth. Returns path or None."""
         import tempfile
         if not self.client.is_authenticated() or not self.client.api:
             return None
@@ -1017,7 +952,6 @@ class DownloadManager(GObject.Object):
         return cookie_file
 
     def _download_one(self, item, fmt_key, fmt, music_dir):
-        """Download and tag a single track. Called from worker threads."""
         from yt_dlp import YoutubeDL
         from ui.utils import get_high_res_url
         import shutil
@@ -1059,6 +993,8 @@ class DownloadManager(GObject.Object):
                             artist_str = ", ".join(
                                 a.get("name", "") for a in wt_artists if isinstance(a, dict)
                             ) or artist_str
+                            if not item.get("artist_id") and isinstance(wt_artists[0], dict) and wt_artists[0].get("id"):
+                                item["artist_id"] = wt_artists[0]["id"]
                     if not title or title == "Unknown":
                         title = wt.get("title", title)
                     if not thumb_url:
@@ -1072,7 +1008,6 @@ class DownloadManager(GObject.Object):
             except Exception:
                 pass
 
-        # Fetch album-level metadata
         album_id = item.get("album_id", "")
         if album_id and album_id.startswith("MPRE"):
             try:
@@ -1104,22 +1039,15 @@ class DownloadManager(GObject.Object):
             except Exception:
                 pass
 
-        # Destination path honours the user-chosen folder structure.
         dir_path = _build_download_dir(
             music_dir, artist_str, album, get_folder_structure()
         )
-        # Fit the title to the destination filesystem's real per-name byte limit
-        # (255 on ext4, ~143 on eCryptfs, less on some mounts), leaving headroom
-        # for the extension and a possible " [videoId]" disambiguation suffix.
         suffix_reserve = len(str(vid)) + len(fmt["ext"]) + 8
         name_budget = max(1, _fs_name_max(dir_path) - suffix_reserve)
         song_name = _truncate_filename_bytes(_sanitize_filename(title), name_budget)
         filename = f"{song_name}.{fmt['ext']}"
         file_path = os.path.join(dir_path, filename)
 
-        # Never overwrite. If the path is taken by a different video
-        # (common in "flat" mode with two same-titled songs), disambiguate
-        # by appending the videoId. If nobody owns it, claim it.
         if os.path.exists(file_path):
             owner = self.db.get_video_for_path(file_path)
             if owner and owner != vid:
@@ -1127,12 +1055,13 @@ class DownloadManager(GObject.Object):
                 file_path = os.path.join(dir_path, suffixed)
                 filename = suffixed
                 if os.path.exists(file_path):
-                    # The disambiguated path is also taken → claim as existing.
                     self.db.add_download(
                         vid, title, artist_str, album, item.get("album_id", ""),
                         track_num, item.get("duration_seconds", 0),
                         file_path, None, thumb_url,
                         os.path.getsize(file_path), fmt_key,
+                        artist_id=item.get("artist_id", ""),
+                        like_status=item.get("likeStatus", "INDIFFERENT"),
                     )
                     return vid, True, "Already exists", title
             else:
@@ -1141,12 +1070,13 @@ class DownloadManager(GObject.Object):
                     track_num, item.get("duration_seconds", 0),
                     file_path, None, thumb_url,
                     os.path.getsize(file_path), fmt_key,
+                    artist_id=item.get("artist_id", ""),
+                    like_status=item.get("likeStatus", "INDIFFERENT"),
                 )
                 return vid, True, "Already exists", title
 
         os.makedirs(dir_path, exist_ok=True)
 
-        # Prefix lets _sweep_stale_tmp_dirs() identify crash debris at startup.
         tmp_dir = tempfile.mkdtemp(prefix=TMP_PREFIX)
         try:
             tmp_file = os.path.join(tmp_dir, f"download.{fmt['ext']}")
@@ -1183,7 +1113,6 @@ class DownloadManager(GObject.Object):
             with YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
-            # Find the downloaded file
             actual_file = None
             for f in os.listdir(tmp_dir):
                 if f.startswith("download"):
@@ -1198,9 +1127,6 @@ class DownloadManager(GObject.Object):
                 filename = f"{song_name}.{actual_ext}"
                 file_path = os.path.join(dir_path, filename)
 
-            # Download cover art for embedding (try fallbacks for video thumbnails)
-            # YouTube returns a tiny 120x90 placeholder JPEG (~1KB) for missing qualities
-            # instead of a real 404, so we check size > 5000 to skip those
             cover_data = None
             if thumb_url:
                 from ui.utils import get_ytimg_fallbacks
@@ -1214,13 +1140,11 @@ class DownloadManager(GObject.Object):
                     except Exception:
                         continue
 
-            # Tag metadata
             self._tag_file(actual_file, actual_ext, title, artist_str, album,
                            track_num, track_total, vid, item.get("album_id", ""),
                            cover_data, item.get("duration_seconds", 0),
                            album_artist=album_artist, release_year=release_year)
 
-            # Move to final location
             if not os.path.exists(file_path):
                 shutil.move(actual_file, file_path)
             else:
@@ -1228,19 +1152,19 @@ class DownloadManager(GObject.Object):
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
-        # Register in DB
         file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
         self.db.add_download(
             vid, title, artist_str, album, item.get("album_id", ""),
             track_num, item.get("duration_seconds", 0),
             file_path, None, thumb_url, file_size, actual_ext,
+            artist_id=item.get("artist_id", ""),
+            like_status=item.get("likeStatus", "INDIFFERENT"),
         )
 
         return vid, True, "Downloaded", title
 
     def _process_queue(self):
         from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
-        # Pre-import yt-dlp on the main thread to avoid concurrent plugin registration
         import yt_dlp  # noqa: F401
 
         fmt_key = get_preferred_format()
@@ -1251,11 +1175,8 @@ class DownloadManager(GObject.Object):
         self._shared_cookie_file = self._make_cookie_file()
 
         try:
-            # Pump work through the pool so items not yet picked up stay in
-            # self._queue and can still be cancelled. Also means tracks added
-            # mid-batch get processed in the same run.
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                in_flight = {}  # future -> item
+                in_flight = {}
                 while True:
                     with self._lock:
                         while len(in_flight) < max_workers and self._queue:
@@ -1289,7 +1210,6 @@ class DownloadManager(GObject.Object):
             self._total = 0
             self._done = 0
             self._pending_playlists = []
-            # Clean up shared cookie file
             if self._shared_cookie_file and os.path.exists(self._shared_cookie_file):
                 try:
                     os.remove(self._shared_cookie_file)
@@ -1301,8 +1221,6 @@ class DownloadManager(GObject.Object):
     def _tag_file(self, filepath, ext, title, artist, album, track_num,
                   track_total, video_id, album_id, cover_data_or_path,
                   duration_seconds, album_artist="", release_year=""):
-        """Write ID3/Vorbis/MP4 metadata including YTM identifiers.
-        cover_data_or_path can be bytes (raw image data) or a file path string."""
         try:
             import mutagen
             from mutagen.oggopus import OggOpus
@@ -1319,14 +1237,12 @@ class DownloadManager(GObject.Object):
                 with open(cover_data_or_path, "rb") as f:
                     cover_data = f.read()
 
-            # Custom comment with YTM identifiers
             ytm_comment = json.dumps({
                 "videoId": video_id,
                 "albumId": album_id,
                 "source": "YouTube Music (Mixtapes)",
             })
 
-            # Track number string: "3/12" or "3"
             trck_str = ""
             if track_num:
                 trck_str = str(track_num)
@@ -1427,24 +1343,8 @@ class DownloadManager(GObject.Object):
             print(f"[DOWNLOAD] Tagging error for {filepath}: {e}")
 
     def register_playlist(self, playlist_id, title, tracks, thumb_url=None):
-        """Register a playlist for incremental m3u8 generation.
-
-        If the same playlist is registered again mid-download (user adds
-        more tracks from the same playlist while the first batch is still
-        processing), the new tracks are MERGED into the existing entry
-        rather than replacing it. Replacing would leave the earlier
-        batch's item-done completions looking themselves up in a track
-        list that no longer contains them — the m3u writer would skip
-        them, and those songs would never appear in the m3u.
-
-        Additionally, if a cached copy of the full playlist exists (from
-        an earlier PlaylistPage open), we hydrate the pending track list
-        from it. That way a single-song download still has access to the
-        full playlist order, which the m3u writer needs."""
         new_tracks = list(tracks or [])
 
-        # Hydrate from cache so the pending playlist reflects the full
-        # track set, not just what the caller happened to pass in.
         cached_tracks = []
         if playlist_id:
             try:
@@ -1475,8 +1375,6 @@ class DownloadManager(GObject.Object):
                     _union_by_vid(existing["tracks"], cached_tracks)
                     _union_by_vid(existing["tracks"], new_tracks)
                     merged = True
-                    # Swap local reference so the _write_playlist_m3u call
-                    # below sees the fully-merged track list.
                     tracks = existing["tracks"]
                     break
         if not merged:
@@ -1489,27 +1387,9 @@ class DownloadManager(GObject.Object):
                 "thumb_url": thumb_url,
             })
             tracks = combined
-        # Refresh the m3u now so re-requesting an already-downloaded
-        # playlist still produces a playable m3u (no item-done signals fire
-        # in that case).
         self._write_playlist_m3u(title, tracks, playlist_id)
-        # The playlist cover is owned by PlaylistPage — it caches on open
-        # and overwrites on every open. Downloading covers here would
-        # fight that flow (and has produced bugs where a single-song
-        # download wrote the song's thumbnail as the playlist cover).
 
     def _write_playlist_m3u(self, title, tracks, playlist_id=None):
-        """Write the m3u for a playlist from scratch, in the playlist's
-        default order, including only tracks already downloaded locally.
-
-        No merging with the prior m3u — tracks removed from the source
-        playlist must disappear from the m3u, and reordering must
-        propagate. When `playlist_id` resolves to a cached playlist row
-        we use that ordered list (authoritative); `tracks` is only the
-        fallback when no cache row exists.
-
-        Albums (MPRE*, OLAK*) are skipped — they're not playlists.
-        """
         if playlist_id and (
             playlist_id.startswith("MPRE") or playlist_id.startswith("OLAK")
         ):
@@ -1529,7 +1409,6 @@ class DownloadManager(GObject.Object):
         music_dir = get_music_dir()
         playlists_dir = os.path.join(music_dir, "Playlists")
         os.makedirs(playlists_dir, exist_ok=True)
-        # Fit to the filesystem limit, leaving room for the ".m3u8" extension.
         name_budget = max(1, _fs_name_max(playlists_dir) - len(".m3u8"))
         safe_name = _truncate_filename_bytes(_sanitize_filename(title), name_budget)
         m3u_path = os.path.join(playlists_dir, f"{safe_name}.m3u8")
@@ -1562,19 +1441,12 @@ class DownloadManager(GObject.Object):
             print(f"[DOWNLOAD] Error updating playlist {title}: {e}")
 
     def _update_playlists_for(self, video_id):
-        """Update m3us for any pending playlist that contains this video."""
         for pl in self._pending_playlists:
             if not any(t.get("videoId") == video_id for t in pl.get("tracks", [])):
                 continue
             self._write_playlist_m3u(pl["title"], pl["tracks"], pl.get("id"))
 
-    # ── Cancel / Delete / Migrate ─────────────────────────────────────────
-
     def cancel_queued(self, video_id):
-        """Remove an item that hasn't started downloading yet. Returns True
-        if something was actually removed. Items already handed to the worker
-        pool can't be cancelled mid-flight — yt_dlp has no cancellation hook.
-        """
         if not video_id:
             return False
         removed = False
@@ -1582,7 +1454,6 @@ class DownloadManager(GObject.Object):
             new_queue = [q for q in self._queue if q["videoId"] != video_id]
             if len(new_queue) < len(self._queue):
                 self._queue = new_queue
-                # Keep _total >= _done so the progress fraction stays sane.
                 self._total = max(self._total - 1, self._done)
                 removed = True
         if removed:
@@ -1591,7 +1462,6 @@ class DownloadManager(GObject.Object):
         return removed
 
     def delete_download(self, video_id):
-        """Remove a completed download from disk, the DB, and any m3u files."""
         if not video_id:
             return False
         file_path = self.db.get_local_path(video_id)
@@ -1608,13 +1478,10 @@ class DownloadManager(GObject.Object):
         return True
 
     def _prune_empty_dirs(self, start_dir):
-        """Delete empty ancestor dirs up to (but not including) the music root."""
         music_dir = os.path.normpath(get_music_dir())
         d = os.path.normpath(start_dir) if start_dir else ""
         while d and os.path.isdir(d) and d != music_dir:
             try:
-                # commonpath() raises if the paths aren't on the same drive;
-                # treat that as "outside the music root" and stop.
                 if os.path.commonpath([d, music_dir]) != music_dir:
                     break
             except ValueError:
@@ -1626,7 +1493,6 @@ class DownloadManager(GObject.Object):
             d = os.path.dirname(d)
 
     def _prune_m3us_missing_files(self):
-        """Remove entries from all m3u files whose target no longer exists."""
         playlists_dir = os.path.join(get_music_dir(), "Playlists")
         if not os.path.isdir(playlists_dir):
             return
@@ -1658,9 +1524,6 @@ class DownloadManager(GObject.Object):
                 print(f"[DOWNLOAD] Error pruning m3u {m3u_path}: {e}")
 
     def migrate_folder_structure(self):
-        """Reorganize existing downloads to match the current folder_structure
-        pref. Blocks; call from a background thread. Returns (moved, errors).
-        Serialized so overlapping pref toggles don't race each other."""
         if not self._migration_lock.acquire(blocking=False):
             return 0, 0
         try:
@@ -1691,7 +1554,6 @@ class DownloadManager(GObject.Object):
             if os.path.normpath(new_path) == os.path.normpath(old_path):
                 continue
 
-            # Don't clobber an unrelated file already at the destination.
             if os.path.exists(new_path):
                 base, ext = os.path.splitext(filename)
                 suffixed = f"{base} [{vid}]{ext}" if vid else filename
@@ -1718,7 +1580,6 @@ class DownloadManager(GObject.Object):
         return moved, errors
 
     def _rewrite_m3us_with_map(self, path_map):
-        """Update m3u relative paths to point at the new locations."""
         playlists_dir = os.path.join(get_music_dir(), "Playlists")
         if not os.path.isdir(playlists_dir):
             return
@@ -1756,7 +1617,6 @@ class DownloadManager(GObject.Object):
 
     @staticmethod
     def extract_cover_from_file(filepath):
-        """Extract embedded cover art from an audio file. Returns bytes or None."""
         if not filepath or not os.path.exists(filepath):
             return None
         try:

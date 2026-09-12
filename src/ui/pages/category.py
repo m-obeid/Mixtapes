@@ -1,11 +1,13 @@
 import json
-from gi.repository import Gtk, Adw, GObject, GLib, Pango
 import threading
+from gi.repository import Adw, GLib, GObject, Gtk, Pango
 from api.client import MusicClient
-from ui.utils import AsyncImage, parse_item_metadata, copy_to_clipboard
 from ui.context_menu import MenuAction, show_item_menu, show_song_menu
-from ui.widgets.scroll_box import HorizontalScrollBox
 from ui.util_classes import ScrolledWindow
+from ui.utils import AsyncImage, AsyncPicture, LikeButton, copy_to_clipboard, parse_item_metadata
+from ui.widgets.scroll_box import HorizontalScrollBox
+from ui.widgets.media_card import MediaCardWidget
+
 
 class CategoryPage(Adw.Bin):
     __gsignals__ = {
@@ -32,6 +34,9 @@ class CategoryPage(Adw.Bin):
         self.scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.scrolled.set_vexpand(True)
 
+        vadjust = self.scrolled.get_vadjustment()
+        vadjust.connect("value-changed", self._on_scroll)
+
         # Content Box
         self.content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=32)
         self.content_box.set_margin_top(24)
@@ -46,7 +51,7 @@ class CategoryPage(Adw.Bin):
         self.page_title_label.set_margin_bottom(16)
         self.content_box.append(self.page_title_label)
 
-        # Loading Spinner — centered vertically when the grid is empty.
+        # Loading Spinner
         self._loading_wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._loading_wrap.set_vexpand(True)
         self._loading_wrap.set_valign(Gtk.Align.CENTER)
@@ -71,9 +76,14 @@ class CategoryPage(Adw.Bin):
 
         self.set_child(self.main_box)
 
+    def _on_scroll(self, vadjust):
+        if vadjust.get_value() > 50:
+            self.emit("header-title-changed", self.title)
+        else:
+            self.emit("header-title-changed", "")
+
     def set_compact_mode(self, compact):
         self._compact = compact
-        # Propagate compact to all song row images
         self._propagate_compact(self.content_box, compact)
 
         if compact:
@@ -84,9 +94,9 @@ class CategoryPage(Adw.Bin):
             self.content_box.set_spacing(32)
 
     def _propagate_compact(self, widget, compact):
-        if hasattr(widget, 'set_compact') and hasattr(widget, 'target_size'):
+        if hasattr(widget, "set_compact") and hasattr(widget, "target_size"):
             widget.set_compact(compact)
-        child = widget.get_first_child() if hasattr(widget, 'get_first_child') else None
+        child = widget.get_first_child() if hasattr(widget, "get_first_child") else None
         while child:
             self._propagate_compact(child, compact)
             child = child.get_next_sibling()
@@ -96,7 +106,6 @@ class CategoryPage(Adw.Bin):
         self.title = title
         self.page_title_label.set_label(title)
 
-        # Clear existing items
         child = self.content_box.get_first_child()
         while child:
             next_child = child.get_next_sibling()
@@ -132,19 +141,21 @@ class CategoryPage(Adw.Bin):
         threading.Thread(target=fetch_func, daemon=True).start()
 
     def _render_sections(self, sections):
-        # Clear existing items again just in case
         child = self.content_box.get_first_child()
         while child:
             next_child = child.get_next_sibling()
-            if child != self.loading_spinner and child != self.page_title_label:
+            if child != self._loading_wrap and child != self.page_title_label:
                 self.content_box.remove(child)
             child = next_child
 
         if sections:
             for section in sections:
                 is_video_section = "video" in section["title"].lower()
-                is_song_section = section["title"].lower() == "songs" or (not is_video_section and all(not i.get("browseId") and i.get("videoId") for i in section["items"][:3]))
-                
+                is_song_section = section["title"].lower() == "songs" or (
+                    not is_video_section
+                    and all(not i.get("browseId") and i.get("videoId") for i in section["items"][:3])
+                )
+
                 if is_song_section:
                     self._add_songs_list(section["title"], section["items"])
                 else:
@@ -152,6 +163,27 @@ class CategoryPage(Adw.Bin):
 
         self._is_loading = False
         self._loading_wrap.set_visible(False)
+
+    def _make_card(self, item):
+        card = MediaCardWidget(
+            item,
+            player=self.player,
+            title_lines=1,
+            on_clicked=lambda btn, it: self._on_item_clicked(None, 1, 0, 0, it)
+        )
+    
+        gesture = Gtk.GestureClick()
+        gesture.set_button(3)
+        gesture.connect("released", self.on_grid_right_click, card)
+        card.add_controller(gesture)
+    
+        lp = Gtk.GestureLongPress()
+        lp.connect(
+            "pressed",
+            lambda g, x, y, c=card: self.on_grid_right_click(g, 1, x, y, c),
+        )
+        card.add_controller(lp)
+        return card
 
     def _add_carousel(self, title, items):
         if not items:
@@ -167,93 +199,10 @@ class CategoryPage(Adw.Bin):
 
         scroll_box = HorizontalScrollBox()
         inner_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
-        
+
         for item in items:
-            thumb_url = (
-                item.get("thumbnails", [])[-1]["url"]
-                if item.get("thumbnails")
-                else None
-            )
-
-            item_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-            item_box.add_css_class("artist-horizontal-item")
-            item_box.item_data = item
-            
-            img = AsyncImage(url=thumb_url, size=140, player=self.player)
-            
-            wrapper = Gtk.Box()
-            wrapper.set_overflow(Gtk.Overflow.HIDDEN)
-            wrapper.add_css_class("card")
-            wrapper.set_halign(Gtk.Align.CENTER)
-            wrapper.append(img)
-            
-            item_box.append(wrapper)
-
-            lbl = Gtk.Label(label=item.get("title", ""))
-            lbl.set_ellipsize(Pango.EllipsizeMode.END)
-            lbl.set_wrap(True)
-            lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            lbl.set_lines(2)
-            lbl.set_justify(Gtk.Justification.LEFT)
-            lbl.set_halign(Gtk.Align.START)
-
-            text_clamp = Adw.Clamp(maximum_size=140)
-            text_clamp.set_child(lbl)
-            item_box.append(text_clamp)
-
-            meta = parse_item_metadata(item)
-            parts = []
-            if meta["year"]:
-                parts.append(meta["year"])
-            if meta["type"]:
-                parts.append(meta["type"])
-
-            subtitle_text = " • ".join(parts)
-            if not subtitle_text and item.get("artists"):
-                artists = item.get("artists")
-                if isinstance(artists, list):
-                    subtitle_text = ", ".join([a.get("name", "") for a in artists])
-                else:
-                    subtitle_text = artists
-
-            if subtitle_text or meta["is_explicit"]:
-                subtitle_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-                subtitle_box.set_halign(Gtk.Align.START)
-                
-                if meta["is_explicit"]:
-                    explicit_lbl = Gtk.Label(label="E")
-                    explicit_lbl.set_justify(Gtk.Justification.CENTER)
-                    explicit_lbl.set_halign(Gtk.Align.CENTER)
-                    explicit_lbl.add_css_class("explicit-badge")
-                    subtitle_box.append(explicit_lbl)
-
-                if subtitle_text:
-                    subtitle_lbl = Gtk.Label(label=subtitle_text)
-                    subtitle_lbl.add_css_class("caption")
-                    subtitle_lbl.add_css_class("dim-label")
-                    subtitle_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-                    subtitle_box.append(subtitle_lbl)
-
-                subtitle_clamp = Adw.Clamp(maximum_size=140)
-                subtitle_clamp.set_child(subtitle_box)
-                item_box.append(subtitle_clamp)
-
-            inner_box.append(item_box)
-
-            click_gesture = Gtk.GestureClick()
-            click_gesture.set_button(1)
-            click_gesture.connect("released", self._on_item_clicked, item)
-            item_box.add_controller(click_gesture)
-
-            # Right Click context menu
-            right_click = Gtk.GestureClick()
-            right_click.set_button(3)
-            right_click.connect("released", self.on_grid_right_click, item_box)
-            item_box.add_controller(right_click)
-
-            lp = Gtk.GestureLongPress()
-            lp.connect("pressed", lambda g, x, y, ib=item_box: self.on_grid_right_click(g, 1, x, y, ib))
-            item_box.add_controller(lp)
+            card = self._make_card(item)
+            inner_box.append(card)
 
         scroll_box.set_content(inner_box)
         section_box.append(scroll_box)
@@ -273,6 +222,7 @@ class CategoryPage(Adw.Bin):
 
         list_box = Gtk.ListBox()
         list_box.add_css_class("boxed-list")
+        list_box.add_css_class("songs-list")
         list_box.set_selection_mode(Gtk.SelectionMode.NONE)
 
         limit = self._section_limits.get(title, 5)
@@ -284,10 +234,8 @@ class CategoryPage(Adw.Bin):
             box.add_css_class("song-row")
             row.set_child(box)
 
-            # Thumbnail
             thumbnails = item.get("thumbnails", [])
             thumb_url = thumbnails[-1]["url"] if thumbnails else None
-            from ui.utils import AsyncPicture
 
             img = AsyncPicture(
                 url=thumb_url,
@@ -298,12 +246,11 @@ class CategoryPage(Adw.Bin):
             img.video_id = item.get("videoId")
             img.add_css_class("song-img")
             root = self.get_root()
-            img.set_compact(getattr(root, '_is_compact', False) if root else False)
+            img.set_compact(getattr(root, "_is_compact", False) if root else False)
             box.append(img)
 
             song_title = item.get("title", "Unknown")
 
-            # Artists
             artist_list = item.get("artists", [])
             subtitle = ""
             if isinstance(artist_list, list):
@@ -325,11 +272,15 @@ class CategoryPage(Adw.Bin):
             title_label.set_halign(Gtk.Align.START)
             title_label.set_ellipsize(Pango.EllipsizeMode.END)
             title_label.set_lines(1)
+            title_label.set_width_chars(1)
+            title_label.set_xalign(0.0)
 
             subtitle_label = Gtk.Label(label=subtitle)
             subtitle_label.set_halign(Gtk.Align.START)
             subtitle_label.set_ellipsize(Pango.EllipsizeMode.END)
             subtitle_label.set_lines(1)
+            subtitle_label.set_width_chars(1)
+            subtitle_label.set_xalign(0.0)
             subtitle_label.add_css_class("dim-label")
             subtitle_label.add_css_class("caption")
 
@@ -347,7 +298,6 @@ class CategoryPage(Adw.Bin):
             vbox.append(subtitle_label)
             box.append(vbox)
 
-            from ui.utils import LikeButton
             if item.get("videoId"):
                 like_btn = LikeButton(
                     self.client, item["videoId"], item.get("likeStatus", "INDIFFERENT")
@@ -358,13 +308,11 @@ class CategoryPage(Adw.Bin):
             row.item_data = item
             list_box.append(row)
 
-            # Left Click Activation
             click_gesture = Gtk.GestureClick()
             click_gesture.set_button(1)
             click_gesture.connect("released", self._on_item_clicked, item)
             row.add_controller(click_gesture)
 
-            # Right Click context menu
             right_click = Gtk.GestureClick()
             right_click.set_button(3)
             right_click.connect("released", self.on_song_right_click, row)
@@ -427,8 +375,17 @@ class CategoryPage(Adw.Bin):
     def _on_item_clicked(self, gesture, n_press, x, y, item):
         video_id = item.get("videoId")
         browse_id = item.get("browseId") or item.get("playlistId")
-        
+
         if video_id:
             self.player.play_tracks([item])
         elif browse_id:
-            self.open_playlist_callback(browse_id)
+            initial_data = {
+                "title": item.get("title", ""),
+                "thumb": (item.get("thumbnails", [{}])[-1] or {}).get("url")
+                if item.get("thumbnails")
+                else None,
+            }
+            try:
+                self.open_playlist_callback(browse_id, initial_data)
+            except TypeError:
+                self.open_playlist_callback(browse_id)

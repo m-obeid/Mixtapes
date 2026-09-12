@@ -1470,7 +1470,32 @@ class MusicClient:
         self._library_playlists = []  # Cache for editable playlists
         self._library_playlist_ids = set()  # IDs of all library playlists
         self._library_album_ids = set()  # Browse IDs of all library albums
+        self._known_likes = {}  # video_id -> status ("LIKE", "INDIFFERENT", etc.)
         self.try_login(skip_validation=True)
+
+    def get_known_like_status(self, video_id):
+        if not video_id:
+            return None
+        return self._known_likes.get(video_id)
+
+    def set_known_like_status(self, video_id, status):
+        if video_id:
+            self._known_likes[video_id] = status
+
+    def sync_liked_songs_cache(self):
+        def _bg():
+            try:
+                if self._offline_db:
+                    cached_lm = self._offline_db.get_cached_playlist("LM")
+                    if cached_lm and cached_lm.get("tracks"):
+                        for t in cached_lm["tracks"]:
+                            vid = t.get("videoId")
+                            if vid:
+                                self._known_likes[vid] = "LIKE"
+            except Exception:
+                pass
+        import threading
+        threading.Thread(target=_bg, daemon=True).start()
 
     @property
     def _offline_db(self):
@@ -1504,6 +1529,7 @@ class MusicClient:
                 if self.validate_session():
                     print("Authenticated via saved session.")
                     self._is_authed = True
+                    self.sync_liked_songs_cache()
                     return True
                 else:
                     print("Saved session invalid.")
@@ -1672,6 +1698,7 @@ class MusicClient:
             if self.validate_session():
                 self._is_authed = True
                 print("Login successful and saved.")
+                self.sync_liked_songs_cache()
                 return True
             else:
                 print("Login failed: Session invalid after init.")
@@ -5101,6 +5128,7 @@ class MusicClient:
         self._library_playlist_ids = set()
         self._library_album_ids = set()
         self._playlist_cache = {}
+        self._known_likes = {}
         if hasattr(self, "_channel_handle_cache"):
             self._channel_handle_cache = {}
 

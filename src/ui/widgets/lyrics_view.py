@@ -603,10 +603,10 @@ class LyricRow(Gtk.ListBoxRow):
         full_byte_len = len(full_text.encode('utf-8'))
         b_end = active_part.get("byte_end", full_byte_len)
 
-        r = int(color.red * 65535)
-        g = int(color.green * 65535)
-        b = int(color.blue * 65535)
-        a = int(color.alpha * 65535)
+        r = max(0, min(65535, int(round(color.red * 65535))))
+        g = max(0, min(65535, int(round(color.green * 65535))))
+        b = max(0, min(65535, int(round(color.blue * 65535))))
+        a = max(0, min(65535, int(round(color.alpha * 65535))))
 
         attr_c = Pango.attr_foreground_new(r, g, b)
         attr_c.start_index = b_start
@@ -683,14 +683,13 @@ class LyricRow(Gtk.ListBoxRow):
                     if abs(self._sub_alphas[0] - t) > 0.005:
                         self._sub_alphas[0] += (t - self._sub_alphas[0]) * self._lerp
                         changed = True
-
         else:
             for i in range(len(self.parts) if self.parts else 1):
                 target = self._word_targets[i]
                 if abs(self._word_alphas[i] - target) > 0.005:
                     self._word_alphas[i] += (target - self._word_alphas[i]) * self._lerp
                     changed = True
-                    
+
             if self.sub_label:
                 if not self.sub_parts:
                     target = self._sub_targets[0]
@@ -705,9 +704,9 @@ class LyricRow(Gtk.ListBoxRow):
                             changed = True
 
         if changed or getattr(self, "_dirty", False):
+            self._dirty = False
             self._render_markup()
             self._render_sub_markup()
-            self._dirty = False
 
     def _on_tick(self, _widget, _frame_clock):
         current_time = GLib.get_monotonic_time() / 1000.0
@@ -718,10 +717,10 @@ class LyricRow(Gtk.ListBoxRow):
 
         c_in, c_act, _ = self._get_css_colors(self.label)
         color_state = (
-            round(c_in.red, 3), round(c_in.green, 3), round(c_in.blue, 3),
-            round(c_act.red, 3), round(c_act.green, 3), round(c_act.blue, 3)
+            round(c_in.red, 2), round(c_in.green, 2), round(c_in.blue, 2),
+            round(c_act.red, 2), round(c_act.green, 2), round(c_act.blue, 2)
         )
-        
+
         if getattr(self, "_last_color_state", None) != color_state:
             self._last_color_state = color_state
             self._dirty = True
@@ -729,14 +728,14 @@ class LyricRow(Gtk.ListBoxRow):
 
         if self._wants_turn_off:
             end_bound = 0
-            if self.parts: 
+            if self.parts:
                 end_bound = max(end_bound, self.parts[-1]["end_ms"])
-            if self.sub_parts: 
+            if self.sub_parts:
                 end_bound = max(end_bound, self.sub_parts[-1]["end_ms"])
             if not self.is_paused:
                 if delta > 250:
                     self._internal_cursor_ms = end_bound + 1
-                
+
                 if self._internal_cursor_ms > end_bound or self._internal_cursor_ms < self.start_ms:
                     self._cursor_ms = -1
                     self._internal_cursor_ms = -1
@@ -745,7 +744,7 @@ class LyricRow(Gtk.ListBoxRow):
                     self._recompute_targets()
                     changed = True
                 else:
-                    if delta < 100: 
+                    if delta < 100:
                         self._internal_cursor_ms += delta
                     changed = True
         else:
@@ -765,9 +764,7 @@ class LyricRow(Gtk.ListBoxRow):
                 setattr(self, attr, cur + (target - cur) * (_EFFECT_LERP * 0.6))
                 changed = True
 
-        if getattr(self, "_dirty", False):
-            self.queue_draw()
-        elif changed or self._cursor_ms >= 0:
+        if changed or self._cursor_ms >= 0:
             self.queue_draw()
 
         return GLib.SOURCE_CONTINUE
@@ -775,31 +772,36 @@ class LyricRow(Gtk.ListBoxRow):
     def _get_css_colors(self, label):
         ctx = label.get_style_context()
         c_in = ctx.get_color()
-        
+
         ctx.save()
-        ctx.add_class("active")
-        c_act = ctx.get_color()
-        
-        ctx.remove_class("active")
-        ctx.add_class("glow")
-        c_glow = ctx.get_color()
-        ctx.restore()
-        
+        try:
+            ctx.add_class("active")
+            c_act = ctx.get_color()
+        finally:
+            ctx.restore()
+
+        ctx.save()
+        try:
+            ctx.add_class("glow")
+            c_glow = ctx.get_color()
+        finally:
+            ctx.restore()
+
         return c_in, c_act, c_glow
 
     def _lerp_color(self, c1, c2, t):
         c = Gdk.RGBA()
-        c.red = c1.red + (c2.red - c1.red) * t
-        c.green = c1.green + (c2.green - c1.green) * t
-        c.blue = c1.blue + (c2.blue - c1.blue) * t
-        c.alpha = c1.alpha + (c2.alpha - c1.alpha) * t
+        c.red = max(0.0, min(1.0, c1.red + (c2.red - c1.red) * t))
+        c.green = max(0.0, min(1.0, c1.green + (c2.green - c1.green) * t))
+        c.blue = max(0.0, min(1.0, c1.blue + (c2.blue - c1.blue) * t))
+        c.alpha = max(0.0, min(1.0, c1.alpha + (c2.alpha - c1.alpha) * t))
         return c
 
     def _color_to_markup(self, color, text):
-        r = int(color.red * 255)
-        g = int(color.green * 255)
-        b = int(color.blue * 255)
-        a = max(1, int(color.alpha * 65535))
+        r = max(0, min(255, int(round(color.red * 255))))
+        g = max(0, min(255, int(round(color.green * 255))))
+        b = max(0, min(255, int(round(color.blue * 255))))
+        a = max(1, min(65535, int(round(color.alpha * 65535))))
         return f"<span color='#{r:02x}{g:02x}{b:02x}' fgalpha='{a}'>{html.escape(text)}</span>"
 
     def _render_markup(self):
@@ -941,10 +943,10 @@ class LyricRow(Gtk.ListBoxRow):
 
             attrs = Pango.AttrList.new()
             
-            r = int(color.red * 65535)
-            g = int(color.green * 65535)
-            b = int(color.blue * 65535)
-            a = int(color.alpha * 65535)
+            r = max(0, min(65535, int(round(color.red * 65535))))
+            g = max(0, min(65535, int(round(color.green * 65535))))
+            b = max(0, min(65535, int(round(color.blue * 65535))))
+            a = max(0, min(65535, int(round(color.alpha * 65535))))
 
             attr_c = Pango.attr_foreground_new(r, g, b)
             attr_c.start_index = b_start
@@ -1450,13 +1452,11 @@ class LyricsView(Gtk.Box):
         # padding and min-width/min-height, which shrank the clickable
         # area to roughly the icon itself and made the button feel like
         # it was ignoring clicks.
-        self._source_picker_btn.add_css_class("osd")
         self._source_picker_btn.add_css_class("circular")
         self._source_picker_btn.add_css_class("lyrics-osd-btn")
         self._source_picker_btn.set_halign(Gtk.Align.END)
         self._source_picker_btn.set_valign(Gtk.Align.START)
-        self._source_picker_btn.set_margin_top(10)
-        self._source_picker_btn.set_margin_end(10)
+        self._source_picker_btn.set_margin_end(20)
         self._source_picker_btn.set_visible(False)
         # No internal label — kept for compatibility with helpers that
         # update the visible button copy on source change.
@@ -2637,86 +2637,76 @@ class LyricsView(Gtk.Box):
         self._scroll_target_idx = target_idx
         self._log(1, f"scroll_to_row idx={target_idx} scheduled")
 
-        def do_scroll(retries=8):
+        retries = 8
+
+        def _check_layout_and_scroll(widget, frame_clock):
+            nonlocal retries
+
             if self._scroll_target_idx != target_idx:
                 self._log(1, f"do_scroll idx={target_idx} SUPERSEDED "
-                         f"(now targeting {self._scroll_target_idx})")
-                return False  # Superseded by a newer activation.
+                             f"(now targeting {self._scroll_target_idx})")
+                return GLib.SOURCE_REMOVE
+
+            alloc = row.get_allocation()
+            if alloc.height <= 0:
+                retries -= 1
+                if retries <= 0:
+                    self._log(2, f"do_scroll idx={target_idx} timeout waiting for layout")
+                    return GLib.SOURCE_REMOVE
+                return GLib.SOURCE_CONTINUE
+
             adj = self.scroller.get_vadjustment()
             content = self.scroller.get_child()
             if adj is None or content is None:
                 self._log(1, f"do_scroll idx={target_idx} no adj/content")
-                return False
-            alloc = row.get_allocation()
-            if alloc.height <= 0:
-                self._log(2, f"do_scroll idx={target_idx} row not laid out "
-                         f"(retries={retries})")
-                if retries > 0:
-                    GLib.timeout_add(33, do_scroll, retries - 1)
-                return False
-            # Use row.get_allocation().y directly. Empirically,
-            # compute_point(row, scroller.get_child()) in this widget
-            # hierarchy factors in the scroll transform — its result
-            # equals `alloc.y - adj.value + padding`. Subtracting vh/2
-            # from a scroll-relative y produces a target that drifts
-            # by the current adj.value each activation, so the active
-            # line creeps toward the bottom of the viewport. alloc.y is
-            # invariant of scroll: it's the row's true y inside the
-            # ListBox, which (with the ListBox at the top of the Clamp,
-            # margin_top=0) equals its y in the scrollable content.
+                return GLib.SOURCE_REMOVE
+
             viewport_h = self.scroller.get_height()
             if viewport_h <= 0:
-                self._log(1, f"do_scroll idx={target_idx} viewport not "
-                         f"realized (vh={viewport_h}) — likely a hidden "
-                         f"LyricsView; skipping")
-                return False
+                self._log(1, f"do_scroll idx={target_idx} viewport not realized")
+                return GLib.SOURCE_REMOVE
+
             target = alloc.y - (viewport_h / 2) + (alloc.height / 2)
-            raw_target = target
             target = max(adj.get_lower(),
                          min(target, adj.get_upper() - adj.get_page_size()))
-            self._log(1,
-                f"do_scroll idx={target_idx} "
-                f"row.alloc=(y={alloc.y},h={alloc.height}) "
-                f"vh={viewport_h} "
-                f"raw_target={raw_target:.1f} clamped={target:.1f} "
-                f"adj=(val={adj.get_value():.1f},lo={adj.get_lower():.1f},"
-                f"up={adj.get_upper():.1f},page={adj.get_page_size():.1f})")
+
             self._animate_to(adj, target)
-            return False
+            return GLib.SOURCE_REMOVE
 
-        GLib.idle_add(do_scroll)
+        self.add_tick_callback(_check_layout_and_scroll)
 
-    def _animate_to(self, adj, target, duration_ms=320):
+    def _animate_to(self, adj, target, duration_ms=500):
         """Smoothly scroll the adjustment from its current value to
         ``target`` over ``duration_ms`` with an ease-out curve. Any
         in-flight animation is cancelled first so consecutive calls
         seamlessly retarget."""
         if self._scroll_anim_source:
-            self._log(1, f"animate_to: cancelling in-flight animation")
-            GLib.source_remove(self._scroll_anim_source)
+            self.remove_tick_callback(self._scroll_anim_source)
             self._scroll_anim_source = 0
+
         start_value = adj.get_value()
         if abs(start_value - target) < 1.0:
-            self._log(1, f"animate_to: no-op (start={start_value:.1f} ≈ "
-                     f"target={target:.1f})")
             adj.set_value(target)
             return
-        self._log(1, f"animate_to: start={start_value:.1f} -> target={target:.1f} "
-                 f"delta={target - start_value:+.1f}")
+
         start_time = GLib.get_monotonic_time()
 
-        def _tick():
-            elapsed = (GLib.get_monotonic_time() - start_time) / 1000.0
+        def _tick(widget, frame_clock):
+            frame_time = frame_clock.get_frame_time()
+            elapsed = (frame_time - start_time) / 1000.0
+
             t = min(1.0, elapsed / max(1, duration_ms))
+
             eased = 1.0 - (1.0 - t) ** 3
             adj.set_value(start_value + (target - start_value) * eased)
+
             if t >= 1.0:
                 self._scroll_anim_source = 0
-                self._log(2, f"animate_to: done at {adj.get_value():.1f}")
-                return False
-            return True
+                return GLib.SOURCE_REMOVE
 
-        self._scroll_anim_source = GLib.timeout_add(16, _tick)
+            return GLib.SOURCE_CONTINUE
+
+        self._scroll_anim_source = self.add_tick_callback(_tick)
 
     def _render_status(self, name, title=None, description=None):
         if title is not None:

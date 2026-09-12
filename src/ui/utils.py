@@ -1,10 +1,13 @@
 import os
 import threading
 import time
-import urllib.request
+import weakref
 import collections
 import re
-from gi.repository import Gtk, Gdk, GObject, GLib, GdkPixbuf
+from gi.repository import Gtk, Gdk, GLib, GdkPixbuf
+import gc
+import ctypes
+import sys
 
 
 # is_online() is called from every bind path that greys out offline rows —
@@ -38,6 +41,7 @@ _PROBE_WAITERS = []
 _FORCE_OFFLINE_CACHE = {"value": False, "expires": 0.0}
 _FORCE_OFFLINE_TTL = 10.0
 
+_ACTIVE_LIKE_BUTTONS = weakref.WeakSet()
 
 def _check_force_offline():
     """Return the force_offline pref, cached for ``_FORCE_OFFLINE_TTL``
@@ -176,8 +180,12 @@ IMG_CACHE = collections.OrderedDict()
 # 1024px can pin ~256 MB by itself after playlist/queue browsing. Keep enough
 # warm artwork for the current view and nearby tracks without letting decoded
 # covers dominate the process footprint.
-MAX_CACHE_SIZE = 24
-MAX_CACHED_DIM = 768
+MAX_CACHE_SIZE = 12
+MAX_CACHED_DIM = 512
+# How long a loaded image holds its texture after going off screen. Long
+# enough that a breakpoint or a tab switch never repaints a placeholder,
+# short enough that a view left alone gives its artwork back.
+HIDDEN_UNLOAD_DELAY = 30
 IMG_CACHE_LOCK = threading.Lock()
 
 # Bounded executor for image fetches. Each row's `load_url` used to spawn a
@@ -204,11 +212,8 @@ def _get_fetch_executor():
     with _FETCH_EXECUTOR_LOCK:
         if _FETCH_EXECUTOR is None:
             from concurrent.futures import ThreadPoolExecutor
-            # Keep decode concurrency low: GdkPixbuf/PIL bursts can otherwise
-            # briefly allocate hundreds of MB while several covers decode and
-            # downscale at the same time.
             _FETCH_EXECUTOR = ThreadPoolExecutor(
-                max_workers=2, thread_name_prefix="muse-img"
+                max_workers=6, thread_name_prefix="muse-img"
             )
     return _FETCH_EXECUTOR
 
@@ -394,39 +399,26 @@ def decode_pixbuf_bounded(data, max_dim=MAX_CACHED_DIM):
 
 
 def get_high_res_url(url, target_size=None):
-    """Rewrites Google Image URLs to request a high resolution (800x800).
-    Also strips sqp and rs parameters which constrain resolution, UNLESS it's a locker track.
-    """
     if not url:
         return url
 
-    # 1. Clean up parameters that constrain resolution
-    # Strip sqp and rs which are often used to force small/safe thumbnails
-    # CRITICAL: Some URL families REQUIRE these params and 404 without them:
-    #   - vi_locker (locker tracks)
-    #   - pl_c (custom playlist covers — sqp/rs are signed access tokens)
-    # Stripping them on pl_c made every library tile fail its primary fetch
-    # and fall back to the original URL, doubling the network load when
-    # opening anything while the library grid is still hydrating.
     if "vi_locker" not in url and "/pl_c/" not in url:
         clean_url = re.sub(r"([?&])(sqp|rs)=[^&]*&?", r"\1", url)
         clean_url = clean_url.replace("?&", "?").rstrip("?&")
     else:
         clean_url = url
 
-    # 2. Upgrade resolution/quality based on domain
     if "i.ytimg.com" in clean_url:
         for q in _YTIMG_QUALITIES:
             if q in clean_url:
                 return clean_url.replace(q, "maxresdefault")
         return clean_url
+    dim = (target_size * 2) if target_size else 544
 
     if "googleusercontent.com" in clean_url or "ggpht.com" in clean_url:
-        # If it has w/h, only update those and ignore s
         if re.search(r"([=-])w\d+-h\d+", clean_url):
-            return re.sub(r"([=-])w\d+-h\d+", r"\1w800-h800", clean_url)
-        # Otherwise update s
-        return re.sub(r"([=-])s\d+(?=-|$)", r"\1s800", clean_url)
+            return re.sub(r"([=-])w\d+-h\d+", rf"\1w{dim}-h{dim}", clean_url)
+        return re.sub(r"([=-])s\d+(?=-|$)", rf"\1s{dim}", clean_url)
 
     return clean_url
 
@@ -741,21 +733,11 @@ def attach_playing_highlight(row_widget, player, video_id):
         is_playing = video_id in (player.current_video_id, source)
         if is_playing:
             target.add_css_class("playing")
+            target.remove_css_class("flat")
         else:
             target.remove_css_class("playing")
+            target.add_css_class("flat")
 
-    try:
-        handler = player.connect("metadata-changed", _refresh)
-    except Exception:
-        return
-
-    def _cleanup(*_):
-        try:
-            player.disconnect(handler)
-        except Exception:
-            pass
-
-    row_widget.connect("destroy", _cleanup)
     _refresh()
 
 
@@ -889,7 +871,6 @@ class AsyncImage(Gtk.Image):
         super().__init__(**kwargs)
         self.player = player
 
-        # Determine target dimensions
         self.target_w = width if width else size
         self.target_h = height if height else size
         self._is_placeholder = True
@@ -898,12 +879,11 @@ class AsyncImage(Gtk.Image):
             self.target_w = 48
         if not self.target_h:
             self.target_h = 48
+        self._active_future = None
 
-        # Set pixel size if provided (limits size for icons).
         if size:
             self.set_pixel_size(size)
         else:
-            # Rely on pixbuf scaling for explicit width/height.
             pass
 
         # Skip the placeholder icon-name lookup at init time — it's a
@@ -918,15 +898,92 @@ class AsyncImage(Gtk.Image):
         self.video_id = None
         self._pending_fetch = None
         self._map_handler_id = None
+        self._unload_source = None
         self.connect("destroy", self._on_destroy)
-        # Remember the desktop size so set_compact() can restore it
-        # when compact mode toggles off. Mirrors AsyncPicture.target_size.
         self._base_size = self.target_w
+
+        self.connect("unmap", self._on_unmap)
+        self.connect("map", self._cancel_hidden_unload)
 
         if url:
             self.load_url(url)
 
+    def cancel_and_unload(self):
+        self._pending_fetch = None
+        if self._active_future:
+            try:
+                self._active_future.cancel()
+            except Exception:
+                pass
+            self._active_future = None
+
+        if getattr(self, "_map_handler_id", None):
+            try:
+                self.disconnect(self._map_handler_id)
+            except Exception:
+                pass
+            self._map_handler_id = None
+
+        if isinstance(self, Gtk.Picture):
+            self.set_paintable(None)
+        else:
+            self.clear()
+            
+        self._is_placeholder = True
+
+    def _on_unmap(self, widget):
+        current_url = self.url
+        if not current_url:
+            return
+        # An image that has finished loading holds its art for a while
+        # instead of dropping it here. Dropping it on every unmap cost a
+        # placeholder frame and a fresh disk read on the way back, since
+        # IMG_CACHE only holds MAX_CACHE_SIZE pixbufs and a breakpoint hides
+        # and reparents whole views at once. Anything still in flight falls
+        # through and reloads on the next map, as before.
+        future = self._active_future
+        settled = (
+            not self._is_placeholder
+            and self.get_paintable() is not None
+            and self._pending_fetch is None
+            and (future is None or future.done())
+        )
+        if settled:
+            if getattr(self, "_unload_source", None) is None:
+                self._unload_source = GLib.timeout_add_seconds(
+                    HIDDEN_UNLOAD_DELAY, self._unload_while_hidden
+                )
+            return
+        self._drop_and_rearm(current_url)
+
+    def _unload_while_hidden(self):
+        self._unload_source = None
+        url = getattr(self, "url", None)
+        if not url or self.get_mapped():
+            return GLib.SOURCE_REMOVE
+        self._drop_and_rearm(url)
+        return GLib.SOURCE_REMOVE
+
+    def _cancel_hidden_unload(self, *_):
+        # getattr, not attribute access: destroy can fire on a wrapper that
+        # no longer carries the instance state, which is why the rest of the
+        # teardown here only ever assigns or uses getattr.
+        source = getattr(self, "_unload_source", None)
+        if source is not None:
+            try:
+                GLib.source_remove(source)
+            except Exception:
+                pass
+        self._unload_source = None
+
+    def _drop_and_rearm(self, url):
+        """Give the texture back. The reload is deferred to the next map."""
+        self.cancel_and_unload()
+        self.set_from_icon_name("image-missing-symbolic")
+        self.load_url(url)
+        
     def _on_destroy(self, *_):
+        self._cancel_hidden_unload()
         self._pending_fetch = None
         self.url = None
         self.video_id = None
@@ -951,10 +1008,12 @@ class AsyncImage(Gtk.Image):
         if self._base_size is None or self._base_size > 80:
             return
         new = 44 if compact else self._base_size
-        if new == self.target_w:
+        if new == self.get_pixel_size():
             return
-        self.target_w = new
-        self.target_h = new
+        # Display size only. target_w feeds get_high_res_url, and both the
+        # memory and disk caches are keyed by URL, so moving it refetches the
+        # thumbnail on the next remap. That lands exactly on the breakpoint,
+        # where the view swap remaps every row at once.
         self.set_pixel_size(new)
         self.queue_resize()
 
@@ -969,8 +1028,15 @@ class AsyncImage(Gtk.Image):
     # sees it. Defer the submit_fetch until the widget is mapped; cache
     # hits still paint synchronously so already-loaded rows are instant.
     def _queue_fetch(self, fn, *args):
+        if self._active_future:
+            try:
+                self._active_future.cancel()
+            except Exception:
+                pass
+            self._active_future = None
+
         if self.get_mapped():
-            submit_fetch(fn, *args)
+            self._active_future = submit_fetch(fn, *args)
             return
         self._pending_fetch = (fn, args)
         if not getattr(self, "_map_handler_id", None):
@@ -982,18 +1048,19 @@ class AsyncImage(Gtk.Image):
             return
         fn, args = pending
         self._pending_fetch = None
-        # The first positional arg to _fetch_image is the URL it was queued
-        # for. If load_url has since pointed this widget at a different URL
-        # (recycled to a new track), drop the stale fetch.
         if args and args[0] != self.url:
             return
-        submit_fetch(fn, *args)
+        if self._active_future:
+            try:
+                self._active_future.cancel()
+            except Exception:
+                pass
+        self._active_future = submit_fetch(fn, *args)
 
     def load_url(self, url, **kwargs):
         orig_url = url
         url = get_high_res_url(url, self.target_w)
         self.url = url
-        # A new URL invalidates any previously deferred fetch.
         self._pending_fetch = None
 
         vid = getattr(self, 'video_id', None)
@@ -1100,8 +1167,8 @@ class AsyncImage(Gtk.Image):
                 # Now perform the widget-specific scaling and cropping in the background thread
                 # To support HiDPI (e.g. 200% scale), we double the target pixel density
                 # GTK will scale the texture back down smoothly, keeping it crisp.
-                tw = self.target_w * 2
-                th = self.target_h * 2
+                tw = self.target_w * 2 if self.target_w else 512
+                th = self.target_h * 2 if self.target_h else 512
 
                 w = pixbuf.get_width()
                 h = pixbuf.get_height()
@@ -1137,13 +1204,9 @@ class AsyncImage(Gtk.Image):
         except Exception:
             if fallbacks and self.url == url:
                 next_url = fallbacks.pop(0)
-                self.url = next_url  # Update current URL to match the fallback
-
-                # If we have a player, notify it about the working fallback URL
-                # when it finally succeeds. This is handled in _apply_pixbuf.
-
+                self.url = next_url
                 print(f"Trying fallback: {next_url}")
-                self._fetch_image(next_url, fallbacks)
+                submit_fetch(self._fetch_image, next_url, fallbacks)
 
     def _apply_pixbuf(self, pixbuf, url=None):
         # Race condition check: only apply if the URL hasn't changed since request
@@ -1193,11 +1256,9 @@ class AsyncImage(Gtk.Image):
     def set_from_file(self, file):
         """Optimistically set image from a local file object (GFile)"""
         try:
-            # We must load into a pixbuf first to handle scaling correctly
             path = file.get_path()
-            # Multiplying by 2 to support HiDPI displays
             pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-                path, self.target_w * 2, self.target_h * 2, True
+                path, self.target_w * 2 if self.target_w else 512, self.target_h * 2 if self.target_h else 512, True
             )
             print(f"[IMAGE-LOAD] AsyncImage path={path}")
             self.set_from_pixbuf(pixbuf)
@@ -1208,12 +1269,10 @@ class AsyncImage(Gtk.Image):
 
 
 def subprocess_pixbuf(pixbuf, x, y, w, h):
-    # bindings helper
     return pixbuf.new_subpixbuf(x, y, w, h)
 
 
 class AsyncPicture(Gtk.Picture):
-    # Added crop_to_square parameter
     def __init__(
         self,
         url=None,
@@ -1233,10 +1292,12 @@ class AsyncPicture(Gtk.Picture):
         self._is_placeholder = True
         self._pending_fetch = None
         self._map_handler_id = None
+        self._unload_source = None
         self.connect("destroy", self._on_destroy)
-
-        # Constrain the picture widget to target_size so it doesn't
-        # request more space when a non-square texture is loaded
+        self.connect("unmap", self._on_unmap)
+        self.connect("map", self._cancel_hidden_unload)
+        self._active_future = None
+        
         if target_size:
             self.set_size_request(target_size, target_size)
             self.set_hexpand(False)
@@ -1245,15 +1306,87 @@ class AsyncPicture(Gtk.Picture):
         if icon_name:
             self.set_from_icon_name(icon_name)
         else:
-            # Skip the eager placeholder icon-name lookup; the bind path
-            # calls load_url which sets it on miss. ~25 row Pictures × 1
-            # icon-theme roundtrip apiece used to fire on every cold
-            # playlist render.
             self._is_placeholder = True
             if url:
                 self.load_url(url)
 
+    def cancel_and_unload(self):
+        """Cancela a Future ativa, limpa o fetch pendente e descarrega a textura."""
+        self._pending_fetch = None
+        if self._active_future:
+            try:
+                self._active_future.cancel()
+            except Exception:
+                pass
+            self._active_future = None
+
+        if getattr(self, "_map_handler_id", None):
+            try:
+                self.disconnect(self._map_handler_id)
+            except Exception:
+                pass
+            self._map_handler_id = None
+
+        if isinstance(self, Gtk.Picture):
+            self.set_paintable(None)
+        else:
+            self.clear()
+            
+        self._is_placeholder = True
+
+    def _on_unmap(self, widget):
+        current_url = self.url
+        if not current_url:
+            return
+        # An image that has finished loading holds its art for a while
+        # instead of dropping it here. Dropping it on every unmap cost a
+        # placeholder frame and a fresh disk read on the way back, since
+        # IMG_CACHE only holds MAX_CACHE_SIZE pixbufs and a breakpoint hides
+        # and reparents whole views at once. Anything still in flight falls
+        # through and reloads on the next map, as before.
+        future = self._active_future
+        settled = (
+            not self._is_placeholder
+            and self.get_paintable() is not None
+            and self._pending_fetch is None
+            and (future is None or future.done())
+        )
+        if settled:
+            if getattr(self, "_unload_source", None) is None:
+                self._unload_source = GLib.timeout_add_seconds(
+                    HIDDEN_UNLOAD_DELAY, self._unload_while_hidden
+                )
+            return
+        self._drop_and_rearm(current_url)
+
+    def _unload_while_hidden(self):
+        self._unload_source = None
+        url = getattr(self, "url", None)
+        if not url or self.get_mapped():
+            return GLib.SOURCE_REMOVE
+        self._drop_and_rearm(url)
+        return GLib.SOURCE_REMOVE
+
+    def _cancel_hidden_unload(self, *_):
+        # getattr, not attribute access: destroy can fire on a wrapper that
+        # no longer carries the instance state, which is why the rest of the
+        # teardown here only ever assigns or uses getattr.
+        source = getattr(self, "_unload_source", None)
+        if source is not None:
+            try:
+                GLib.source_remove(source)
+            except Exception:
+                pass
+        self._unload_source = None
+
+    def _drop_and_rearm(self, url):
+        """Give the texture back. The reload is deferred to the next map."""
+        self.cancel_and_unload()
+        self.set_from_icon_name("image-missing-symbolic")
+        self.load_url(url)
+
     def _on_destroy(self, *_):
+        self._cancel_hidden_unload()
         self._pending_fetch = None
         self.url = None
         self.video_id = None
@@ -1428,11 +1561,9 @@ class AsyncPicture(Gtk.Picture):
                 w = pixbuf.get_width()
                 h = pixbuf.get_height()
 
-                # Cache the high-res version BEFORE potential thumbnail downscaling
                 cache_pixbuf(url, pixbuf)
 
                 if target_size:
-                    # Scale to 2x for HiDPI quality (this is the widget-specific version)
                     tw = target_size * 2
                     th = target_size * 2
                     if w > tw or h > th:
@@ -1449,9 +1580,9 @@ class AsyncPicture(Gtk.Picture):
             if fallbacks and self.url == url:
                 next_url = fallbacks.pop(0)
                 self.url = next_url
-                self._fetch_image(next_url, target_size, crop, fallbacks)
+                print(f"Trying fallback: {next_url}")
+                submit_fetch(self._fetch_image, next_url, fallbacks)
             else:
-                # Last resort: try local cover for downloaded songs
                 try:
                     local = self._get_local_cover()
                     if local and local != url:
@@ -1468,11 +1599,9 @@ class AsyncPicture(Gtk.Picture):
             self.set_paintable(None)
             return
 
-        # Notify player of working URL
         if self.player and url and "ytimg.com" in url:
             GLib.idle_add(self._sync_player_url, url)
 
-        # Crop to center square if requested
         if self.crop_to_square and pixbuf:
             w = pixbuf.get_width()
             h = pixbuf.get_height()
@@ -1482,7 +1611,6 @@ class AsyncPicture(Gtk.Picture):
                 y_off = (h - size) // 2
                 pixbuf = pixbuf.new_subpixbuf(x_off, y_off, size, size)
 
-        # Convert to Texture and paint
         texture = Gdk.Texture.new_for_pixbuf(pixbuf)
         self.set_paintable(texture)
         self._is_placeholder = False
@@ -1534,14 +1662,12 @@ class MarqueeLabel(Gtk.ScrolledWindow):
         width = self.get_width()
         label_w = self.label1.get_width()
 
-        # If it fits, don't animate and keep centered/start aligned
         if label_w <= width:
             self.label2.set_visible(False)
             self.get_hadjustment().set_value(0)
             self._is_animating = False
             return True
 
-        # Otherwise, animate
         self.label2.set_visible(True)
         self._is_animating = True
 
@@ -1554,10 +1680,9 @@ class MarqueeLabel(Gtk.ScrolledWindow):
         self._last_frame_time = frame_time
 
         adj = self.get_hadjustment()
-        speed = 40.0  # px/s
+        speed = 40.0
         new_val = adj.get_value() + (speed * delta)
 
-        # Seamless loop point
         loop_point = label_w + self._loop_spacing
         if new_val >= loop_point:
             new_val -= loop_point
@@ -1568,73 +1693,235 @@ class MarqueeLabel(Gtk.ScrolledWindow):
     def set_label(self, text):
         self.label1.set_label(text)
         self.label2.set_label(text)
-        # Reset scroll on text change
         self.get_hadjustment().set_value(0)
         if hasattr(self, "_last_frame_time"):
             delattr(self, "_last_frame_time")
 
 
+def notify_like_changed(video_id, status):
+    """Updates the cache and synchronizes all active instances of LikeButton."""
+    if not video_id:
+        return GLib.SOURCE_REMOVE
+
+    for btn in list(_ACTIVE_LIKE_BUTTONS):
+        if getattr(btn, "video_id", None) == video_id:
+            btn.status = status
+            btn.update_icon()
+
+    return GLib.SOURCE_REMOVE
+
+def bind_weak_signal(emitter, signal_name, lifecycle_obj, callback):
+    weak_obj = weakref.ref(lifecycle_obj)
+    
+    handler_id = [None] 
+
+    def _wrapper(*args, **kwargs):
+        if weak_obj() is None:
+            if handler_id[0] is not None:
+                try:
+                    emitter.disconnect(handler_id[0])
+                except Exception as e:
+                    pass
+            return False
+            
+        return callback(*args, **kwargs)
+
+    handler_id[0] = emitter.connect(signal_name, _wrapper)
+    return handler_id[0]
+
+def force_garbage_collect():
+    
+    gc.collect()
+    if sys.platform.startswith("linux"):
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
+
+
 class LikeButton(Gtk.Button):
-    def __init__(self, client, video_id, initial_status="INDIFFERENT", **kwargs):
+    def __init__(self, client, video_id=None, initial_status="INDIFFERENT", **kwargs):
         super().__init__(**kwargs)
         self.client = client
         self.video_id = video_id
-        self.status = initial_status
+        self._suppress_next_click = False
+        _ACTIVE_LIKE_BUTTONS.add(self)
+
+        resolved = None
+        if video_id and hasattr(self.client, "get_known_like_status"):
+            resolved = self.client.get_known_like_status(video_id)
+
+        self.status = resolved or initial_status or "INDIFFERENT"
 
         self.add_css_class("flat")
         self.add_css_class("circular")
         self.set_valign(Gtk.Align.CENTER)
 
+        self._setup_context_menu()
         self.update_icon()
+
         self.connect("clicked", self.on_clicked)
+
+    def _setup_context_menu(self):
+        self._popover = Gtk.Popover()
+        self._popover.set_parent(self)
+        self._popover.set_has_arrow(True)
+        self._popover.connect("closed", self._on_popover_closed)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        box.set_margin_start(4)
+        box.set_margin_end(4)
+
+        self._dislike_menu_btn = Gtk.Button()
+        self._dislike_menu_btn.add_css_class("flat")
+        self._dislike_menu_btn.connect("clicked", self._on_dislike_menu_clicked)
+
+        dislike_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._dislike_icon = Gtk.Image.new_from_icon_name("heart-broken-symbolic")
+        self._dislike_label = Gtk.Label(label="Dislike")
+        dislike_content.append(self._dislike_icon)
+        dislike_content.append(self._dislike_label)
+
+        self._dislike_menu_btn.set_child(dislike_content)
+        box.append(self._dislike_menu_btn)
+        self._popover.set_child(box)
+
+        right_click = Gtk.GestureClick()
+        right_click.set_button(Gdk.BUTTON_SECONDARY)
+        right_click.connect("pressed", lambda g, n, x, y: self._show_menu())
+        self.add_controller(right_click)
+
+        long_press = Gtk.GestureLongPress()
+        long_press.set_touch_only(False)
+        long_press.connect("pressed", self._on_long_press)
+        self.add_controller(long_press)
+
+    def _on_popover_closed(self, _popover):
+        def _clear():
+            self._suppress_next_click = False
+            return GLib.SOURCE_REMOVE
+        GLib.idle_add(_clear)
+
+    def _on_long_press(self, gesture, x, y):
+        self._suppress_next_click = True
+        self._show_menu()
+
+    def _show_menu(self):
+        if not self.video_id:
+            return
+        if self.status == "DISLIKE":
+            self._dislike_label.set_label("Remove Dislike")
+        else:
+            self._dislike_label.set_label("Dislike")
+
+        rect = Gdk.Rectangle()
+        rect.x = 0
+        rect.y = 0
+        rect.width = self.get_width()
+        rect.height = self.get_height()
+        self._popover.set_pointing_to(rect)
+        self._popover.popup()
+
+    def _on_dislike_menu_clicked(self, _btn):
+        self._popover.popdown()
+        self._suppress_next_click = False
+        target_status = "INDIFFERENT" if self.status == "DISLIKE" else "DISLIKE"
+        self._apply_rating(target_status)
 
     def update_icon(self):
         if self.status == "LIKE":
-            self.set_icon_name("starred-symbolic")
-            self.add_css_class("liked-button")  # For potential CSS styling
-            self.set_tooltip_text("Unlike")
+            self.set_icon_name("heart-filled-symbolic")
+            self.add_css_class("liked-button")
+            self.remove_css_class("disliked-button")
+            self.set_tooltip_text("Unlike (Hold or right-click for Dislike)")
         elif self.status == "DISLIKE":
-            self.set_icon_name(
-                "view-restore-symbolic"
-            )  # Placeholder or specific icon if found
-            self.set_tooltip_text("Disliked")
-        else:
-            self.set_icon_name("non-starred-symbolic")
+            self.set_icon_name("heart-broken-symbolic")
+            self.add_css_class("disliked-button")
             self.remove_css_class("liked-button")
-            self.set_tooltip_text("Like")
+            self.set_tooltip_text("Disliked (Hold or right-click to remove)")
+        else:
+            self.set_icon_name("heart-outline-thick-symbolic")
+            self.remove_css_class("liked-button")
+            self.remove_css_class("disliked-button")
+            self.set_tooltip_text("Like (Hold or right-click for Dislike)")
 
-    def on_clicked(self, btn):
-        # Toggle: LIKE -> INDIFFERENT, others -> LIKE
+    def on_clicked(self, _btn):
+        if not self.video_id:
+            return
+
+        if self._suppress_next_click or self._popover.get_visible():
+            self._suppress_next_click = False
+            return
+
         new_status = "INDIFFERENT" if self.status == "LIKE" else "LIKE"
+        self._apply_rating(new_status)
 
-        # Optimistic update
+    def _apply_rating(self, new_status):
+        if not self.video_id:
+            return
+
         old_status = self.status
         self.status = new_status
         self.update_icon()
 
+        if hasattr(self.client, "set_known_like_status"):
+            self.client.set_known_like_status(self.video_id, new_status)
+
+        notify_like_changed(self.video_id, new_status)
+
+        player = getattr(self.client, "player", None) or getattr(self, "player", None)
+        if player and hasattr(player, "queue"):
+            for track in player.queue:
+                if track.get("videoId") == self.video_id:
+                    track["likeStatus"] = new_status
+
+        try:
+            from player.downloads import get_download_db
+            db = get_download_db()
+            db.invalidate_playlist_cache("LM")
+        except Exception:
+            pass
+
         def do_rate():
             success = self.client.rate_song(self.video_id, new_status)
             if not success:
-                # Revert on failure
-                GLib.idle_add(self.revert, old_status)
-            else:
-                # if disliked, invalidate Liked Music playlist cache
-                # this avoids the regression skip
-                # normal playlists have a similar functionality to invalidate cache when a track is removed
-                if new_status == "INDIFFERENT":
-                    from player.downloads import get_download_db
-                    get_download_db().invalidate_playlist_cache("LM")
+                if hasattr(self.client, "set_known_like_status"):
+                    self.client.set_known_like_status(self.video_id, old_status)
+                GLib.idle_add(notify_like_changed, self.video_id, old_status)
+                if player and hasattr(player, "queue"):
+                    for track in player.queue:
+                        if track.get("videoId") == self.video_id:
+                            track["likeStatus"] = old_status
 
-        thread = threading.Thread(target=do_rate)
-        thread.daemon = True
-        thread.start()
-
-    def revert(self, status):
-        self.status = status
-        self.update_icon()
+        threading.Thread(target=do_rate, daemon=True).start()
 
     def set_data(self, video_id, status):
         self.video_id = video_id
-        self.status = status
+        if not video_id:
+            self.status = "INDIFFERENT"
+            self.update_icon()
+            self.set_visible(False)
+            return
+
+        resolved = None
+        if hasattr(self.client, "get_known_like_status"):
+            resolved = self.client.get_known_like_status(video_id)
+
+        if resolved is not None:
+            self.status = resolved
+        else:
+            self.status = status or "INDIFFERENT"
+            if hasattr(self.client, "set_known_like_status"):
+                self.client.set_known_like_status(video_id, self.status)
+
+        player = getattr(self.client, "player", None) or getattr(self, "player", None)
+        if player and hasattr(player, "queue"):
+            for track in player.queue:
+                if track.get("videoId") == video_id:
+                    track["likeStatus"] = self.status
+                    break
+
         self.update_icon()
-        self.set_visible(bool(video_id))
+        self.set_visible(True)

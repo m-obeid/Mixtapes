@@ -38,6 +38,7 @@ class AllMoodsPage(Adw.Bin):
 
         self.list_box = Gtk.ListBox()
         self.list_box.add_css_class("boxed-list")
+        self.list_box.add_css_class("songs-list")
         self.list_box.set_selection_mode(Gtk.SelectionMode.NONE)
 
         for item in self.items:
@@ -51,6 +52,10 @@ class AllMoodsPage(Adw.Bin):
             
             lbl = Gtk.Label(label=item.get("title", ""))
             lbl.set_halign(Gtk.Align.START)
+            lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            lbl.set_lines(1)
+            lbl.set_width_chars(1)
+            lbl.set_xalign(0.0)
             lbl.set_hexpand(True)
             box.append(lbl)
             
