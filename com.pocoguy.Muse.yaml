@@ -67,15 +67,20 @@ modules:
         tar -xf bg.tar.xz
         install -Dm755 rustypipe-botguard ${FLATPAK_DEST}/bin/rustypipe-botguard
     sources:
-      # Vendored release binary, extracted into the build dir as
+      # Vendored release binaries, extracted into the build dir as
       # rustypipe-botguard-v0.1.2-<triple>.tar.xz so the build-command above
-      # uses it instead of hitting Codeberg. Add an aarch64 entry (with its
-      # own only-arches) if/when that tarball is vendored too.
+      # uses them instead of hitting Codeberg. One entry per arch we build:
+      # only-arches picks exactly one, so the other tarball is never staged.
       - type: file
         only-arches:
           - x86_64
         path: vendor/rustypipe-botguard/rustypipe-botguard-v0.1.2-x86_64-unknown-linux-gnu.tar.xz
         sha256: 4f2ec561e8f9fadece7deadc6ce0624fbdedd852222c3eb194c22153b1323129
+      - type: file
+        only-arches:
+          - aarch64
+        path: vendor/rustypipe-botguard/rustypipe-botguard-v0.1.2-aarch64-unknown-linux-gnu.tar.xz
+        sha256: 4d038857374a69aea9be8ded981d93a776dc88d4e254f5c6d292746099abf69a
 
   - name: python-dependencies
     buildsystem: simple
