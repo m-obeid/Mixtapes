@@ -535,7 +535,7 @@ impl DesktopCoverView {
         };
         let opts = crate::ui::context_menu::SongMenuOptions {
             prefix: "cv",
-            hide: &["play_next", "add_to_queue"].as_slice(),
+            hide: ["play_next", "add_to_queue"].as_slice(),
             nav: Some(self.ctx.nav.clone()),
             ctx: Some(self.ctx.clone()),
             ..Default::default()

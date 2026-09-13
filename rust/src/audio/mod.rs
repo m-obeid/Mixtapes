@@ -249,15 +249,18 @@ impl Engine {
         // Streaming thread: hand playbin the armed URI so the switch is gapless.
         {
             let shared = shared.clone();
-            let control = control.clone();
             playbin.connect("about-to-finish", false, move |values| {
                 let Ok(playbin) = values[0].get::<gst::Element>() else { return None };
                 let armed = shared.armed_next.lock().unwrap().take();
                 if let Some((uri, generation)) = armed {
+                    // The pipeline plays the tail of the current stream for about
+                    // a second after this fires. Reporting Loading here froze the
+                    // slider and stopped the visualizer for that whole stretch,
+                    // with audio still running. The switch reports itself through
+                    // StreamStart instead.
                     playbin.set_property("uri", &uri);
                     *shared.pending_gapless.lock().unwrap() = Some(generation);
                     tracing::debug!(generation, "gapless uri handed to playbin");
-                    let _ = control.send_blocking(AudioEvent::StateChanged { generation, status: PlaybackStatus::Loading });
                 }
                 None
             });
@@ -301,6 +304,7 @@ impl Engine {
     fn handle(&self, cmd: AudioCommand) -> glib::ControlFlow {
         match cmd {
             AudioCommand::Load { uri, generation, auth } => {
+                tracing::debug!(generation, "audio: load");
                 self.shared.generation.store(generation, Ordering::Release);
                 *self.shared.armed_next.lock().unwrap() = None;
                 *self.shared.pending_gapless.lock().unwrap() = None;
@@ -330,6 +334,7 @@ impl Engine {
                 let _ = self.playbin.set_state(gst::State::Paused);
             }
             AudioCommand::Stop => {
+                tracing::debug!(generation = self.generation(), "audio: stop");
                 *self.shared.armed_next.lock().unwrap() = None;
                 *self.shared.pending_gapless.lock().unwrap() = None;
                 self.loading.set(false);

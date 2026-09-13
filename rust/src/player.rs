@@ -69,6 +69,11 @@ pub struct Player {
     /// Spectrum frames keyed by stream time, what _viz_queue held: released
     /// once the sink has reached them, so the bars follow the audible sound.
     viz_queue: RefCell<std::collections::VecDeque<(i64, Vec<f32>)>>,
+    /// Load generation the queued frames belong to. A gapless switch restarts
+    /// stream time, so frames from the old stream would sit in the queue's
+    /// front with times the new play-head never reaches, and the drain would
+    /// hand back nothing until the length cap evicted them.
+    viz_generation: Cell<u64>,
     /// The last position tick and its arrival time, interpolated between ticks.
     position_mark: Cell<Option<(std::time::Instant, f64)>>,
     /// A radio extension is in flight, like _is_fetching_infinite.
@@ -90,6 +95,7 @@ impl Player {
             inflight: RefCell::new(None),
             retries: Cell::new(0),
             viz_queue: RefCell::new(std::collections::VecDeque::new()),
+            viz_generation: Cell::new(0),
             position_mark: Cell::new(None),
             infinite_fetching: Cell::new(false),
         })
@@ -127,6 +133,7 @@ impl Player {
         if queue.is_empty() {
             return None;
         }
+
         let Some((at, position)) = self.position_mark.get() else {
             return queue.back().map(|(_, b)| b.clone());
         };
@@ -617,6 +624,13 @@ impl Player {
         let generation = self.alloc_generation();
         self.current.set(generation);
         self.retries.set(0);
+        // Resolution can take seconds for an uncached stream, and the pipeline
+        // would keep playing the old track throughout. Tear it down now, as
+        // Player.set_queue and play_queue_index did. The Stopped event this
+        // raises carries the old generation, so the Loading state set below
+        // survives it. Gapless never comes through here: the pipeline swaps
+        // to the armed URI on its own and reports StreamStarted.
+        self.audio.send(AudioCommand::Stop);
 
         self.mark_current(Some(index));
         self.state.set_status(PlaybackStatus::Loading);
@@ -749,6 +763,7 @@ impl Player {
                             q.tracks.get(index).cloned()
                         };
                         self.mark_current(Some(index));
+                        self.clear_visualizer_queue();
                         self.state.set_position(0.0);
                         self.state.set_duration(
                             track
@@ -851,6 +866,9 @@ impl Player {
                     return;
                 }
                 let mut queue = self.viz_queue.borrow_mut();
+                if self.viz_generation.replace(generation) != generation {
+                    queue.clear();
+                }
                 queue.push_back((stream_time, bands));
                 // About three seconds at the element's 30 Hz tick.
                 while queue.len() > 90 {

@@ -2,7 +2,7 @@
 //!
 //! MIXTAPES_DEMO=1            stage a queue at startup (play stays a click away)
 //! MIXTAPES_DEMO_URI=a,b      URIs or paths to use; default: audio files under ~/Music
-//! MIXTAPES_DEMO_VIDEO=<id>   append a real YouTube id so yt-dlp resolution runs too
+//! MIXTAPES_DEMO_VIDEO=a,b    append real YouTube ids so yt-dlp resolution runs too
 //! MIXTAPES_DEMO_AUTOPLAY=1   press play three seconds after the window shows
 //! MIXTAPES_DEMO_SNAPSHOT=p   write p-1.png at 2.5 s and p-2.png at 11 s from inside GTK
 //! MIXTAPES_DEMO_QUEUE=1      open the queue sidebar after staging
@@ -17,6 +17,7 @@
 //! MIXTAPES_DEMO_PLAYLIST_PLAY=1  press Play on that page six seconds in
 //! MIXTAPES_DEMO_DISCOGRAPHY=id  open a discography grid for a browse id 1.5 s in
 //! MIXTAPES_DEMO_SEEK=secs    seek to that position seven seconds in
+//! MIXTAPES_DEMO_NEXT_AT=ms   skip to the next queue entry after that many ms
 //! MIXTAPES_DEMO_ARTIST=id    open an artist page 1.5 s in
 //! MIXTAPES_DEMO_ARTIST_RADIO=1  press the artist page's radio button six seconds in
 
@@ -63,11 +64,10 @@ pub fn from_env() -> Option<Demo> {
         uris.insert(id.clone(), uri);
         tracks.push(Track { video_id: VideoId(id), title, artist, ..Track::default() });
     }
-    if let Ok(video) = std::env::var("MIXTAPES_DEMO_VIDEO") {
-        let video = video.trim().to_owned();
-        if !video.is_empty() {
+    if let Ok(list) = std::env::var("MIXTAPES_DEMO_VIDEO") {
+        for video in list.split(',').map(str::trim).filter(|v| !v.is_empty()) {
             tracks.push(Track {
-                video_id: VideoId(video.clone()),
+                video_id: VideoId(video.to_owned()),
                 title: format!("YouTube {video}"),
                 artist: "resolved by yt-dlp".to_owned(),
                 thumb: Some(format!("https://i.ytimg.com/vi/{video}/hqdefault.jpg")),
@@ -143,6 +143,13 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
                 tracing::info!(pressed = mw.press_radio_on_visible_artist(), "demo: radio on artist page");
             }
+        });
+    }
+    if let Some(ms) = std::env::var("MIXTAPES_DEMO_NEXT_AT").ok().and_then(|v| v.parse::<u64>().ok()) {
+        let player = ctx.player.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            tracing::info!(status = ?player.state().status(), "demo: next");
+            player.next();
         });
     }
     if let Some(secs) = std::env::var("MIXTAPES_DEMO_SEEK").ok().and_then(|v| v.parse::<f64>().ok()) {
