@@ -570,7 +570,9 @@ impl Player {
         // Queued spectrum frames belong to the old position on either side of the seek.
         self.clear_visualizer_queue();
         self.audio.send(AudioCommand::Seek { seconds });
-        self.state.set_position(seconds.max(0.0));
+        let target = seconds.max(0.0);
+        self.state.set_position(target);
+        self.state.emit_seeked(target);
     }
 
     pub fn set_volume(&self, volume: f64) {

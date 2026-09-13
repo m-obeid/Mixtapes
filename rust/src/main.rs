@@ -14,6 +14,7 @@ mod bootstrap;
 mod demo;
 mod mock;
 mod model;
+mod mpris;
 mod net;
 mod paths;
 mod player;
@@ -28,6 +29,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
+use crate::mpris::Mpris;
 use crate::paths::Paths;
 use crate::player::Player;
 use crate::ui::window::MainWindow;
@@ -42,6 +44,8 @@ pub struct App {
     pub paths: Paths,
     pub demo: Option<demo::Demo>,
     pub window: RefCell<Option<Rc<MainWindow>>>,
+    /// System media controls. None when the bus name could not be taken.
+    pub mpris: RefCell<Option<Rc<Mpris>>>,
 }
 
 fn main() -> glib::ExitCode {
@@ -99,6 +103,7 @@ fn main() -> glib::ExitCode {
         paths,
         demo,
         window: RefCell::new(None),
+        mpris: RefCell::new(None),
     });
 
     let app = adw::Application::builder()
@@ -121,6 +126,9 @@ fn main() -> glib::ExitCode {
         app_ctx,
         move |_| {
             tracing::info!("shutting down");
+            if let Some(mpris) = app_ctx.mpris.borrow_mut().take() {
+                mpris.shutdown();
+            }
             app_ctx.player.shutdown();
         }
     ));
@@ -144,6 +152,7 @@ fn on_startup(ctx: &Rc<App>) {
 
     // Event pumps must attach to the running GTK main context.
     ctx.player.start();
+    ctx.mpris.replace(Some(Mpris::start(ctx)));
     tracing::info!(auth = ?ctx.net.client().auth_state(), "core started");
 }
 

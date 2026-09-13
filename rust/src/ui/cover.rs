@@ -11,6 +11,7 @@ use std::rc::Rc;
 
 use gtk::{gdk, glib};
 
+use crate::model::HttpAuth;
 use crate::net::NetHandle;
 use crate::ui::context::UiContext;
 use crate::ui::high_res_url;
@@ -262,6 +263,26 @@ impl CoverImage {
             }
         });
     }
+}
+
+/// Bytes of the first address in the fallback chain that answers. For
+/// consumers outside the texture cache, such as the MPRIS art file.
+pub async fn fetch_cover_bytes(http: &reqwest::Client, auth: Option<&HttpAuth>, url: &str) -> Option<Vec<u8>> {
+    for candidate in fallback_chain(url) {
+        let mut request = http.get(&candidate);
+        // Private covers on YouTube's hosts need the session cookie.
+        if let Some(auth) = auth.filter(|_| ["youtube.com", "ytimg.com", "googleusercontent.com", "ggpht.com"].iter().any(|d| candidate.contains(d))) {
+            request = request.header("Cookie", &auth.cookie).header("User-Agent", &auth.user_agent);
+        }
+        match request.send().await.and_then(|r| r.error_for_status()) {
+            Ok(response) => match response.bytes().await {
+                Ok(bytes) if !bytes.is_empty() => return Some(bytes.to_vec()),
+                _ => continue,
+            },
+            Err(_) => continue,
+        }
+    }
+    None
 }
 
 /// Addresses to try in order: the upscaled form, the original, then each lower ytimg quality.

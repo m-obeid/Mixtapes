@@ -92,6 +92,8 @@ mod imp {
                     Signal::builder("queue-changed").build(),
                     // Short message for a toast (rating failed, and similar).
                     Signal::builder("notice").param_types([String::static_type()]).build(),
+                    // The position jumped somewhere clients cannot predict.
+                    Signal::builder("seeked").param_types([f64::static_type()]).build(),
                 ]
             })
         }
@@ -133,5 +135,17 @@ impl PlayerState {
 
     pub fn emit_notice(&self, message: &str) {
         self.emit_by_name::<()>("notice", &[&message]);
+    }
+
+    /// Announce a seek, which MPRIS reports separately from position ticks.
+    pub fn emit_seeked(&self, position: f64) {
+        self.emit_by_name::<()>("seeked", &[&position]);
+    }
+
+    pub fn connect_seeked(&self, f: impl Fn(f64) + 'static) -> glib::SignalHandlerId {
+        self.connect_local("seeked", false, move |values| {
+            f(values.get(1).and_then(|v| v.get::<f64>().ok()).unwrap_or(0.0));
+            None
+        })
     }
 }

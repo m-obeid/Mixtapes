@@ -163,6 +163,42 @@ Seeks are `FLUSH | ACCURATE` with a key-unit fallback, as in `Player.seek`; a ke
 
 Radio is `Player::start_radio` for songs, playlists and artists, replacing the queue with the watch panel's fifty tracks as an infinite queue sourced from the radio id. `maybe_extend_infinite` runs after every advance and fetches more from the queue's tail when fewer than fifteen rows remain or the play-head is past halfway, retrying from the playing track when the batch was all duplicates; `force_radio_extend` is the last resort when the queue runs dry and accepts repeats over silence, as the Python player did.
 
+## System media controls
+
+`mpris.rs` is player/mpris.py, which handed mprisify an adapter onto the
+player. The split matches the audio thread: `Server` runs on the tokio
+runtime, so its implementation is `Send` and never touches the player. It
+answers from a snapshot the GTK thread writes under a mutex, and posts
+commands back over an async-channel the GTK thread drains, applying them
+through the controller so seeks and volume reach GStreamer the usual way.
+
+Every `PlayerState` notification mirrors into the snapshot. Changes are held
+until the next idle and deduplicated by kind, so a track change sends one
+`PropertiesChanged` carrying Metadata with CanGoNext and CanGoPrevious rather
+than four signals. Position is excluded from that, as the spec requires: the
+snapshot stores its last sample with an `Instant`, so a poll between the
+100 ms ticks reads a live value, and `PlayerState` gained a `seeked` signal
+that `Player::seek` emits and the bridge forwards as `Seeked`.
+
+Cover art is a local file, not the address the track carries: shells load
+`file://` reliably and the carried address is often a dead ytimg quality.
+When the track changes, the art is fetched through the same fallback chain the
+covers use, centre-cropped to a square, upscaled past 512 px and written to
+`<cache>/mpris/mpris_art_<id>.jpg`, one file at a time. The metadata keeps the
+remote address until the file lands, and the file is held separately from it
+so a later metadata refresh cannot put the address back.
+
+Details that follow the Python adapter: Loading reports as Playing so the
+shell does not blink between tracks, the track id is the sanitized video id
+under `/com/pocoguy/Muse/track`, CanGoPrevious is answered live because
+Previous restarts the track past three seconds, and an idle player gets its
+own path rather than `NO_TRACK`, which is reserved for track lists. Play on a
+stopped player loads the staged track, which the shell expects and the
+controller's plain `play()` does not do. The bus name is released and the
+server dropped from the application's shutdown handler, which is also what
+closing the last window reaches when background play is off; with it on, the
+window hides, the app stays up and the shell keeps its controls.
+
 ## Not ported yet, and where it attaches
 
 - Upload tracks and non-seekable streams staged in tmpfs: a second `StreamResolver` impl that downloads to `/dev/shm` and returns a `file://` URI.
@@ -170,6 +206,5 @@ Radio is `Player::start_radio` for songs, playlists and artists, replacing the q
 - Home and Explore feed data: swap the remaining `mock::*` calls for browse endpoint parsers; search and the library are live already.
 - Audio-version swap (OMV to ATV): inside `spawn_resolve` before resolution, on `playlists::find_audio_version`.
 - History recording, scrobbling, Discord: subscribers to `PlayerState` property notifications, each an `Rc` on the GTK thread that spawns its own network work.
-- MPRIS: `mpris-server` with the tokio feature, fed from `PlayerState` notifications and calling `Player` methods. Dependency is already declared.
 - Downloads: a `DownloadManager` on tokio with its own progress `watch` channel.
 - GResource and style.css: `build.rs` with `glib-build-tools`, when the first real widget lands.
