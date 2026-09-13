@@ -1,0 +1,64 @@
+[package]
+name = "mixtapes"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+description = "A modern, Linux-first YouTube Music player"
+default-run = "mixtapes"
+
+[[bin]]
+name = "mixtapes"
+path = "src/main.rs"
+
+[dependencies]
+# GNOME stack. gtk4 0.11, libadwaita 0.9 and gstreamer 0.25 all build on glib 0.22.
+# One glib major across the tree is what lets gst and gtk types cross freely.
+# Version floors: GTK 4.18, libadwaita 1.7, GStreamer 1.24 (GNOME 48 runtime).
+gtk = { package = "gtk4", version = "0.11", features = ["v4_18"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_7"] }
+glib = "0.22"
+gio = "0.22"
+gst = { package = "gstreamer", version = "0.25", features = ["v1_24"] }
+gst-audio = { package = "gstreamer-audio", version = "0.25", features = ["v1_24"] }
+# Embedded sign-in page, like ui/login_webview.py. WebKitGTK 6.0 (GNOME 48 runtime ships 2.48).
+webkit6 = { version = "0.6", features = ["v2_44"] }
+
+# Async runtime for the network layer. GTK keeps its own loop; tokio never touches widgets.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "io-util", "net"] }
+# InnerTube transport. rustls keeps the Flatpak build free of OpenSSL headers.
+# Do not add "brotli" or set Accept-Encoding by hand: reqwest negotiates gzip itself.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json", "gzip", "charset", "system-proxy"] }
+# Cross-thread event channels. force_send on a bounded channel gives newest-wins telemetry.
+async-channel = "2"
+# InnerTube auth and transport (browser cookies, SAPISIDHASH, send_request), playlists, ratings.
+# Search is not in the crate; net/search.rs builds it on send_request.
+ytmusicapi = "0.5"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# SAPISIDHASH authorization header.
+sha1 = "0.10"
+# VISITOR_DATA extraction from the music.youtube.com landing page.
+regex = "1"
+
+# mallopt and setrlimit at process start. See bootstrap.rs.
+libc = "0.2"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+anyhow = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# MPRIS D-Bus interface. Wired in when player/mpris.py is ported.
+mpris-server = { version = "0.10", features = ["tokio"] }
+
+[profile.dev.package."*"]
+# Optimized dependencies keep debug builds of gtk and gst usable.
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
