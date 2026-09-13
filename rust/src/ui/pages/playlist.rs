@@ -24,19 +24,13 @@ use crate::state::track_object::TrackObject;
 use crate::ui::context::{NavRequest, UiContext};
 use crate::ui::context_menu::{MenuAction, Section, SongMenuOptions, show_song_menu};
 use crate::ui::cover::CoverImage;
+use crate::ui::pages::track_list::{needs_metric, TrackList, SORT_ADDED, SORT_DEFAULT, SORT_VIEWS};
 use crate::ui::widgets::add_to_playlist::{AddToPlaylistPopover, mark_playlist_used};
 use crate::ui::widgets::track_row::{TrackRow, TrackRowHost};
 use crate::ui::{copy_to_clipboard, toast};
 
 // Sort dropdown positions. The first five come straight off the track data;
 // the last two need a side fetch, so they are appended rather than slotted in.
-const SORT_DEFAULT: u32 = 0;
-const SORT_TITLE: u32 = 1;
-const SORT_ARTIST: u32 = 2;
-const SORT_ALBUM: u32 = 3;
-const SORT_DURATION: u32 = 4;
-const SORT_VIEWS: u32 = 5;
-const SORT_ADDED: u32 = 6;
 const SORT_LABELS: [&str; 7] = ["Default", "Title (A-Z)", "Artist (A-Z)", "Album (A-Z)", "Duration", "Most viewed", "Recently added"];
 
 /// Delay the live refresh when something is on screen already, so the
@@ -114,22 +108,18 @@ pub struct PlaylistPage {
     privacy_text: RefCell<Option<String>>,
     full_description: RefCell<String>,
     description_expanded: Cell<bool>,
-    current_tracks: RefCell<Vec<Track>>,
-    original_tracks: RefCell<Vec<Track>>,
+    /// The rows: order, search, selection and sort metrics in one place.
+    tracks: RefCell<TrackList>,
     current_limit: Cell<usize>,
     is_loading_more: Cell<bool>,
     is_fully_loaded: Cell<bool>,
     is_fully_fetched: Cell<bool>,
     is_background_fetching: Cell<bool>,
     pending_queue_append: Cell<bool>,
-    current_filter_text: RefCell<String>,
     pending_filter_text: RefCell<String>,
     filter_debounce: RefCell<Option<glib::SourceId>>,
     populate_token: Cell<u64>,
     multi_select: Cell<bool>,
-    selected: RefCell<HashSet<String>>,
-    sort_descending: Cell<bool>,
-    sort_metrics: RefCell<HashMap<(String, u32), SortMetric>>,
     is_owned: Cell<bool>,
     is_editable: Cell<bool>,
     is_saved_to_library: Cell<bool>,
@@ -313,22 +303,17 @@ impl PlaylistPage {
             privacy_text: RefCell::new(None),
             full_description: RefCell::new(String::new()),
             description_expanded: Cell::new(false),
-            current_tracks: RefCell::new(Vec::new()),
-            original_tracks: RefCell::new(Vec::new()),
+            tracks: RefCell::new(TrackList::default()),
             current_limit: Cell::new(INITIAL_LIMIT),
             is_loading_more: Cell::new(false),
             is_fully_loaded: Cell::new(false),
             is_fully_fetched: Cell::new(false),
             is_background_fetching: Cell::new(false),
             pending_queue_append: Cell::new(false),
-            current_filter_text: RefCell::new(String::new()),
             pending_filter_text: RefCell::new(String::new()),
             filter_debounce: RefCell::new(None),
             populate_token: Cell::new(0),
             multi_select: Cell::new(false),
-            selected: RefCell::new(HashSet::new()),
-            sort_descending: Cell::new(false),
-            sort_metrics: RefCell::new(HashMap::new()),
             is_owned: Cell::new(false),
             is_editable: Cell::new(false),
             is_saved_to_library: Cell::new(false),
@@ -350,11 +335,12 @@ impl PlaylistPage {
             let weak = Rc::downgrade(&page);
             page.track_filter.set_filter_func(move |obj| {
                 let Some(p) = weak.upgrade() else { return true };
-                let text = p.current_filter_text.borrow();
+                let list = p.tracks.borrow();
+                let text = list.filter();
                 if text.is_empty() {
                     return true;
                 }
-                obj.downcast_ref::<TrackObject>().is_some_and(|t| t.with_track(|track| track.title.to_lowercase().contains(text.as_str()) || track.artist.to_lowercase().contains(text.as_str())))
+                obj.downcast_ref::<TrackObject>().is_some_and(|t| t.with_track(|track| track.title.to_lowercase().contains(text) || track.artist.to_lowercase().contains(text)))
             });
         }
         page.wire_factory(&factory);
@@ -411,6 +397,17 @@ impl PlaylistPage {
     }
 
     /// Demo hook: what the Play button does.
+    /// Demo hook: type into the search box and pick a sort order.
+    pub fn sift_for_demo(self: &Rc<Self>, filter: Option<&str>, sort: Option<u32>) {
+        if let Some(sort) = sort {
+            self.sort_dropdown.set_selected(sort);
+            self.on_sort_changed(sort);
+        }
+        if let Some(text) = filter {
+            self.filter_content(text);
+        }
+    }
+
     pub fn press_play(self: &Rc<Self>) {
         self.on_play_clicked();
     }
@@ -508,7 +505,11 @@ impl PlaylistPage {
         let weak = Rc::downgrade(self);
         self.sort_dir_btn.connect_clicked(move |_| {
             if let Some(p) = weak.upgrade() {
-                p.sort_descending.set(!p.sort_descending.get());
+                {
+                    let mut list = p.tracks.borrow_mut();
+                    let flipped = !list.descending();
+                    list.set_order(p.sort_dropdown.selected(), flipped);
+                }
                 p.refresh_sort_dir_icon();
                 p.reorder_playlist(p.sort_dropdown.selected());
             }
@@ -639,7 +640,7 @@ impl PlaylistPage {
             self.title_text.replace(String::new());
             self.current_limit.set(INITIAL_LIMIT);
             self.emit_title("");
-            self.current_tracks.borrow_mut().clear();
+            self.tracks.borrow_mut().clear();
             self.is_previewing_cover.set(false);
             self.clear_track_store();
         }
@@ -838,8 +839,7 @@ impl PlaylistPage {
     /// Render rows from the in-memory cache while the live fetch runs, what
     /// _apply_disk_cache_tracks did with the disk cache.
     fn apply_cached_tracks(self: &Rc<Self>, cached: Vec<Track>) {
-        self.original_tracks.replace(cached.clone());
-        self.current_tracks.replace(cached.clone());
+        self.tracks.borrow_mut().set(cached.clone());
         self.empty_label.set_visible(cached.is_empty());
         self.is_fully_fetched.set(false);
         self.populate_tracks_chunked(cached);
@@ -881,8 +881,7 @@ impl PlaylistPage {
                     let title = if !cached.title.is_empty() { cached.title.clone() } else { initial.as_ref().map(|i| i.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| "Playlist".to_owned()) };
                     let tracks = cached.tracks;
                     page.title_text.replace(title.clone());
-                    page.original_tracks.replace(tracks.clone());
-                    page.current_tracks.replace(tracks.clone());
+                    page.tracks.borrow_mut().set(tracks.clone());
                     page.is_fully_loaded.set(true);
                     page.is_fully_fetched.set(true);
                     let total: u32 = tracks.iter().filter_map(|t| t.duration_seconds).sum();
@@ -962,7 +961,7 @@ impl PlaylistPage {
                 Ok(Ok(fetched)) => page.apply_fetch(&id, fetched, incremental),
                 Ok(Err(err)) => {
                     tracing::warn!(%err, id, "playlist fetch failed");
-                    if !incremental && page.current_tracks.borrow().is_empty() {
+                    if !incremental && page.tracks.borrow().rendered().is_empty() {
                         page.update_ui(HeaderText { title: "Error Loading Playlist".into(), description: err.to_string(), meta1: "Playlist • Error".into(), meta2: "0 songs".into() }, Vec::new(), Vec::new(), false, Some(0), false);
                     }
                     page.is_loading_more.set(false);
@@ -979,8 +978,7 @@ impl PlaylistPage {
         let mut details = match fetched {
             Fetched::Raw { title, tracks } => {
                 let title = title.or_else(|| Some(self.title_text.borrow().clone()).filter(|t| !t.is_empty())).unwrap_or_else(|| "Chart Playlist".to_owned());
-                self.original_tracks.replace(tracks.clone());
-                self.current_tracks.replace(tracks.clone());
+                self.tracks.borrow_mut().set(tracks.clone());
                 self.is_fully_fetched.set(true);
                 self.is_fully_loaded.set(true);
                 let total: u32 = tracks.iter().filter_map(|t| t.duration_seconds).sum();
@@ -1086,7 +1084,7 @@ impl PlaylistPage {
         self.name_label.set_label(&text.title);
 
         // A partial live fetch must not regress a richer view already rendered.
-        let existing_count = self.original_tracks.borrow().len();
+        let existing_count = self.tracks.borrow().fetched().len();
         let keep_richer = !append && existing_count > tracks.len();
 
         self.set_description(&text.description);
@@ -1121,7 +1119,7 @@ impl PlaylistPage {
         }
 
         if append {
-            let start = self.current_tracks.borrow().len();
+            let start = self.tracks.borrow().rendered().len();
             let new_tracks: Vec<Track> = tracks.get(start..).map(|s| s.to_vec()).unwrap_or_default();
             if new_tracks.is_empty() {
                 tracing::info!("no new tracks, playlist fully loaded");
@@ -1130,8 +1128,7 @@ impl PlaylistPage {
                 self.is_loading_more.set(false);
                 return;
             }
-            self.current_tracks.borrow_mut().extend(new_tracks.iter().cloned());
-            self.original_tracks.borrow_mut().extend(new_tracks.iter().cloned());
+            self.tracks.borrow_mut().extend(new_tracks.clone());
             if self.sort_dropdown.selected() != SORT_DEFAULT {
                 self.reorder_playlist(self.sort_dropdown.selected());
             } else {
@@ -1151,18 +1148,19 @@ impl PlaylistPage {
                 self.ctx.net.caches().set_cached_tracks(&pid, tracks.clone());
             }
             if !keep_richer {
-                self.current_tracks.replace(tracks.clone());
-                if self.original_tracks.borrow().is_empty() {
-                    self.original_tracks.replace(tracks.clone());
+                let mut list = self.tracks.borrow_mut();
+                list.set_rendered(tracks.clone());
+                if list.fetched().is_empty() {
+                    list.set_fetched(tracks.clone());
                 }
+                drop(list);
                 self.sort_dropdown.set_selected(SORT_DEFAULT);
                 self.populate_tracks_chunked(tracks);
             } else {
                 tracing::info!(existing_count, fetched = tracks.len(), "keeping cached render over partial fetch");
             }
         }
-        let cur = self.current_tracks.borrow().len();
-        if cur > 0 && cur == self.original_tracks.borrow().len() {
+        if self.tracks.borrow().fully_rendered() {
             self.is_fully_fetched.set(true);
         }
     }
@@ -1255,13 +1253,10 @@ impl PlaylistPage {
     /// hit the network only for infinite lists.
     fn load_more(self: &Rc<Self>) {
         if self.is_fully_fetched.get() {
-            let (cur_len, orig_len) = (self.current_tracks.borrow().len(), self.original_tracks.borrow().len());
-            if cur_len < orig_len {
+            let new_tracks = self.tracks.borrow_mut().render_chunk(50);
+            if !new_tracks.is_empty() {
                 self.is_loading_more.set(true);
                 self.load_more_spinner.set_visible(true);
-                let end = (cur_len + 50).min(orig_len);
-                let new_tracks: Vec<Track> = self.original_tracks.borrow()[cur_len..end].to_vec();
-                self.current_tracks.borrow_mut().extend(new_tracks.iter().cloned());
                 if self.sort_dropdown.selected() != SORT_DEFAULT {
                     self.reorder_playlist(self.sort_dropdown.selected());
                 } else {
@@ -1279,7 +1274,7 @@ impl PlaylistPage {
         }
         self.is_loading_more.set(true);
         self.load_more_spinner.set_visible(true);
-        let limit = self.current_tracks.borrow().len() + 50;
+        let limit = self.tracks.borrow().rendered().len() + 50;
         self.current_limit.set(limit);
         tracing::info!(limit, "loading more");
         if let Some(id) = self.playlist_id() {
@@ -1333,20 +1328,20 @@ impl PlaylistPage {
 
     fn on_background_fetch_complete(self: &Rc<Self>, tracks: Option<Vec<Track>>) {
         if let Some(tracks) = &tracks {
-            self.original_tracks.replace(tracks.clone());
+            self.tracks.borrow_mut().set_fetched(tracks.clone());
         }
         self.is_fully_fetched.set(true);
         self.is_background_fetching.set(false);
         let sort_type = self.sort_dropdown.selected();
-        if sort_type != SORT_DEFAULT || self.sort_descending.get() {
+        if sort_type != SORT_DEFAULT || self.tracks.borrow().descending() {
             self.reorder_playlist(sort_type);
         } else if let Some(tracks) = &tracks {
             // The live list may differ from the rendered one: refresh without a manual reload.
             let new_ids: Vec<&str> = tracks.iter().map(|t| t.video_id.as_str()).collect();
-            let cur_ids: Vec<String> = self.current_tracks.borrow().iter().map(|t| t.video_id.0.clone()).collect();
-            if !new_ids.is_empty() && new_ids != cur_ids.iter().map(String::as_str).collect::<Vec<_>>() && self.current_filter_text.borrow().is_empty() {
+            let cur_ids: Vec<String> = self.tracks.borrow().rendered().iter().map(|t| t.video_id.0.clone()).collect();
+            if !new_ids.is_empty() && new_ids != cur_ids.iter().map(String::as_str).collect::<Vec<_>>() && !self.tracks.borrow().filtering() {
                 tracing::info!(cached = cur_ids.len(), live = new_ids.len(), "external edits detected, refreshing");
-                self.current_tracks.replace(tracks.clone());
+                self.tracks.borrow_mut().set_rendered(tracks.clone());
                 self.populate_tracks_chunked(tracks.clone());
             }
         }
@@ -1356,10 +1351,10 @@ impl PlaylistPage {
         if let Some(pid) = self.playlist_id() {
             if self.ctx.player.queue_source_id().as_deref() == Some(pid.as_str()) {
                 let queue_len = self.ctx.player.queue_tracks().len();
-                let originals = self.original_tracks.borrow();
-                if queue_len > 0 && queue_len < originals.len() {
-                    tracing::info!(queue_len, total = originals.len(), "extending player queue after background fetch");
-                    self.ctx.player.extend_queue(originals[queue_len..].to_vec());
+                let fetched = self.tracks.borrow().fetched().to_vec();
+                if queue_len > 0 && queue_len < fetched.len() {
+                    tracing::info!(queue_len, total = fetched.len(), "extending player queue after background fetch");
+                    self.ctx.player.extend_queue(fetched[queue_len..].to_vec());
                 }
             }
         }
@@ -1368,8 +1363,8 @@ impl PlaylistPage {
     }
 
     fn update_duration_from_all_tracks(&self) {
-        let originals = self.original_tracks.borrow();
-        let tracks: &Vec<Track> = if originals.is_empty() { &self.current_tracks.borrow() } else { &originals };
+        let list = self.tracks.borrow();
+        let tracks = list.source();
         let total: u32 = tracks.iter().filter_map(|t| t.duration_seconds).sum();
         let count = tracks.len();
         let mut parts = vec![format!("{count} {}", if count == 1 { "song" } else { "songs" })];
@@ -1401,21 +1396,12 @@ impl PlaylistPage {
 
     fn filter_content_apply(self: &Rc<Self>) {
         let text = self.pending_filter_text.borrow().clone();
-        self.current_filter_text.replace(text.clone());
-        if !self.original_tracks.borrow().is_empty() {
+        self.tracks.borrow_mut().set_filter(text.clone());
+        if !self.tracks.borrow().fetched().is_empty() {
             self.filter_model.set_filter(None::<&gtk::CustomFilter>);
-            if !text.is_empty() {
-                let matches: Vec<Track> = self.original_tracks.borrow().iter().filter(|t| {
-                    let (title, artist, album) = playlists::track_search_text(t);
-                    title.contains(&text) || artist.contains(&text) || album.contains(&text)
-                }).cloned().collect();
-                let matches = self.sort_tracks(matches, None);
-                let objects: Vec<TrackObject> = matches.into_iter().map(TrackObject::new).collect();
-                self.track_store.splice(0, self.track_store.n_items(), &objects);
-            } else {
-                let objects: Vec<TrackObject> = self.current_tracks.borrow().iter().cloned().map(TrackObject::new).collect();
-                self.track_store.splice(0, self.track_store.n_items(), &objects);
-            }
+            let rows = self.tracks.borrow().visible();
+            let objects: Vec<TrackObject> = rows.into_iter().map(TrackObject::new).collect();
+            self.track_store.splice(0, self.track_store.n_items(), &objects);
             // Keep the filter attached only while a search is active.
             if !text.is_empty() {
                 self.filter_model.set_filter(Some(&self.track_filter));
@@ -1487,10 +1473,11 @@ impl PlaylistPage {
 
     /// Port of _best_queue: the full list only under the forward default sort.
     fn best_queue(&self) -> Vec<Track> {
-        if self.is_fully_fetched.get() && !self.original_tracks.borrow().is_empty() && self.sort_dropdown.selected() == SORT_DEFAULT && !self.sort_descending.get() {
-            return self.original_tracks.borrow().clone();
+        let list = self.tracks.borrow();
+        if self.is_fully_fetched.get() && !list.fetched().is_empty() && list.sort_type() == SORT_DEFAULT && !list.descending() {
+            return list.fetched().to_vec();
         }
-        self.current_tracks.borrow().clone()
+        list.rendered().to_vec()
     }
 
     /// Offline the queue keeps downloaded songs only. None are known, so it empties.
@@ -1499,7 +1486,7 @@ impl PlaylistPage {
     }
 
     fn on_play_clicked(self: &Rc<Self>) {
-        if self.current_tracks.borrow().is_empty() {
+        if self.tracks.borrow().rendered().is_empty() {
             return;
         }
         let queue = self.offline_filter_queue(self.best_queue());
@@ -1514,7 +1501,7 @@ impl PlaylistPage {
     }
 
     fn on_shuffle_clicked(self: &Rc<Self>) {
-        if self.current_tracks.borrow().is_empty() {
+        if self.tracks.borrow().rendered().is_empty() {
             return;
         }
         let queue = self.offline_filter_queue(self.best_queue());
@@ -1565,9 +1552,7 @@ impl PlaylistPage {
     }
 
     fn all_tracks(&self) -> Vec<Track> {
-        let originals = self.original_tracks.borrow();
-        let source: &Vec<Track> = if originals.is_empty() { &self.current_tracks.borrow() } else { &originals };
-        source.iter().filter(|t| !t.video_id.0.is_empty()).cloned().collect()
+        self.tracks.borrow().source().iter().filter(|t| !t.video_id.0.is_empty()).cloned().collect()
     }
 
     fn on_play_all_next(&self) {
@@ -1607,7 +1592,7 @@ impl PlaylistPage {
     }
 
     fn do_add_all_to_playlist(self: &Rc<Self>, playlist_id: &str) {
-        let video_ids: Vec<String> = self.current_tracks.borrow().iter().map(|t| t.video_id.0.clone()).filter(|v| !v.is_empty()).collect();
+        let video_ids: Vec<String> = self.tracks.borrow().rendered().iter().map(|t| t.video_id.0.clone()).filter(|v| !v.is_empty()).collect();
         if playlist_id.is_empty() || video_ids.is_empty() {
             return;
         }
@@ -1713,7 +1698,7 @@ impl PlaylistPage {
 
     fn on_select_toggled(self: &Rc<Self>, active: bool) {
         self.multi_select.set(active);
-        self.selected.borrow_mut().clear();
+        self.tracks.borrow_mut().clear_selection();
         if active {
             self.selection_bar.set_visible(true);
             self.sel_remove_btn.set_visible(self.is_owned.get());
@@ -1729,14 +1714,10 @@ impl PlaylistPage {
             return;
         }
         let selected = {
-            let mut set = self.selected.borrow_mut();
-            if set.contains(video_id) {
-                set.remove(video_id);
-                false
-            } else {
-                set.insert(video_id.to_owned());
-                true
-            }
+            let mut list = self.tracks.borrow_mut();
+            let on = !list.is_selected(video_id);
+            list.select(video_id, on);
+            on
         };
         self.update_selection_count();
         if let Some(row) = row {
@@ -1765,49 +1746,38 @@ impl PlaylistPage {
             if row.track().is_none() {
                 continue;
             }
-            let selected = row.video_id().is_some_and(|v| self.selected.borrow().contains(&v));
+            let selected = row.video_id().is_some_and(|v| self.tracks.borrow().is_selected(&v));
             row.refresh_visuals(multi, selected);
         }
     }
 
     /// Port of _get_visible_tracks: the filtered rows under a search, else everything known.
     fn visible_tracks(&self) -> Vec<Track> {
-        if !self.current_filter_text.borrow().is_empty() {
-            return (0..self.track_store.n_items()).filter_map(|i| self.track_store.item(i).and_downcast::<TrackObject>().map(|t| t.track())).collect();
-        }
-        let originals = self.original_tracks.borrow();
-        if !originals.is_empty() { originals.clone() } else { self.current_tracks.borrow().clone() }
+        let list = self.tracks.borrow();
+        if list.filtering() { list.matches() } else { list.source().to_vec() }
     }
 
     fn select_all(self: &Rc<Self>) {
-        for t in self.visible_tracks() {
-            if !t.video_id.0.is_empty() {
-                self.selected.borrow_mut().insert(t.video_id.0);
-            }
-        }
+        self.tracks.borrow_mut().select_visible();
         self.update_selection_count();
         self.refresh_all_row_visuals();
     }
 
     fn deselect_all(self: &Rc<Self>) {
-        self.selected.borrow_mut().clear();
+        self.tracks.borrow_mut().clear_selection();
         self.update_selection_count();
         self.refresh_all_row_visuals();
     }
 
     fn update_selection_count(&self) {
-        let count = self.selected.borrow().len();
+        let count = self.tracks.borrow().selected_count();
         let total = self.visible_tracks().len();
         self.selection_count_label.set_label(&format!("{count} of {total} selected"));
     }
 
     /// Selected tracks in the current sort order.
     fn selected_tracks(&self) -> Vec<Track> {
-        let selected = self.selected.borrow();
-        let originals = self.original_tracks.borrow();
-        let source: &Vec<Track> = if originals.is_empty() { &self.current_tracks.borrow() } else { &originals };
-        let picked: Vec<Track> = source.iter().filter(|t| selected.contains(&t.video_id.0)).cloned().collect();
-        self.sort_tracks(picked, None)
+        self.tracks.borrow().selected_tracks()
     }
 
     fn do_sel_add_to_playlist(self: &Rc<Self>, target: &str) {
@@ -1860,13 +1830,13 @@ impl PlaylistPage {
 
     fn copy_selection_debug(&self) {
         let tracks = self.selected_tracks();
-        let mut ids: Vec<String> = self.selected.borrow().iter().cloned().collect();
+        let mut ids: Vec<String> = self.tracks.borrow().selected_ids();
         ids.sort();
         let debug = serde_json::json!({
             "selected_count": tracks.len(),
             "selected_video_ids": ids,
-            "current_tracks_count": self.current_tracks.borrow().len(),
-            "original_tracks_count": self.original_tracks.borrow().len(),
+            "current_tracks_count": self.tracks.borrow().rendered().len(),
+            "original_tracks_count": self.tracks.borrow().fetched().len(),
             "tracks": tracks.iter().map(|t| serde_json::json!({
                 "videoId": t.video_id.0, "title": t.title, "artists": t.artists.iter().map(|a| a.name.clone()).collect::<Vec<_>>(), "setVideoId": t.set_video_id, "duration_seconds": t.duration_seconds,
             })).collect::<Vec<_>>(),
@@ -1880,7 +1850,7 @@ impl PlaylistPage {
     /// Point the arrow at the order on screen. Most viewed and recently added
     /// run biggest first untoggled, so their icon is the flip of the toggle.
     fn refresh_sort_dir_icon(&self) {
-        let mut descending = self.sort_descending.get();
+        let mut descending = self.tracks.borrow().descending();
         if matches!(self.sort_dropdown.selected(), SORT_VIEWS | SORT_ADDED) {
             descending = !descending;
         }
@@ -1889,27 +1859,15 @@ impl PlaylistPage {
 
     fn on_sort_changed(self: &Rc<Self>, sort_type: u32) {
         self.refresh_sort_dir_icon();
-        if matches!(sort_type, SORT_VIEWS | SORT_ADDED) && !self.has_sort_metric(sort_type) {
+        if needs_metric(sort_type) && !self.tracks.borrow().has_metric(sort_type) {
             self.fetch_sort_metric(sort_type);
             return;
         }
         self.reorder_playlist(sort_type);
     }
 
-    fn sort_metric(&self, sort_type: u32) -> SortMetric {
-        let pid = self.playlist_id().unwrap_or_default();
-        self.sort_metrics.borrow().get(&(pid, sort_type)).cloned().unwrap_or_default()
-    }
-
-    fn has_sort_metric(&self, sort_type: u32) -> bool {
-        let pid = self.playlist_id().unwrap_or_default();
-        self.sort_metrics.borrow().contains_key(&(pid, sort_type))
-    }
-
     fn drop_sort_metrics(&self, playlist_id: &str) {
-        let mut metrics = self.sort_metrics.borrow_mut();
-        metrics.remove(&(playlist_id.to_owned(), SORT_VIEWS));
-        metrics.remove(&(playlist_id.to_owned(), SORT_ADDED));
+        self.tracks.borrow_mut().drop_metrics();
         let browse_id = if playlist_id.starts_with("VL") { playlist_id.to_owned() } else { format!("VL{playlist_id}") };
         self.ctx.net.caches().drop_sort_metrics(&browse_id);
     }
@@ -1958,16 +1916,15 @@ impl PlaylistPage {
                 page.sort_metric_unavailable(sort_type, false);
                 return;
             }
-            page.sort_metrics.borrow_mut().insert((pid, sort_type), metric.clone());
+            page.tracks.borrow_mut().set_metric(sort_type, metric.clone());
             page.reorder_playlist(sort_type);
             page.warn_partial_sort_metric(sort_type, &metric);
         });
     }
 
     fn warn_partial_sort_metric(&self, sort_type: u32, metric: &SortMetric) {
-        let originals = self.original_tracks.borrow();
-        let tracks: &Vec<Track> = if originals.is_empty() { &self.current_tracks.borrow() } else { &originals };
-        let ids: HashSet<&str> = tracks.iter().map(|t| t.video_id.as_str()).filter(|v| !v.is_empty()).collect();
+        let list = self.tracks.borrow();
+        let ids: HashSet<&str> = list.source().iter().map(|t| t.video_id.as_str()).filter(|v| !v.is_empty()).collect();
         let total = ids.len();
         let ranked = ids.iter().filter(|v| metric.contains_key(**v)).count();
         if total == 0 || ranked as f64 >= total as f64 * 0.9 {
@@ -1987,52 +1944,19 @@ impl PlaylistPage {
         }
     }
 
-    /// Port of _sort_tracks under the dropdown and direction. Ranked rows come
-    /// first for metric sorts; unranked rows keep their order at the bottom.
-    fn sort_tracks(&self, tracks: Vec<Track>, sort_type: Option<u32>) -> Vec<Track> {
-        let sort_type = sort_type.unwrap_or_else(|| self.sort_dropdown.selected());
-        let reverse = self.sort_descending.get();
-        let mut result = tracks;
-        let lower = |s: &str| s.to_lowercase();
-        match sort_type {
-            SORT_DEFAULT => {
-                if reverse {
-                    result.reverse();
-                }
-            }
-            SORT_TITLE => result.sort_by_cached_key(|t| lower(&t.title)),
-            SORT_ARTIST => result.sort_by_cached_key(|t| (t.artists.first().map(|a| lower(&a.name)).unwrap_or_default(), lower(&t.title))),
-            SORT_ALBUM => result.sort_by_cached_key(|t| (t.album.as_ref().map(|a| lower(&a.name)).unwrap_or_default(), lower(&t.title))),
-            SORT_DURATION => result.sort_by_key(|t| t.duration_seconds.unwrap_or(0)),
-            SORT_VIEWS | SORT_ADDED => {
-                let metric = self.sort_metric(sort_type);
-                let (mut ranked, unranked): (Vec<Track>, Vec<Track>) = result.into_iter().partition(|t| metric.contains_key(t.video_id.as_str()));
-                ranked.sort_by_key(|t| metric.get(t.video_id.as_str()).copied().unwrap_or(0));
-                if !reverse {
-                    ranked.reverse();
-                }
-                ranked.extend(unranked);
-                return ranked;
-            }
-            _ => {}
-        }
-        if reverse && sort_type != SORT_DEFAULT {
-            result.reverse();
-        }
-        result
-    }
-
     fn reorder_playlist(self: &Rc<Self>, sort_type: u32) {
-        let source: Vec<Track> = {
-            let originals = self.original_tracks.borrow();
-            if originals.is_empty() { self.current_tracks.borrow().clone() } else { originals.clone() }
+        let sorted = {
+            let mut list = self.tracks.borrow_mut();
+            if list.is_empty() {
+                return;
+            }
+            let descending = list.descending();
+            list.set_order(sort_type, descending);
+            let sorted = list.sorted_source();
+            list.set_rendered(sorted.clone());
+            sorted
         };
-        if source.is_empty() {
-            return;
-        }
-        let sorted = self.sort_tracks(source, Some(sort_type));
-        self.current_tracks.replace(sorted.clone());
-        let filter = self.current_filter_text.borrow().clone();
+        let filter = self.tracks.borrow().filter().to_owned();
         if !filter.is_empty() {
             self.filter_content(&filter);
         } else {
@@ -2045,13 +1969,13 @@ impl PlaylistPage {
     fn open_row_menu(self: &Rc<Self>, row: &Rc<TrackRow>, x: f64, y: f64) {
         let Some(track) = row.track() else { return };
         let vid = track.video_id.0.clone();
-        let has_selection = self.multi_select.get() && !self.selected.borrow().is_empty();
+        let has_selection = self.multi_select.get() && self.tracks.borrow().has_selection();
         let selection = if has_selection { self.selected_tracks() } else { Vec::new() };
         let mut extras: Vec<MenuAction> = Vec::new();
 
         if self.is_owned.get() {
             if has_selection {
-                let n = self.selected.borrow().len();
+                let n = self.tracks.borrow().selected_count();
                 let page = self.clone();
                 extras.push(MenuAction::new(&format!("Remove {n} from Playlist"), Section::Remove, move || page.remove_selected_from_playlist()));
             } else if let (Some(set_id), false) = (track.set_video_id.clone(), vid.is_empty()) {
@@ -2067,7 +1991,7 @@ impl PlaylistPage {
             extras.push(MenuAction::new("Delete Upload", Section::Remove, move || page.confirm_delete_upload_track(&entity_id, &title)));
         }
         if self.multi_select.get() {
-            let is_selected = !vid.is_empty() && self.selected.borrow().contains(&vid);
+            let is_selected = !vid.is_empty() && self.tracks.borrow().is_selected(&vid);
             let page = self.clone();
             let row_c = row.clone();
             let vid_c = vid.clone();
@@ -2076,7 +2000,7 @@ impl PlaylistPage {
             extras.push(MenuAction::new("Select All", Section::Remove, move || page.select_all()));
             let page = self.clone();
             extras.push(MenuAction::new("Deselect All", Section::Remove, move || page.deselect_all()));
-            if !self.selected.borrow().is_empty() {
+            if self.tracks.borrow().has_selection() {
                 let page = self.clone();
                 extras.push(MenuAction::new("Copy Selection Data (Debug)", Section::Clipboard, move || page.copy_selection_debug()));
             }
@@ -2129,10 +2053,9 @@ impl PlaylistPage {
     }
 
     fn remove_track_by_entity_id(self: &Rc<Self>, entity_id: &str) {
-        self.original_tracks.borrow_mut().retain(|t| t.entity_id.as_deref() != Some(entity_id));
-        self.current_tracks.borrow_mut().retain(|t| t.entity_id.as_deref() != Some(entity_id));
+        self.tracks.borrow_mut().remove(|t| t.entity_id.as_deref() == Some(entity_id));
         self.clear_track_store();
-        for t in self.current_tracks.borrow().iter() {
+        for t in self.tracks.borrow().rendered() {
             self.track_store.append(&TrackObject::new(t.clone()));
         }
         self.update_duration_from_all_tracks();
@@ -2153,8 +2076,7 @@ impl PlaylistPage {
                 let _ = tokio::task::spawn_blocking(move || caches.disk().invalidate(&pid)).await;
             });
         }
-        self.original_tracks.borrow_mut().clear();
-        self.current_tracks.borrow_mut().clear();
+        self.tracks.borrow_mut().clear();
         self.is_fully_fetched.set(false);
         self.is_fully_loaded.set(false);
     }
@@ -2164,8 +2086,7 @@ impl PlaylistPage {
         let Some(pid) = self.playlist_id() else { return };
         if pid == "DOWNLOADS" {
             self.clear_track_store();
-            self.original_tracks.borrow_mut().clear();
-            self.current_tracks.borrow_mut().clear();
+            self.tracks.borrow_mut().clear();
             self.stack.set_visible_child_name("loading");
             // No downloads database yet: the list is empty.
             let weak = Rc::downgrade(self);
@@ -2204,8 +2125,7 @@ impl PlaylistPage {
 
     /// Port of _reshow_virtual and _fill_downloads_page.
     pub fn show_virtual(self: &Rc<Self>, title: &str, tracks: Vec<Track>, meta1: &str) {
-        self.original_tracks.replace(tracks.clone());
-        self.current_tracks.replace(tracks.clone());
+        self.tracks.borrow_mut().set(tracks.clone());
         let total: u32 = tracks.iter().filter_map(|t| t.duration_seconds).sum();
         let thumbnails: Vec<String> = tracks.first().and_then(|t| t.thumb.clone()).into_iter().collect();
         self.update_ui(HeaderText { title: title.to_owned(), description: String::new(), meta1: meta1.to_owned(), meta2: short_duration(total) }, thumbnails, tracks, false, None, false);
@@ -2486,7 +2406,7 @@ impl TrackRowHost for PlaylistPage {
     }
 
     fn is_selected(&self, video_id: &str) -> bool {
-        self.selected.borrow().contains(video_id)
+        self.tracks.borrow().is_selected(video_id)
     }
 
     fn toggle_selection(&self, video_id: &str, row: Option<&Rc<TrackRow>>) {
@@ -2499,7 +2419,7 @@ impl TrackRowHost for PlaylistPage {
         if page.multi_select.get() {
             if let Some(vid) = row.video_id() {
                 page.toggle_track_selection(&vid, Some(row));
-                row.set_check_active(page.selected.borrow().contains(&vid));
+                row.set_check_active(page.tracks.borrow().is_selected(&vid));
             }
             return;
         }

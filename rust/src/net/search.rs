@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use ytmusicapi::YTMusicClient;
+use super::browse::Browse;
 
 use crate::model::{ItemKind, MediaItem, Named, Person};
 use crate::net::ytmusic::NetError;
@@ -56,17 +56,17 @@ pub struct SearchResults {
 }
 
 /// One search call. `filter` narrows the results to a kind.
-pub async fn search(client: &YTMusicClient, query: &str, filter: Option<SearchFilter>) -> Result<SearchResults, NetError> {
+pub async fn search(client: &dyn Browse, query: &str, filter: Option<SearchFilter>) -> Result<SearchResults, NetError> {
     let mut body = json!({ "query": query });
     if let Some(filter) = filter {
         body["params"] = json!(filter.params());
     }
-    let response = client.send_request("search", body).await?;
+    let response = client.post("search", body).await?;
     Ok(parse_search_response(&response, filter.map(SearchFilter::kind)))
 }
 
 /// Unfiltered plus songs, artists, playlists and albums in parallel, merged in that order.
-pub async fn search_all(client: Arc<YTMusicClient>, query: String) -> Result<SearchResults, NetError> {
+pub async fn search_all(client: Arc<dyn Browse>, query: String) -> Result<SearchResults, NetError> {
     let filters = [None, Some(SearchFilter::Songs), Some(SearchFilter::Artists), Some(SearchFilter::CommunityPlaylists), Some(SearchFilter::Albums)];
     let calls = filters.iter().map(|f| {
         let client = client.clone();
@@ -481,6 +481,7 @@ fn parse_card_shelf(card: &Value) -> Option<MediaItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ytmusicapi::YTMusicClient;
 
     #[test]
     fn duration_and_year_detection() {
@@ -525,7 +526,7 @@ mod tests {
     #[ignore]
     async fn live_dump_card() {
         let client = YTMusicClient::builder().build().unwrap();
-        let response = client.send_request("search", json!({ "query": "queen" })).await.expect("search");
+        let response = client.post("search", json!({ "query": "queen" })).await.expect("search");
         let sections = response
             .pointer("/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
             .and_then(Value::as_array)

@@ -13,11 +13,13 @@
 //! MIXTAPES_DEMO_WIDTH=px     initial window width, under 500 for the phone layout
 //! MIXTAPES_DEMO_LOGIN=1      open the sign-in dialog and snapshot it as <prefix>-login.png
 //! MIXTAPES_DEMO_SNAPSHOT_AT=ms  delay of the second snapshot, default 11000
+//! MIXTAPES_DEMO_SIFT=text,sort  search and sort the open playlist
 //! MIXTAPES_DEMO_PLAYLIST=id  open a playlist or album page 1.5 s in
 //! MIXTAPES_DEMO_PLAYLIST_PLAY=1  press Play on that page six seconds in
 //! MIXTAPES_DEMO_DISCOGRAPHY=id  open a discography grid for a browse id 1.5 s in
 //! MIXTAPES_DEMO_SEEK=secs    seek to that position seven seconds in
 //! MIXTAPES_DEMO_NEXT_AT=ms   skip to the next queue entry after that many ms
+//! MIXTAPES_DEMO_EDIT_AT=ms   append a copy of the first track after that many ms
 //! MIXTAPES_DEMO_ARTIST=id    open an artist page 1.5 s in
 //! MIXTAPES_DEMO_ARTIST_RADIO=1  press the artist page's radio button six seconds in
 
@@ -105,6 +107,19 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SIFT") {
+        let ctx_w = ctx.clone();
+        glib::timeout_add_local_once(Duration::from_millis(9000), move || {
+            let (text, sort) = spec.split_once(',').unwrap_or((spec.as_str(), ""));
+            let sort = sort.parse::<u32>().ok();
+            let filter = (!text.is_empty()).then_some(text);
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!(?filter, ?sort, "demo: sifting the playlist");
+                mw.sift_visible_playlist(filter, sort);
+            }
+        });
+    }
+
     if let Ok(id) = std::env::var("MIXTAPES_DEMO_PLAYLIST") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(1500), move || {
@@ -143,6 +158,14 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
                 tracing::info!(pressed = mw.press_radio_on_visible_artist(), "demo: radio on artist page");
             }
+        });
+    }
+    if let Some(ms) = std::env::var("MIXTAPES_DEMO_EDIT_AT").ok().and_then(|v| v.parse::<u64>().ok()) {
+        let player = ctx.player.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            let extra: Vec<Track> = player.queue_tracks().first().cloned().into_iter().collect();
+            tracing::info!(added = extra.len(), "demo: appending to the queue mid-track");
+            player.add_to_queue(extra, false);
         });
     }
     if let Some(ms) = std::env::var("MIXTAPES_DEMO_NEXT_AT").ok().and_then(|v| v.parse::<u64>().ok()) {

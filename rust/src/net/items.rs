@@ -360,8 +360,8 @@ pub fn parse_uploaded_item(data: &Value) -> Option<Track> {
     })
 }
 
-pub fn parse_uploaded_items(contents: &[Value]) -> Vec<Track> {
-    contents.iter().filter_map(|r| r.get(MRLIR)).filter_map(parse_uploaded_item).collect()
+pub fn parse_uploaded_items<'a>(contents: impl IntoIterator<Item = &'a Value>) -> Vec<Track> {
+    contents.into_iter().filter_map(|r| r.get(MRLIR)).filter_map(parse_uploaded_item).collect()
 }
 
 // -- watch panel rows -----------------------------------------------------
@@ -399,7 +399,7 @@ pub fn parse_watch_track(data: &Value) -> Option<Track> {
     })
 }
 
-pub fn parse_watch_playlist(results: &[Value]) -> Vec<WatchTrack> {
+pub fn parse_watch_playlist<'a>(results: impl IntoIterator<Item = &'a Value>) -> Vec<WatchTrack> {
     let mut out = Vec::new();
     for result in results {
         let (data, counterpart) = match result.get("playlistPanelVideoWrapperRenderer") {

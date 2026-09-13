@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use ytmusicapi::YTMusicClient;
+use super::browse::Browse;
 
 use crate::model::{ItemKind, MediaItem, Track};
 use crate::net::items::*;
@@ -240,9 +240,9 @@ fn parse_channel_page(response: &Value) -> Option<ArtistData> {
 /// Port of MusicClient.get_artist plus ArtistPage._fetch_artist: the page
 /// data with the deep fetches merged in (full top songs, detailed albums
 /// and singles), each bounded like the joined worker threads were.
-pub async fn get_artist(api: Arc<YTMusicClient>, channel_id: &str) -> Result<ArtistData, NetError> {
+pub async fn get_artist(api: Arc<dyn Browse>, channel_id: &str) -> Result<ArtistData, NetError> {
     let channel_id = channel_id.strip_prefix("MPLA").unwrap_or(channel_id).to_owned();
-    let response = api.send_request("browse", json!({ "browseId": channel_id })).await?;
+    let response = api.post("browse", json!({ "browseId": channel_id })).await?;
     let mut artist = match parse_artist_page(&response) {
         Some(a) => a,
         None => parse_channel_page(&response).ok_or_else(|| NetError::Message(format!("artist {channel_id}: no header")))?,
@@ -286,20 +286,20 @@ pub async fn get_artist(api: Arc<YTMusicClient>, channel_id: &str) -> Result<Art
 }
 
 /// Port of _resolve_artist_from_player's lookup: the channel behind a video, from the player response.
-pub async fn channel_of_video(api: &YTMusicClient, video_id: &str) -> Result<Option<(String, String)>, NetError> {
-    let response = api.send_request("player", json!({ "videoId": video_id })).await?;
+pub async fn channel_of_video(api: &dyn Browse, video_id: &str) -> Result<Option<(String, String)>, NetError> {
+    let response = api.post("player", json!({ "videoId": video_id })).await?;
     let channel = owned_at(&response, "/videoDetails/channelId");
     let author = owned_at(&response, "/videoDetails/author").unwrap_or_else(|| "Artist".to_owned());
     Ok(channel.map(|c| (c, author)))
 }
 
-pub async fn subscribe(api: &YTMusicClient, channel_id: &str) -> Result<(), NetError> {
-    api.send_request("subscription/subscribe", json!({ "channelIds": [channel_id] })).await?;
+pub async fn subscribe(api: &dyn Browse, channel_id: &str) -> Result<(), NetError> {
+    api.post("subscription/subscribe", json!({ "channelIds": [channel_id] })).await?;
     Ok(())
 }
 
-pub async fn unsubscribe(api: &YTMusicClient, channel_id: &str) -> Result<(), NetError> {
-    api.send_request("subscription/unsubscribe", json!({ "channelIds": [channel_id] })).await?;
+pub async fn unsubscribe(api: &dyn Browse, channel_id: &str) -> Result<(), NetError> {
+    api.post("subscription/unsubscribe", json!({ "channelIds": [channel_id] })).await?;
     Ok(())
 }
 

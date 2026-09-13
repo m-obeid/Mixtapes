@@ -6,6 +6,7 @@
 //! no `idle_add`. Dropping or aborting the `JoinHandle` cancels the request.
 
 pub mod artist;
+pub mod browse;
 pub mod cache;
 pub mod covers;
 pub mod items;

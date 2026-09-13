@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use ytmusicapi::YTMusicClient;
+use super::browse::{Browse, Continuation};
 
 use crate::model::{ItemKind, MediaItem, Person};
 use crate::net::ytmusic::NetError;
@@ -14,30 +14,30 @@ use crate::net::ytmusic::NetError;
 const SECTIONS: &str = "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents";
 
 /// Playlists in the library, every page. Automatic playlists (two-letter ids) sort first, as the Python page did.
-pub async fn library_playlists(api: Arc<YTMusicClient>) -> Result<Vec<MediaItem>, NetError> {
+pub async fn library_playlists(api: Arc<dyn Browse>) -> Result<Vec<MediaItem>, NetError> {
     let entries = browse_all(&api, "FEmusic_liked_playlists", Container::Grid).await?;
     let mut items: Vec<MediaItem> = entries.iter().filter_map(|r| parse_two_row(r, ItemKind::Playlist)).collect();
     items.sort_by_key(|p| if p.id.len() == 2 { 0 } else { 1 });
     Ok(items)
 }
 
-pub async fn library_albums(api: Arc<YTMusicClient>) -> Result<Vec<MediaItem>, NetError> {
+pub async fn library_albums(api: Arc<dyn Browse>) -> Result<Vec<MediaItem>, NetError> {
     let entries = browse_all(&api, "FEmusic_liked_albums", Container::Grid).await?;
     Ok(entries.iter().filter_map(|r| parse_two_row(r, ItemKind::Album)).collect())
 }
 
 /// Subscribed artists, what library.py shows in its Artists section.
-pub async fn library_subscriptions(api: Arc<YTMusicClient>) -> Result<Vec<MediaItem>, NetError> {
+pub async fn library_subscriptions(api: Arc<dyn Browse>) -> Result<Vec<MediaItem>, NetError> {
     let entries = browse_all(&api, "FEmusic_library_corpus_artists", Container::Shelf).await?;
     Ok(entries.iter().filter_map(parse_artist_row).collect())
 }
 
-pub async fn upload_albums(api: Arc<YTMusicClient>) -> Result<Vec<MediaItem>, NetError> {
+pub async fn upload_albums(api: Arc<dyn Browse>) -> Result<Vec<MediaItem>, NetError> {
     let entries = browse_all(&api, "FEmusic_library_privately_owned_releases", Container::Grid).await?;
     Ok(entries.iter().filter_map(|r| parse_two_row(r, ItemKind::Album)).collect())
 }
 
-pub async fn upload_artists(api: Arc<YTMusicClient>) -> Result<Vec<MediaItem>, NetError> {
+pub async fn upload_artists(api: Arc<dyn Browse>) -> Result<Vec<MediaItem>, NetError> {
     let entries = browse_all(&api, "FEmusic_library_privately_owned_artists", Container::Shelf).await?;
     Ok(entries.iter().filter_map(parse_artist_row).collect())
 }
@@ -51,11 +51,10 @@ enum Container {
 /// Safety cap on continuation pages, like ytmusicapi's limit=None with a sane bound.
 const MAX_PAGES: usize = 40;
 
-/// All entries of a library browse, following grid or shelf continuations the way
-/// ytmusicapi's get_continuations does: the token rides in the body and the next
-/// page comes back under continuationContents.
-async fn browse_all(api: &YTMusicClient, browse_id: &str, container: Container) -> Result<Vec<Value>, NetError> {
-    let response = api.send_request("browse", json!({ "browseId": browse_id })).await?;
+/// All entries of a library browse, first page here and the rest through
+/// `Continuation`, which knows both response shapes.
+async fn browse_all(api: &dyn Browse, browse_id: &str, container: Container) -> Result<Vec<Value>, NetError> {
+    let response = api.post("browse", json!({ "browseId": browse_id })).await?;
     let (container_key, items_key) = match container {
         Container::Grid => ("gridRenderer", "items"),
         Container::Shelf => ("musicShelfRenderer", "contents"),
@@ -71,21 +70,8 @@ async fn browse_all(api: &YTMusicClient, browse_id: &str, container: Container) 
             }
         }
     }
-    let continuation_key = match container {
-        Container::Grid => "gridContinuation",
-        Container::Shelf => "musicShelfContinuation",
-    };
-    let mut pages = 0;
-    while let Some(t) = token.take() {
-        pages += 1;
-        if pages > MAX_PAGES {
-            break;
-        }
-        let next = api.send_request("browse", json!({ "continuation": t })).await?;
-        let Some(node) = next.pointer(&format!("/continuationContents/{continuation_key}")) else { break };
-        entries.extend(node.get(items_key).and_then(Value::as_array).cloned().unwrap_or_default());
-        token = continuation_token(node);
-    }
+    let rest = Continuation::browse(api, token).pages(MAX_PAGES).collect(|page| page.iter().map(|e| (*e).clone()).collect()).await;
+    entries.extend(rest.strict()?);
     Ok(entries)
 }
 
@@ -192,6 +178,7 @@ fn parse_artist_row(entry: &Value) -> Option<MediaItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ytmusicapi::YTMusicClient;
 
     #[test]
     fn parses_album_card() {
@@ -228,7 +215,7 @@ mod tests {
     async fn live_continuation() {
         let auth = ytmusicapi::BrowserAuth::from_file(std::env::var("HOME").unwrap() + "/.local/share/muse/headers_auth.json").unwrap();
         let api = YTMusicClient::builder().with_browser_auth(auth).build().unwrap();
-        let response = api.send_request("browse", json!({ "browseId": "FEmusic_liked_playlists" })).await.unwrap();
+        let response = api.post("browse", json!({ "browseId": "FEmusic_liked_playlists" })).await.unwrap();
         let grid = response.pointer(&format!("{SECTIONS}/0/gridRenderer")).unwrap();
         println!("grid keys {:?}", grid.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()));
         let items = grid.get("items").and_then(Value::as_array).unwrap();
@@ -238,7 +225,7 @@ mod tests {
             .or_else(|| grid.pointer("/continuations/0/nextContinuationData/continuation").and_then(Value::as_str).map(str::to_owned));
         println!("token {:?}", token.as_ref().map(|t| t.len()));
         if let Some(token) = token {
-            let next = api.send_request("browse", json!({ "continuation": token })).await.unwrap();
+            let next = api.post("browse", json!({ "continuation": token })).await.unwrap();
             println!("next top keys {:?}", next.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()));
             for path in ["/onResponseReceivedActions/0/appendContinuationItemsAction/continuationItems", "/continuationContents/gridContinuation/items"] {
                 if let Some(arr) = next.pointer(path).and_then(Value::as_array) {

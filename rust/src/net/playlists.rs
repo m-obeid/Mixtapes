@@ -7,7 +7,7 @@ use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
 use serde_json::{Value, json};
-use ytmusicapi::YTMusicClient;
+use super::browse::{Browse, Continuation};
 
 use crate::model::{HttpAuth, ItemKind, LikeStatus, MediaItem, Named, Person, Track};
 use crate::net::cache::{LibraryIds, SortMetric};
@@ -69,9 +69,9 @@ impl PlaylistDetails {
 
 /// Port of ytmusicapi's get_playlist plus the MusicClient tweaks: LM gets the
 /// "Your Likes" title, and every continuation is followed up to `limit`.
-pub async fn get_playlist(api: &YTMusicClient, playlist_id: &str, limit: Option<usize>) -> Result<PlaylistDetails, NetError> {
+pub async fn get_playlist(api: &dyn Browse, playlist_id: &str, limit: Option<usize>) -> Result<PlaylistDetails, NetError> {
     let browse_id = if playlist_id.starts_with("VL") { playlist_id.to_owned() } else { format!("VL{playlist_id}") };
-    let response = api.send_request("browse", json!({ "browseId": browse_id })).await?;
+    let response = api.post("browse", json!({ "browseId": browse_id })).await?;
     let mut details = parse_playlist_header(&response).ok_or_else(|| message(format!("playlist {playlist_id}: header missing")))?;
     if details.id.is_empty() {
         details.id = playlist_id.trim_start_matches("VL").to_owned();
@@ -82,34 +82,13 @@ pub async fn get_playlist(api: &YTMusicClient, playlist_id: &str, limit: Option<
     // add, not the first page, and nothing is truncated afterwards.
     let limit = limit.unwrap_or(usize::MAX);
     let mut tracks = shelf.map(|s| parse_playlist_items(array_at(s, "/contents"), false, collaborative)).unwrap_or_default();
-    let first_page = tracks.len();
-    let mut token = shelf.and_then(|s| array_at(s, "/contents").last().and_then(item_continuation_token).or_else(|| next_continuation(s)));
-    let mut pages = 0;
-    while let Some(t) = token.take() {
-        if tracks.len() - first_page >= limit || pages >= MAX_CONTINUATION_PAGES {
-            break;
-        }
-        pages += 1;
-        let next = api.send_request("browse", json!({ "continuation": t })).await?;
-        let mut entries: Vec<&Value> = Vec::new();
-        for action in array_at(&next, "/onResponseReceivedActions") {
-            entries.extend(array_at(action, "/appendContinuationItemsAction/continuationItems"));
-        }
-        if let Some(legacy) = next.pointer("/continuationContents/musicPlaylistShelfContinuation") {
-            entries.extend(array_at(legacy, "/contents"));
-            token = next_continuation(legacy);
-        }
-        for entry in &entries {
-            if let Some(t2) = item_continuation_token(entry) {
-                token = Some(t2);
-            }
-        }
-        let parsed = parse_playlist_items(entries.iter().copied(), false, collaborative);
-        if parsed.is_empty() {
-            break;
-        }
-        tracks.extend(parsed);
-    }
+    let token = shelf.and_then(|s| array_at(s, "/contents").last().and_then(item_continuation_token).or_else(|| next_continuation(s)));
+    let rest = Continuation::browse(api, token)
+        .limit(limit)
+        .pages(MAX_CONTINUATION_PAGES)
+        .collect(|entries| parse_playlist_items(entries.iter().copied(), false, collaborative))
+        .await;
+    tracks.extend(rest.strict()?);
     details.tracks = tracks;
     details.sum_duration();
     if playlist_id == "LM" {
@@ -160,11 +139,11 @@ fn parse_playlist_header(response: &Value) -> Option<PlaylistDetails> {
 
 /// Port of get_album with parse_album_header_2024: header, then the rows
 /// parsed as album items with their album and artists filled from the header.
-pub async fn get_album(api: &YTMusicClient, browse_id: &str) -> Result<PlaylistDetails, NetError> {
+pub async fn get_album(api: &dyn Browse, browse_id: &str) -> Result<PlaylistDetails, NetError> {
     if !browse_id.starts_with("MPRE") {
         return Err(message("Invalid album browseId provided, must start with MPRE."));
     }
-    let response = api.send_request("browse", json!({ "browseId": browse_id })).await?;
+    let response = api.post("browse", json!({ "browseId": browse_id })).await?;
     let header = response.pointer(&format!("{HEADER_SECTION}/musicResponsiveHeaderRenderer")).ok_or_else(|| message(format!("album {browse_id}: header missing")))?;
     let mut details = PlaylistDetails { id: browse_id.to_owned(), ..PlaylistDetails::default() };
     details.title = owned_at(header, "/title/runs/0/text").unwrap_or_default();
@@ -202,8 +181,8 @@ pub async fn get_album(api: &YTMusicClient, browse_id: &str) -> Result<PlaylistD
 }
 
 /// Port of get_library_upload_album: the older detail header plus upload rows.
-pub async fn get_upload_album(api: &YTMusicClient, browse_id: &str) -> Result<PlaylistDetails, NetError> {
-    let response = api.send_request("browse", json!({ "browseId": browse_id })).await?;
+pub async fn get_upload_album(api: &dyn Browse, browse_id: &str) -> Result<PlaylistDetails, NetError> {
+    let response = api.post("browse", json!({ "browseId": browse_id })).await?;
     let header = response.pointer("/header/musicDetailHeaderRenderer").ok_or_else(|| message(format!("upload album {browse_id}: header missing")))?;
     let mut details = PlaylistDetails { id: browse_id.to_owned(), ..PlaylistDetails::default() };
     details.title = owned_at(header, "/title/runs/0/text").unwrap_or_default();
@@ -228,24 +207,14 @@ pub async fn get_upload_album(api: &YTMusicClient, browse_id: &str) -> Result<Pl
 }
 
 /// Port of get_library_upload_songs(limit=None): every uploaded track.
-pub async fn get_upload_songs(api: &YTMusicClient) -> Result<Vec<Track>, NetError> {
-    let response = api.send_request("browse", json!({ "browseId": "FEmusic_library_privately_owned_tracks" })).await?;
+pub async fn get_upload_songs(api: &dyn Browse) -> Result<Vec<Track>, NetError> {
+    let response = api.post("browse", json!({ "browseId": "FEmusic_library_privately_owned_tracks" })).await?;
     let sections = array_at(&response, SINGLE_SECTIONS);
     let shelf = sections.iter().find_map(|s| s.get("musicShelfRenderer").or_else(|| s.pointer("/itemSectionRenderer/contents/0/musicShelfRenderer")));
     let Some(shelf) = shelf else { return Ok(Vec::new()) };
     let mut songs = parse_uploaded_items(array_at(shelf, "/contents"));
-    let mut token = next_continuation(shelf);
-    let mut pages = 0;
-    while let Some(t) = token.take() {
-        if pages >= MAX_CONTINUATION_PAGES {
-            break;
-        }
-        pages += 1;
-        let next = api.send_request("browse", json!({ "continuation": t })).await?;
-        let Some(cont) = next.pointer("/continuationContents/musicShelfContinuation") else { break };
-        songs.extend(parse_uploaded_items(array_at(cont, "/contents")));
-        token = next_continuation(cont);
-    }
+    let rest = Continuation::browse(api, next_continuation(shelf)).pages(MAX_CONTINUATION_PAGES).collect(|entries| parse_uploaded_items(entries.iter().copied())).await;
+    songs.extend(rest.strict()?);
     Ok(songs)
 }
 
@@ -259,7 +228,7 @@ pub struct WatchPlaylist {
 
 /// Port of get_watch_playlist: the panel YouTube Music shows when a track
 /// plays, or a radio for `radio`. Follows continuations until `limit`.
-pub async fn get_watch_playlist(api: &YTMusicClient, video_id: Option<&str>, playlist_id: Option<&str>, limit: usize, radio: bool) -> Result<WatchPlaylist, NetError> {
+pub async fn get_watch_playlist(api: &dyn Browse, video_id: Option<&str>, playlist_id: Option<&str>, limit: usize, radio: bool) -> Result<WatchPlaylist, NetError> {
     let mut body = json!({ "enablePersistentPlaylistPanel": true, "isAudioOnly": true, "tunerSettingValue": "AUTOMIX_SETTING_NORMAL" });
     if video_id.is_none() && playlist_id.is_none() {
         return Err(message("You must provide either a video id, a playlist id, or both"));
@@ -283,7 +252,7 @@ pub async fn get_watch_playlist(api: &YTMusicClient, video_id: Option<&str>, pla
     if radio {
         body["params"] = json!("wAEB");
     }
-    let response = api.send_request("next", body.clone()).await?;
+    let response = api.post("next", body.clone()).await?;
     let watch_next = response.pointer("/contents/singleColumnMusicWatchNextResultsRenderer/tabbedRenderer/watchNextTabbedResultsRenderer").ok_or_else(|| message("No content returned by the server."))?;
     let results = watch_next.pointer("/tabs/0/tabRenderer/content/musicQueueRenderer/content/playlistPanelRenderer").ok_or_else(|| {
         let mut msg = "No content returned by the server.".to_owned();
@@ -298,30 +267,20 @@ pub async fn get_watch_playlist(api: &YTMusicClient, video_id: Option<&str>, pla
     // appends its own "?alt=json" to whatever endpoint it is given, so the
     // token goes in front of a throwaway parameter that swallows that suffix.
     let key = if is_playlist { "/continuations/0/nextContinuationData/continuation" } else { "/continuations/0/nextRadioContinuationData/continuation" };
-    let mut token = owned_at(results, key);
-    let mut pages = 0;
-    while let Some(t) = token.take() {
-        if tracks.len() >= limit || pages >= 20 {
-            break;
-        }
-        pages += 1;
-        let endpoint = format!("next?ctoken={t}&continuation={t}&_=");
-        let next = api.send_request(&endpoint, body.clone()).await?;
-        let Some(cont) = next.pointer("/continuationContents/playlistPanelContinuation") else { break };
-        tracks.extend(parse_watch_playlist(array_at(cont, "/contents")));
-        token = owned_at(cont, key);
-    }
+    let token = owned_at(results, key);
+    let rest = Continuation::query(api, "next", body, token).limit(limit.saturating_sub(tracks.len())).pages(20).collect(|entries| parse_watch_playlist(entries.iter().copied())).await;
+    tracks.extend(rest.strict()?);
     Ok(WatchPlaylist { tracks, playlist_id: panel_playlist })
 }
 
 /// Port of Player.start_radio's fetch: 50 radio tracks for a song or a playlist.
-pub async fn radio_tracks(api: &YTMusicClient, video_id: Option<&str>, playlist_id: Option<&str>) -> Result<WatchPlaylist, NetError> {
+pub async fn radio_tracks(api: &dyn Browse, video_id: Option<&str>, playlist_id: Option<&str>) -> Result<WatchPlaylist, NetError> {
     get_watch_playlist(api, video_id, playlist_id, 50, true).await
 }
 
 /// Port of MusicClient.find_audio_version: the song twin of a music video,
 /// from YouTube Music's own pairing first, then a conservative song search.
-pub async fn find_audio_version(api: &YTMusicClient, video_id: &str) -> Result<Option<Track>, NetError> {
+pub async fn find_audio_version(api: &dyn Browse, video_id: &str) -> Result<Option<Track>, NetError> {
     let watch = get_watch_playlist(api, Some(video_id), None, 1, false).await.unwrap_or_default();
     let Some(current) = watch.tracks.first() else { return Ok(None) };
     let cur_type = current.track.video_type.clone().unwrap_or_default().to_uppercase();
@@ -376,7 +335,7 @@ pub async fn get_album_browse_id(http: &reqwest::Client, auth: Option<&HttpAuth>
 
 /// Port of MusicClient.rate_playlist: LIKE saves, INDIFFERENT removes.
 /// Strips a VL prefix and turns an MPRE browse id into its audio playlist.
-pub async fn rate_playlist(api: &YTMusicClient, playlist_id: &str, rating: LikeStatus) -> Result<(), NetError> {
+pub async fn rate_playlist(api: &dyn Browse, playlist_id: &str, rating: LikeStatus) -> Result<(), NetError> {
     let mut pid = playlist_id.trim_start_matches("VL").to_owned();
     if pid.starts_with("MPRE") {
         if let Ok(album) = get_album(api, &pid).await {
@@ -390,12 +349,12 @@ pub async fn rate_playlist(api: &YTMusicClient, playlist_id: &str, rating: LikeS
         LikeStatus::Dislike => "like/dislike",
         LikeStatus::Indifferent => "like/removelike",
     };
-    api.send_request(endpoint, json!({ "target": { "playlistId": pid } })).await?;
+    api.post(endpoint, json!({ "target": { "playlistId": pid } })).await?;
     Ok(())
 }
 
 /// Port of edit_playlist for the fields the edit dialog offers.
-pub async fn edit_playlist(api: &YTMusicClient, playlist_id: &str, title: Option<&str>, description: Option<&str>, privacy: Option<&str>) -> Result<(), NetError> {
+pub async fn edit_playlist(api: &dyn Browse, playlist_id: &str, title: Option<&str>, description: Option<&str>, privacy: Option<&str>) -> Result<(), NetError> {
     let mut actions = Vec::new();
     if let Some(t) = title.filter(|t| !t.is_empty()) {
         actions.push(json!({ "action": "ACTION_SET_PLAYLIST_NAME", "playlistName": t }));
@@ -409,23 +368,23 @@ pub async fn edit_playlist(api: &YTMusicClient, playlist_id: &str, title: Option
     if actions.is_empty() {
         return Ok(());
     }
-    api.send_request("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
+    api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
     Ok(())
 }
 
 /// Remove rows by (videoId, setVideoId), like remove_playlist_items.
-pub async fn remove_playlist_items(api: &YTMusicClient, playlist_id: &str, items: &[(String, String)]) -> Result<(), NetError> {
+pub async fn remove_playlist_items(api: &dyn Browse, playlist_id: &str, items: &[(String, String)]) -> Result<(), NetError> {
     let actions: Vec<Value> = items.iter().map(|(video, set)| json!({ "setVideoId": set, "removedVideoId": video, "action": "ACTION_REMOVE_VIDEO" })).collect();
     if actions.is_empty() {
         return Err(message("Cannot remove songs, because setVideoId is missing"));
     }
-    api.send_request("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
+    api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
     Ok(())
 }
 
 /// Port of MusicClient.add_playlist_items. Single adds swap a music video
 /// for its song version first, bulk adds do not.
-pub async fn add_playlist_items(api: &YTMusicClient, playlist_id: &str, video_ids: Vec<String>, swap_to_audio: Option<bool>) -> Result<(), NetError> {
+pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: Vec<String>, swap_to_audio: Option<bool>) -> Result<(), NetError> {
     let swap = swap_to_audio.unwrap_or(video_ids.len() == 1);
     let mut ids = Vec::with_capacity(video_ids.len());
     for vid in video_ids {
@@ -441,12 +400,18 @@ pub async fn add_playlist_items(api: &YTMusicClient, playlist_id: &str, video_id
         }
         ids.push(vid);
     }
-    api.add_playlist_items(playlist_id.trim_start_matches("VL"), &ids, false).await?;
+    if ids.is_empty() {
+        return Ok(());
+    }
+    // Port of the crate's add_playlist_items body. DEDUPE_OPTION_SKIP is what
+    // "allow_duplicates: false" means to YouTube.
+    let actions: Vec<Value> = ids.iter().map(|vid| json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": vid, "dedupeOption": "DEDUPE_OPTION_SKIP" })).collect();
+    api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
     Ok(())
 }
 
-pub async fn delete_playlist(api: &YTMusicClient, playlist_id: &str) -> Result<(), NetError> {
-    api.delete_playlist(playlist_id.trim_start_matches("VL")).await?;
+pub async fn delete_playlist(api: &dyn Browse, playlist_id: &str) -> Result<(), NetError> {
+    api.post("playlist/delete", json!({ "playlistId": playlist_id.trim_start_matches("VL") })).await?;
     Ok(())
 }
 
@@ -454,7 +419,7 @@ pub async fn delete_playlist(api: &YTMusicClient, playlist_id: &str) -> Result<(
 
 /// Port of _populate_library_cache_async's fetch: every saved playlist and
 /// album id, albums under their browse id and audio playlist id both.
-pub async fn fetch_library_ids(api: Arc<YTMusicClient>) -> Result<(LibraryIds, Vec<MediaItem>), NetError> {
+pub async fn fetch_library_ids(api: Arc<dyn Browse>) -> Result<(LibraryIds, Vec<MediaItem>), NetError> {
     let playlists = library::library_playlists(api.clone()).await.unwrap_or_default();
     let albums = library::library_albums(api).await.unwrap_or_default();
     let mut ids = LibraryIds::default();
@@ -514,10 +479,10 @@ fn normalize_browse_playlist_id(playlist_id: &str) -> Option<String> {
 }
 
 /// Port of get_playlist_added_dates: videoId to the epoch seconds it was added.
-pub async fn playlist_added_dates(api: &YTMusicClient, playlist_id: &str) -> Result<SortMetric, NetError> {
+pub async fn playlist_added_dates(api: &dyn Browse, playlist_id: &str) -> Result<SortMetric, NetError> {
     let Some(browse_id) = normalize_browse_playlist_id(playlist_id) else { return Ok(SortMetric::new()) };
     let mut dates = SortMetric::new();
-    let mut response = api.send_request("browse", json!({ "browseId": browse_id })).await?;
+    let mut response = api.post("browse", json!({ "browseId": browse_id })).await?;
     for _ in 0..MAX_METRIC_PAGES {
         for item in walk_key(&response, "playlistItemData") {
             if let (Some(vid), Some(added)) = (str_at(item, "/videoId"), item.get("voteSortValue").and_then(Value::as_i64)) {
@@ -525,7 +490,7 @@ pub async fn playlist_added_dates(api: &YTMusicClient, playlist_id: &str) -> Res
             }
         }
         let Some(token) = continuation_token_for_rows(&response, &[MRLIR]) else { break };
-        response = match api.send_request("browse", json!({ "continuation": token })).await {
+        response = match api.post("browse", json!({ "continuation": token })).await {
             Ok(r) => r,
             Err(err) => {
                 tracing::warn!(%err, browse_id, "added-date fetch failed");
@@ -647,39 +612,17 @@ pub async fn playlist_view_counts(http: &reqwest::Client, auth: Option<&HttpAuth
 // -- raw parsing fallbacks ------------------------------------------------
 
 /// Port of _fetch_continuation: follow tokens through both response shapes.
-async fn fetch_continuation(api: &YTMusicClient, mut token: Option<String>) -> Vec<MediaItem> {
-    let mut items = Vec::new();
-    for _ in 0..MAX_CONTINUATION_PAGES {
-        let Some(t) = token.take() else { break };
-        let Ok(response) = api.send_request("browse", json!({ "continuation": t })).await else { break };
-        for action in array_at(&response, "/onResponseReceivedActions") {
-            for raw in array_at(action, "/appendContinuationItemsAction/continuationItems") {
-                match item_continuation_token(raw) {
-                    Some(next) => token = Some(next),
-                    None => items.extend(parse_channel_item(raw)),
-                }
-            }
-        }
-        for key in ["musicPlaylistShelfContinuation", "gridContinuation", "musicShelfContinuation"] {
-            let Some(renderer) = response.pointer(&format!("/continuationContents/{key}")) else { continue };
-            for raw in array_at(renderer, "/contents").iter().chain(array_at(renderer, "/items")) {
-                match item_continuation_token(raw) {
-                    Some(next) => token = Some(next),
-                    None => items.extend(parse_channel_item(raw)),
-                }
-            }
-        }
-    }
-    items
+async fn fetch_continuation(api: &dyn Browse, token: Option<String>) -> Vec<MediaItem> {
+    Continuation::browse(api, token).pages(MAX_CONTINUATION_PAGES).collect(|entries| entries.iter().filter_map(|e| parse_channel_item(e)).collect()).await.items
 }
 
 /// Port of _raw_parse_channel_content.
-pub async fn raw_parse_channel_content(api: &YTMusicClient, browse_id: &str, params: Option<&str>) -> Result<Vec<MediaItem>, NetError> {
+pub async fn raw_parse_channel_content(api: &dyn Browse, browse_id: &str, params: Option<&str>) -> Result<Vec<MediaItem>, NetError> {
     let mut body = json!({ "browseId": browse_id });
     if let Some(p) = params {
         body["params"] = json!(p);
     }
-    let response = api.send_request("browse", body).await?;
+    let response = api.post("browse", body).await?;
     let mut items = Vec::new();
     for section in array_at(&response, SINGLE_SECTIONS) {
         for key in ["gridRenderer", "musicShelfRenderer", "musicPlaylistShelfRenderer", "musicCarouselShelfRenderer"] {
@@ -698,8 +641,8 @@ pub async fn raw_parse_channel_content(api: &YTMusicClient, browse_id: &str, par
 
 /// Port of _raw_parse_playlist for lists ytmusicapi cannot read, such as
 /// OLAK chart playlists. Returns the header title with the rows.
-pub async fn raw_parse_playlist(api: &YTMusicClient, browse_id: &str) -> Result<(Option<String>, Vec<MediaItem>), NetError> {
-    let response = api.send_request("browse", json!({ "browseId": browse_id })).await?;
+pub async fn raw_parse_playlist(api: &dyn Browse, browse_id: &str) -> Result<(Option<String>, Vec<MediaItem>), NetError> {
+    let response = api.post("browse", json!({ "browseId": browse_id })).await?;
     let mut items = Vec::new();
     for section in array_at(&response, SECONDARY_SECTIONS) {
         for key in ["musicPlaylistShelfRenderer", "musicShelfRenderer"] {
@@ -721,29 +664,19 @@ pub async fn raw_parse_playlist(api: &YTMusicClient, browse_id: &str) -> Result<
 
 /// Port of MusicClient.get_artist_albums: the artist's albums grid with
 /// its continuations, falling back to user playlists and raw parsing.
-pub async fn artist_albums(api: &YTMusicClient, channel_id: &str, params: Option<&str>) -> Result<Vec<MediaItem>, NetError> {
+pub async fn artist_albums(api: &dyn Browse, channel_id: &str, params: Option<&str>) -> Result<Vec<MediaItem>, NetError> {
     let mut body = json!({ "browseId": channel_id });
     if let Some(p) = params {
         body["params"] = json!(p);
     }
-    if let Ok(response) = api.send_request("browse", body).await {
+    if let Ok(response) = api.post("browse", body).await {
         let results = response.pointer(&format!("{SINGLE_SECTIONS}/0"));
         if let Some(results) = results {
             let grid = results.get("gridRenderer");
             let contents = grid.map(|g| array_at(g, "/items")).filter(|c| !c.is_empty()).unwrap_or_else(|| array_at(results, "/musicCarouselShelfRenderer/contents"));
             let mut albums: Vec<MediaItem> = contents.iter().filter_map(|c| parse_two_row(c, ItemKind::Album)).collect();
-            let mut token = grid.and_then(next_continuation);
-            let mut pages = 0;
-            while let Some(t) = token.take() {
-                if pages >= MAX_CONTINUATION_PAGES {
-                    break;
-                }
-                pages += 1;
-                let Ok(next) = api.send_request("browse", json!({ "continuation": t })).await else { break };
-                let Some(cont) = next.pointer("/continuationContents/gridContinuation") else { break };
-                albums.extend(array_at(cont, "/items").iter().filter_map(|c| parse_two_row(c, ItemKind::Album)));
-                token = next_continuation(cont);
-            }
+            let rest = Continuation::browse(api, grid.and_then(next_continuation)).pages(MAX_CONTINUATION_PAGES).collect(|entries| entries.iter().filter_map(|c| parse_two_row(c, ItemKind::Album)).collect()).await;
+            albums.extend(rest.items);
             if !albums.is_empty() {
                 return Ok(albums);
             }
@@ -765,6 +698,63 @@ pub fn track_search_text(track: &Track) -> (String, String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ytmusicapi::YTMusicClient;
+
+    // -- fixtures ---------------------------------------------------------
+
+    /// Ids that change between accounts, written beside the captured responses.
+    fn index_path() -> std::path::PathBuf {
+        crate::net::browse::Fixtures::dir().join("index.json")
+    }
+
+    /// Records what the offline test replays. Run it once while signed in:
+    /// `cargo test -- --ignored capture_fixtures`
+    #[tokio::test]
+    #[ignore]
+    async fn capture_fixtures() {
+        let live: Arc<dyn Browse> = live_client();
+        let tape: Arc<dyn Browse> = Arc::new(crate::net::browse::Recorder::new(live));
+        let liked = get_playlist(&tape, "LM", Some(60)).await.expect("liked songs");
+        let albums = crate::net::library::library_albums(tape.clone()).await.expect("library albums");
+        let album_id = albums.first().map(|a| a.id.clone()).expect("an album in the library");
+        get_album(&tape, &album_id).await.expect("album");
+        crate::net::search::search(&tape, "queen", None).await.expect("search");
+        let artist_id = liked.tracks.iter().find_map(|t| t.artists.first().and_then(|a| a.id.clone())).expect("an artist on a liked track");
+        crate::net::artist::get_artist(tape.clone(), &artist_id).await.expect("artist");
+        let index = json!({ "album": album_id, "artist": artist_id, "tracks": liked.tracks.len() });
+        std::fs::write(index_path(), index.to_string()).expect("index written");
+        println!("captured into {}", crate::net::browse::Fixtures::dir().display());
+    }
+
+    /// Parsing runs with no network. Skips until `capture_fixtures` has run.
+    #[tokio::test]
+    async fn captured_responses_still_parse() {
+        let Some(fixtures) = crate::net::browse::Fixtures::open() else {
+            println!("no fixtures: cargo test -- --ignored capture_fixtures");
+            return;
+        };
+        let Ok(index) = std::fs::read_to_string(index_path()) else {
+            println!("no fixture index: cargo test -- --ignored capture_fixtures");
+            return;
+        };
+        let index: Value = serde_json::from_str(&index).expect("index json");
+        let tape: Arc<dyn Browse> = Arc::new(fixtures);
+
+        let liked = get_playlist(&tape, "LM", Some(60)).await.expect("liked replay");
+        assert_eq!(liked.title, "Your Likes");
+        assert_eq!(liked.tracks.len() as u64, index["tracks"].as_u64().unwrap());
+        assert!(liked.tracks.iter().all(|t| !t.video_id.0.is_empty()));
+
+        let album = get_album(&tape, index["album"].as_str().unwrap()).await.expect("album replay");
+        assert!(!album.title.is_empty());
+        assert!(album.tracks.iter().all(|t| t.album.is_some()));
+
+        let results = crate::net::search::search(&tape, "queen", None).await.expect("search replay");
+        assert!(!results.items.is_empty());
+
+        let artist = crate::net::artist::get_artist(tape.clone(), index["artist"].as_str().unwrap()).await.expect("artist replay");
+        assert!(!artist.name.is_empty());
+    }
 
     fn live_client() -> Arc<YTMusicClient> {
         let paths = crate::paths::Paths::discover();

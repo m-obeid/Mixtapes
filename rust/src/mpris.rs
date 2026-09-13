@@ -24,6 +24,7 @@ use crate::App;
 use crate::model::{HttpAuth, PlaybackStatus, RepeatMode};
 use crate::net::NetHandle;
 use crate::paths::Paths;
+use crate::queue::PREVIOUS_RESTART_THRESHOLD;
 use crate::player::Player;
 use crate::state::PlayerState;
 use crate::ui::cover::fetch_cover_bytes;
@@ -33,8 +34,6 @@ const BUS_SUFFIX: &str = "Mixtapes";
 const IDENTITY: &str = "Mixtapes";
 const DESKTOP_ENTRY: &str = "com.pocoguy.Muse";
 const TRACK_ID_PREFIX: &str = "/com/pocoguy/Muse/track";
-/// Previous restarts the track past this point, so it always has somewhere to go.
-const PREVIOUS_RESTART_THRESHOLD: f64 = 3.0;
 /// Art below this is upscaled: some clients render small covers badly.
 const MIN_ART_SIZE: i32 = 512;
 
@@ -434,11 +433,7 @@ impl Mpris {
                     }
                     Command::SetPosition(seconds) => player.seek(seconds),
                     Command::SetVolume(volume) => player.set_volume(volume),
-                    Command::SetShuffle(shuffle) => {
-                        if player.state().shuffle() != shuffle {
-                            player.toggle_shuffle();
-                        }
-                    }
+                    Command::SetShuffle(shuffle) => player.set_shuffle(shuffle),
                     Command::SetLoop(mode) => player.set_repeat(mode),
                     Command::Raise => {
                         if let Some(window) = weak_ctx.upgrade().and_then(|c| c.window.borrow().clone()) {
@@ -549,14 +544,13 @@ impl Mpris {
     }
 
     fn refresh_queue_bounds(self: &Rc<Self>) {
-        let state = self.player.state();
-        let index = state.current_index();
-        let length = state.queue_length() as i32;
-        let can_next = index >= 0 && index + 1 < length;
+        // The queue decides. The snapshot still answers CanGoPrevious from the
+        // live position, because it crosses the restart threshold between ticks.
+        let can_next = self.player.bounds().can_next;
         let can_previous = {
             let mut snapshot = self.shared.lock().unwrap();
             snapshot.can_next = can_next;
-            snapshot.index = index;
+            snapshot.index = self.player.state().current_index();
             snapshot.can_previous()
         };
         self.queue(Property::CanGoNext(can_next));

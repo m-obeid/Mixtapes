@@ -208,3 +208,29 @@ window hides, the app stays up and the shell keeps its controls.
 - History recording, scrobbling, Discord: subscribers to `PlayerState` property notifications, each an `Rc` on the GTK thread that spawns its own network work.
 - Downloads: a `DownloadManager` on tokio with its own progress `watch` channel.
 - GResource and style.css: `build.rs` with `glib-build-tools`, when the first real widget lands.
+
+## Queue, transport and track list
+
+Three modules own rules the rest of the app used to restate.
+
+`src/queue.rs` holds the queue: tracks, the play head, shuffle and repeat, and
+the radio source. It answers with a `Step` (`Load`, `Restart`, `Stop`,
+`Extend`, `Stay`) and with `Bounds` (can next, can previous). The player
+carries out the step and tells the audio thread; the transport bar and MPRIS
+read the bounds. Shuffle keeps the original order so toggling it back restores
+it, repeat-all wraps on Next but repeat-track does not, and a failed track
+never wraps or extends a radio, because every track could fail. The module is
+pure data and covered by unit tests.
+
+`src/net/browse.rs` is the InnerTube seam. `Browse` is one call: post a body to
+an endpoint, get JSON. The `ytmusicapi` client implements it for the app, and
+`Fixtures` replays captured responses for tests. Endpoints take `&dyn Browse`.
+`Continuation` follows continuation tokens for all of them: both response
+shapes, both legacy token spellings, one page cap, one row limit, rows kept
+when a page fails. Capture with `cargo test -- --ignored capture_fixtures`;
+`rust/fixtures/` is gitignored and the offline tests skip when it is absent.
+
+`src/ui/pages/track_list.rs` holds the playlist page's rows: fetched order,
+rendered order, search text, selection and sort metrics. The page renders what
+it returns and mirrors it into the GTK store. The "which list is the source"
+question and the sort rules live there, not at fifteen call sites.

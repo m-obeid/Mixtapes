@@ -711,6 +711,17 @@ impl MainWindow {
         self.open_playlist(id, None);
     }
 
+    /// Demo hook: search and sort the visible playlist page.
+    pub fn sift_visible_playlist(&self, filter: Option<&str>, sort: Option<u32>) -> bool {
+        match self.visible_pushed_page() {
+            Some(PushedPage::Playlist(p)) => {
+                p.sift_for_demo(filter, sort);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Demo hook: press Play on the visible playlist page.
     pub fn press_play_on_visible_playlist(&self) -> bool {
         match self.visible_pushed_page() {

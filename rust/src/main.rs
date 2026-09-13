@@ -18,6 +18,7 @@ mod mpris;
 mod net;
 mod paths;
 mod player;
+mod queue;
 mod state;
 mod ui;
 

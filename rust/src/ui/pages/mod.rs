@@ -7,6 +7,7 @@ pub mod home;
 pub mod library;
 pub mod playlist;
 pub mod stub;
+pub mod track_list;
 
 use std::rc::Rc;
 

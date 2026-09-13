@@ -15,40 +15,18 @@ use crate::audio::{AudioCommand, AudioEvent, AudioEvents, AudioHandle, AudioTele
 use crate::model::{LikeStatus, PlaybackStatus, RepeatMode, Track, VideoId};
 use crate::net::NetHandle;
 use crate::net::ytmusic::AuthState;
+use crate::queue::{Bounds, Queue, Step};
 use crate::state::{PlayerState, QueueEntry};
 use gtk::glib;
 
 const STREAM_RETRY_MAX: u8 = 2;
-const PREVIOUS_RESTART_THRESHOLD: f64 = 3.0;
 
-/// Queue as plain data. Mutated only through `Player`, mirrored into the ListStore afterwards.
-#[derive(Default)]
-struct Queue {
-    tracks: Vec<Track>,
-    /// Unshuffled order, for turning shuffle back off.
-    original: Vec<Track>,
-    current: Option<usize>,
-    shuffle: bool,
-    repeat: RepeatMode,
-    source_id: Option<String>,
-    infinite: bool,
-}
-
-impl Queue {
-    fn current_track(&self) -> Option<&Track> {
-        self.current.and_then(|i| self.tracks.get(i))
-    }
-
-    /// Index that follows `current` under the repeat rules, or None at the end.
-    fn next_index(&self) -> Option<usize> {
-        let cur = self.current?;
-        match self.repeat {
-            RepeatMode::Track => Some(cur),
-            _ if cur + 1 < self.tracks.len() => Some(cur + 1),
-            RepeatMode::All if !self.tracks.is_empty() => Some(0),
-            _ => None,
-        }
-    }
+/// The track handed to playbin ahead of time, so the switch has no gap.
+#[derive(Clone)]
+struct Armed {
+    index: usize,
+    generation: u64,
+    video_id: VideoId,
 }
 
 pub struct Player {
@@ -62,8 +40,8 @@ pub struct Player {
     counter: Cell<u64>,
     /// Generation of the stream the pipeline should be playing right now.
     current: Cell<u64>,
-    /// (queue index, generation) pre-armed for gapless.
-    armed_next: Cell<Option<(usize, u64)>>,
+    /// The track pre-armed for a gapless switch, if any.
+    armed_next: RefCell<Option<Armed>>,
     inflight: RefCell<Option<AbortHandle>>,
     retries: Cell<u8>,
     /// Spectrum frames keyed by stream time, what _viz_queue held: released
@@ -91,7 +69,7 @@ impl Player {
             net,
             counter: Cell::new(0),
             current: Cell::new(0),
-            armed_next: Cell::new(None),
+            armed_next: RefCell::new(None),
             inflight: RefCell::new(None),
             retries: Cell::new(0),
             viz_queue: RefCell::new(std::collections::VecDeque::new()),
@@ -114,11 +92,17 @@ impl Player {
     }
 
     pub fn queue_tracks(&self) -> Vec<Track> {
-        self.queue.borrow().tracks.clone()
+        self.queue.borrow().tracks().to_vec()
     }
 
     pub fn repeat_mode(&self) -> RepeatMode {
-        self.queue.borrow().repeat
+        self.queue.borrow().repeat()
+    }
+
+    /// Whether Next and Previous have anywhere to go, for the transport bar
+    /// and the system controls. The queue decides; nobody re-derives it.
+    pub fn bounds(&self) -> Bounds {
+        self.queue.borrow().bounds(self.state.position())
     }
 
     /// Port of pull_visualizer_bands: the spectrum frame the sink is playing
@@ -166,7 +150,7 @@ impl Player {
             .or_else(|| {
                 self.queue
                     .borrow()
-                    .tracks
+                    .tracks()
                     .iter()
                     .find(|t| t.video_id == video_id)
                     .map(|t| t.like_status)
@@ -192,15 +176,7 @@ impl Player {
         self.net
             .client()
             .set_known_like_status(video_id.as_str(), status);
-        {
-            let mut guard = self.queue.borrow_mut();
-            let q = &mut *guard;
-            for t in q.tracks.iter_mut().chain(q.original.iter_mut()) {
-                if t.video_id == *video_id {
-                    t.like_status = status;
-                }
-            }
-        }
+        self.queue.borrow_mut().set_like_status(video_id, status);
         if self.state.video_id() == video_id.as_str() {
             self.state.set_like_status(status.as_str().to_owned());
         }
@@ -268,10 +244,7 @@ impl Player {
         self.audio.send(AudioCommand::Stop);
         let track = {
             let mut q = self.queue.borrow_mut();
-            q.original = tracks.clone();
-            q.tracks = tracks;
-            q.shuffle = false;
-            q.current = (start_index < q.tracks.len()).then_some(start_index);
+            q.stage(tracks, start_index);
             q.current_track().cloned()
         };
         self.state.set_shuffle(false);
@@ -296,122 +269,27 @@ impl Player {
         source_id: Option<String>,
         infinite: bool,
     ) {
-        {
-            let mut q = self.queue.borrow_mut();
-            q.original = tracks.clone();
-            q.tracks = tracks;
-            q.shuffle = shuffle;
-            q.source_id = source_id;
-            q.infinite = infinite;
-            if shuffle {
-                // Play the chosen track first, shuffle everything behind it.
-                let mut rest = q.tracks.clone();
-                let first = if start_index < rest.len() {
-                    Some(rest.remove(start_index))
-                } else {
-                    None
-                };
-                shuffle_in_place(&mut rest);
-                if let Some(first) = first {
-                    rest.insert(0, first);
-                }
-                q.tracks = rest;
-                q.current = if q.tracks.is_empty() { None } else { Some(0) };
-            } else {
-                q.current = (start_index < q.tracks.len()).then_some(start_index);
-            }
-        }
+        let step = self.queue.borrow_mut().replace(tracks, start_index, shuffle, source_id, infinite);
         self.state.set_shuffle(shuffle);
         self.sync_queue_model();
-        self.load_current();
+        self.apply(step);
     }
 
     pub fn add_to_queue(&self, tracks: Vec<Track>, play_next: bool) {
-        if tracks.is_empty() {
-            return;
-        }
-        let start_now = {
-            let mut q = self.queue.borrow_mut();
-            let pos = match (play_next, q.current) {
-                (true, Some(cur)) => cur + 1,
-                _ => q.tracks.len(),
-            };
-            let opos = pos.min(q.original.len());
-            for (i, t) in tracks.into_iter().enumerate() {
-                q.tracks.insert(pos + i, t.clone());
-                let at = (opos + i).min(q.original.len());
-                q.original.insert(at, t);
-            }
-            if q.current.is_none() {
-                q.current = Some(0);
-                true
-            } else {
-                false
-            }
-        };
+        let step = self.queue.borrow_mut().insert(tracks, play_next);
         self.sync_queue_model();
-        if start_now {
-            self.load_current();
-        }
+        self.apply(step);
     }
 
     pub fn remove_from_queue(&self, index: usize) {
-        let reload = {
-            let mut q = self.queue.borrow_mut();
-            if index >= q.tracks.len() {
-                return;
-            }
-            let removed = q.tracks.remove(index);
-            if let Some(pos) = q.original.iter().position(|t| *t == removed) {
-                q.original.remove(pos);
-            }
-            match q.current {
-                Some(cur) if index < cur => {
-                    q.current = Some(cur - 1);
-                    false
-                }
-                Some(cur) if index == cur => {
-                    if cur < q.tracks.len() {
-                        true
-                    } else {
-                        q.current = None;
-                        true
-                    }
-                }
-                _ => false,
-            }
-        };
+        let step = self.queue.borrow_mut().remove(index);
         self.sync_queue_model();
-        if reload {
-            self.load_current();
-        }
+        self.apply(step);
     }
 
     pub fn move_queue_item(&self, old_index: usize, new_index: usize) -> bool {
-        {
-            let mut q = self.queue.borrow_mut();
-            if old_index >= q.tracks.len() || new_index >= q.tracks.len() || old_index == new_index
-            {
-                return false;
-            }
-            let item = q.tracks.remove(old_index);
-            let insert_at = if old_index < new_index {
-                new_index - 1
-            } else {
-                new_index
-            };
-            q.tracks.insert(insert_at, item);
-            q.current = q.current.map(|cur| {
-                if cur == old_index {
-                    insert_at
-                } else if old_index < cur && cur <= insert_at {
-                    cur - 1
-                } else if insert_at <= cur && cur < old_index {
-                    cur + 1
-                } else {
-                    cur
-                }
-            });
+        if !self.queue.borrow_mut().move_item(old_index, new_index) {
+            return false;
         }
         self.sync_queue_model();
         true
@@ -421,11 +299,7 @@ impl Player {
         self.abort_inflight();
         // A fresh generation makes any in-flight resolution stale.
         self.current.set(self.alloc_generation());
-        let repeat = self.queue.borrow().repeat;
-        *self.queue.borrow_mut() = Queue {
-            repeat,
-            ..Queue::default()
-        };
+        self.queue.borrow_mut().clear();
         self.audio.send(AudioCommand::Stop);
         self.state.set_status(PlaybackStatus::Stopped);
         self.state.set_shuffle(false);
@@ -434,112 +308,62 @@ impl Player {
     }
 
     pub fn play_queue_index(&self, index: usize) {
-        {
-            let mut q = self.queue.borrow_mut();
-            if index >= q.tracks.len() {
-                return;
-            }
-            q.current = Some(index);
-        }
-        self.load_current();
-        self.maybe_extend_infinite();
+        let step = self.queue.borrow_mut().jump(index);
+        self.apply(step);
     }
 
     pub fn next(&self) {
-        let target = {
-            let q = self.queue.borrow();
-            match q.current {
-                Some(cur) if cur + 1 < q.tracks.len() => Some(cur + 1),
-                Some(_) if q.repeat == RepeatMode::All && !q.tracks.is_empty() => Some(0),
-                _ => None,
-            }
-        };
-        match target {
-            Some(i) => {
-                self.queue.borrow_mut().current = Some(i);
-                self.load_current();
-                self.maybe_extend_infinite();
-            }
-            None => {
-                let ran_out_on_radio = {
-                    let q = self.queue.borrow();
-                    q.infinite && q.source_id.is_some() && !q.tracks.is_empty()
-                };
-                if ran_out_on_radio {
-                    // The halfway trigger normally hides this; a deduped batch can leave the queue dry.
-                    self.force_radio_extend();
-                    return;
-                }
-                self.queue.borrow_mut().current = None;
-                self.stop();
-                self.mark_current(None);
-            }
-        }
+        let step = self.queue.borrow_mut().advance();
+        self.apply(step);
     }
 
     pub fn previous(&self) {
-        if self.state.position() > PREVIOUS_RESTART_THRESHOLD {
-            self.seek(0.0);
-            return;
-        }
-        let target = {
-            let q = self.queue.borrow();
-            match q.current {
-                Some(0) => Some(0),
-                Some(cur) => Some(cur - 1),
-                None => None,
-            }
-        };
-        if let Some(i) = target {
-            self.queue.borrow_mut().current = Some(i);
-            self.load_current();
-        }
+        let step = self.queue.borrow_mut().back(self.state.position());
+        self.apply(step);
     }
 
     pub fn toggle_shuffle(&self) {
-        let now_shuffled = {
-            let mut q = self.queue.borrow_mut();
-            let playing = q.current_track().cloned();
-            if q.shuffle {
-                q.shuffle = false;
-                q.tracks = q.original.clone();
-                q.current = playing
-                    .as_ref()
-                    .and_then(|p| q.tracks.iter().position(|t| t == p))
-                    .or(if q.tracks.is_empty() { None } else { Some(0) });
-            } else {
-                q.shuffle = true;
-                let mut rest: Vec<Track> = q
-                    .tracks
-                    .iter()
-                    .filter(|t| Some(*t) != playing.as_ref())
-                    .cloned()
-                    .collect();
-                shuffle_in_place(&mut rest);
-                if let Some(p) = playing {
-                    rest.insert(0, p);
-                    q.current = Some(0);
-                } else {
-                    q.current = None;
-                }
-                q.tracks = rest;
-            }
-            q.shuffle
-        };
-        self.state.set_shuffle(now_shuffled);
+        let shuffled = self.queue.borrow_mut().toggle_shuffle();
+        self.state.set_shuffle(shuffled);
         self.sync_queue_model();
     }
 
+    /// Shuffle on or off, for callers that know which they want.
+    pub fn set_shuffle(&self, on: bool) {
+        if self.queue.borrow().shuffle() != on {
+            self.toggle_shuffle();
+        }
+    }
+
     pub fn set_repeat(&self, mode: RepeatMode) {
-        self.queue.borrow_mut().repeat = mode;
+        self.queue.borrow_mut().set_repeat(mode);
         self.state.set_repeat(mode);
-        self.disarm_gapless();
+        // Repeat changes what follows the current track, so what is armed may be wrong.
+        self.resync_gapless();
+    }
+
+    /// Carry out what the queue decided.
+    fn apply(&self, step: Step) {
+        match step {
+            Step::Load(_) => {
+                self.load_current();
+                self.maybe_extend_infinite();
+            }
+            Step::Restart => self.seek(0.0),
+            Step::Stop => {
+                self.stop();
+                self.mark_current(None);
+            }
+            // A deduped batch can leave a radio dry before the halfway trigger fires.
+            Step::Extend => self.force_radio_extend(),
+            Step::Stay => {}
+        }
     }
 
     // -- transport API ----------------------------------------------------
 
     pub fn play(&self) {
-        if self.queue.borrow().current.is_none() {
+        if self.queue.borrow().current().is_none() {
             return;
         }
         self.audio.send(AudioCommand::Play);
@@ -553,7 +377,7 @@ impl Player {
         match self.state.status() {
             PlaybackStatus::Playing => self.pause(),
             PlaybackStatus::Paused => self.play(),
-            PlaybackStatus::Stopped if self.queue.borrow().current.is_some() => self.load_current(),
+            PlaybackStatus::Stopped if self.queue.borrow().current().is_some() => self.load_current(),
             _ => {}
         }
     }
@@ -598,8 +422,28 @@ impl Player {
     }
 
     fn disarm_gapless(&self) {
-        if self.armed_next.take().is_some() {
+        if self.armed_next.borrow_mut().take().is_some() {
             self.audio.send(AudioCommand::DisarmNext);
+        }
+    }
+
+    /// Keep the armed track in step with the queue after an edit.
+    ///
+    /// Only an edit that changes what follows the current track makes the
+    /// armed URI wrong. Disarming on every edit meant a radio extension, which
+    /// appends to the queue, cancelled gapless for the rest of the track.
+    fn resync_gapless(&self) {
+        let armed = self.armed_next.borrow().as_ref().map(|a| a.video_id.clone());
+        let wanted = {
+            let q = self.queue.borrow();
+            q.armable_next().and_then(|i| q.track_at(i)).map(|t| t.video_id.clone())
+        };
+        if armed == wanted {
+            return;
+        }
+        self.disarm_gapless();
+        if wanted.is_some() && self.state.status() == PlaybackStatus::Playing {
+            self.arm_gapless();
         }
     }
 
@@ -609,10 +453,7 @@ impl Player {
         self.clear_visualizer_queue();
         let (index, track) = {
             let q = self.queue.borrow();
-            match q
-                .current
-                .and_then(|i| q.tracks.get(i).map(|t| (i, t.clone())))
-            {
+            match q.current().zip(q.current_track().cloned()) {
                 Some(pair) => pair,
                 None => {
                     drop(q);
@@ -665,11 +506,7 @@ impl Player {
             let Ok(result) = outcome else { return };
             if arm_only {
                 if let Ok(info) = result {
-                    if player
-                        .armed_next
-                        .get()
-                        .is_some_and(|(_, g)| g == generation)
-                    {
+                    if player.armed_next.borrow().as_ref().is_some_and(|a| a.generation == generation) {
                         player.audio.send(AudioCommand::ArmNext {
                             uri: info.uri,
                             generation,
@@ -713,32 +550,22 @@ impl Player {
     }
 
     fn advance_after_failure(&self) {
-        let has_next = {
-            let q = self.queue.borrow();
-            q.current.is_some_and(|cur| cur + 1 < q.tracks.len())
-        };
-        if has_next {
-            self.next();
-        } else {
-            self.queue.borrow_mut().current = None;
-            self.stop();
-            self.mark_current(None);
-        }
+        let step = self.queue.borrow_mut().failed_current();
+        self.apply(step);
     }
 
     /// Pre-resolve the following track and hand its URI to playbin for a gapless switch.
     fn arm_gapless(&self) {
         let next = {
             let q = self.queue.borrow();
-            q.next_index()
-                .and_then(|i| q.tracks.get(i).map(|t| (i, t.clone())))
+            q.armable_next().and_then(|i| q.track_at(i).map(|t| (i, t.clone())))
         };
         let Some((index, track)) = next else { return };
         if track.is_upload() {
             return;
         }
         let generation = self.alloc_generation();
-        self.armed_next.set(Some((index, generation)));
+        self.armed_next.replace(Some(Armed { index, generation, video_id: track.video_id.clone() }));
         self.spawn_resolve(track, generation, true);
     }
 
@@ -755,15 +582,12 @@ impl Player {
                 }
             }
             AudioEvent::StreamStarted { generation } => {
-                if let Some((index, armed)) = self.armed_next.take() {
-                    if armed == generation {
+                if let Some(armed) = self.armed_next.borrow_mut().take() {
+                    if armed.generation == generation {
+                        let index = armed.index;
                         self.current.set(generation);
                         self.retries.set(0);
-                        let track = {
-                            let mut q = self.queue.borrow_mut();
-                            q.current = Some(index);
-                            q.tracks.get(index).cloned()
-                        };
+                        let track = self.queue.borrow_mut().adopt(index).cloned();
                         self.mark_current(Some(index));
                         self.clear_visualizer_queue();
                         self.state.set_position(0.0);
@@ -780,7 +604,7 @@ impl Player {
             }
             AudioEvent::StateChanged { generation, status } => {
                 if generation != self.current.get()
-                    && !self.armed_next.get().is_some_and(|(_, g)| g == generation)
+                    && !self.armed_next.borrow().as_ref().is_some_and(|a| a.generation == generation)
                 {
                     return;
                 }
@@ -789,7 +613,7 @@ impl Player {
                     && self.state.status() != PlaybackStatus::Playing
                 {
                     self.retries.set(0);
-                    if self.armed_next.get().is_none() {
+                    if self.armed_next.borrow().is_none() {
                         self.arm_gapless();
                     }
                 }
@@ -801,12 +625,8 @@ impl Player {
                 if generation != self.current.get() {
                     return;
                 }
-                let repeat_track = self.queue.borrow().repeat == RepeatMode::Track;
-                if repeat_track {
-                    self.load_current()
-                } else {
-                    self.next()
-                }
+                let step = self.queue.borrow_mut().finished();
+                self.apply(step);
             }
             AudioEvent::Error {
                 generation,
@@ -950,14 +770,7 @@ impl Player {
         if changed == *track {
             return;
         }
-        {
-            let mut q = self.queue.borrow_mut();
-            if let Some(slot) = q.current.and_then(|i| q.tracks.get_mut(i)) {
-                if slot.video_id == changed.video_id {
-                    *slot = changed.clone();
-                }
-            }
-        }
+        self.queue.borrow_mut().refine_current(&changed);
         self.apply_track_metadata(Some(&changed));
     }
 
@@ -1001,18 +814,18 @@ impl Player {
         let (items, current) = {
             let q = self.queue.borrow();
             let items: Vec<QueueEntry> = q
-                .tracks
+                .tracks()
                 .iter()
                 .enumerate()
-                .map(|(i, t)| QueueEntry::new(i as u32, t, Some(i) == q.current, paused))
+                .map(|(i, t)| QueueEntry::new(i as u32, t, Some(i) == q.current(), paused))
                 .collect();
-            (items, q.current)
+            (items, q.current())
         };
         let model = self.state.queue_model();
         model.splice(0, model.n_items(), &items);
         self.state.set_queue_length(items.len() as u32);
         self.mark_current(current);
-        self.disarm_gapless();
+        self.resync_gapless();
         self.state.emit_queue_changed();
     }
 
@@ -1021,71 +834,16 @@ impl Player {
     }
 }
 
-/// Fisher-Yates with a tiny xorshift source. Good enough for a play queue, no rand dependency.
-fn shuffle_in_place(items: &mut [Track]) {
-    let mut seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0x9E37_79B9_7F4A_7C15)
-        | 1;
-    for i in (1..items.len()).rev() {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        let j = (seed % (i as u64 + 1)) as usize;
-        items.swap(i, j);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::VideoId;
-
-    fn track(id: &str) -> Track {
-        Track {
-            video_id: VideoId(id.into()),
-            title: id.into(),
-            ..Track::default()
-        }
-    }
-
-    #[test]
-    fn next_index_follows_repeat_rules() {
-        let mut q = Queue {
-            tracks: vec![track("a"), track("b")],
-            current: Some(1),
-            ..Queue::default()
-        };
-        assert_eq!(q.next_index(), None);
-        q.repeat = RepeatMode::All;
-        assert_eq!(q.next_index(), Some(0));
-        q.repeat = RepeatMode::Track;
-        assert_eq!(q.next_index(), Some(1));
-    }
-
-    #[test]
-    fn shuffle_keeps_every_track() {
-        let mut items: Vec<Track> = (0..20).map(|i| track(&i.to_string())).collect();
-        let before = items.clone();
-        shuffle_in_place(&mut items);
-        assert_eq!(items.len(), before.len());
-        for t in &before {
-            assert!(items.contains(t));
-        }
-    }
-}
-
 // -- playlist page support ------------------------------------------------
 
 impl Player {
     /// The playlist or album the queue came from, what a page compares itself to.
     pub fn queue_source_id(&self) -> Option<String> {
-        self.queue.borrow().source_id.clone()
+        self.queue.borrow().source_id().map(str::to_owned)
     }
 
     pub fn queue_is_infinite(&self) -> bool {
-        self.queue.borrow().infinite
+        self.queue.borrow().is_infinite()
     }
 
     /// Port of Player.extend_queue: append at the end. Under shuffle the new
@@ -1094,29 +852,7 @@ impl Player {
         if tracks.is_empty() {
             return;
         }
-        {
-            let mut q = self.queue.borrow_mut();
-            q.original.extend(tracks.iter().cloned());
-            if q.shuffle {
-                match q.current {
-                    Some(cur) if cur < q.tracks.len() => {
-                        let mut upcoming = q.tracks.split_off(cur + 1);
-                        upcoming.extend(tracks);
-                        shuffle_in_place(&mut upcoming);
-                        q.tracks.extend(upcoming);
-                    }
-                    _ => {
-                        q.tracks.extend(tracks);
-                        shuffle_in_place(&mut q.tracks);
-                        if q.current.is_none() && !q.tracks.is_empty() {
-                            q.current = Some(0);
-                        }
-                    }
-                }
-            } else {
-                q.tracks.extend(tracks);
-            }
-        }
+        self.queue.borrow_mut().append(tracks);
         self.sync_queue_model();
     }
 
@@ -1156,7 +892,7 @@ impl Player {
     pub fn maybe_extend_infinite(&self) {
         let (infinite, has_source, current, len) = {
             let q = self.queue.borrow();
-            (q.infinite, q.source_id.is_some(), q.current, q.tracks.len())
+            (q.is_infinite(), q.source_id().is_some(), q.current(), q.len())
         };
         if !infinite || !has_source || self.infinite_fetching.get() {
             return;
@@ -1178,12 +914,9 @@ impl Player {
         let (last_vid, source, existing) = {
             let q = self.queue.borrow();
             (
-                q.tracks.last().map(|t| t.video_id.0.clone()),
-                q.source_id.clone(),
-                q.tracks
-                    .iter()
-                    .map(|t| t.video_id.0.clone())
-                    .collect::<std::collections::HashSet<_>>(),
+                q.tracks().last().map(|t| t.video_id.0.clone()),
+                q.source_id().map(str::to_owned),
+                q.tracks().iter().map(|t| t.video_id.0.clone()).collect::<std::collections::HashSet<_>>(),
             )
         };
         // Queue-identity stamps with a colon are not playlist ids.
@@ -1226,11 +959,8 @@ impl Player {
         let (last_vid, existing) = {
             let q = self.queue.borrow();
             (
-                q.tracks.last().map(|t| t.video_id.0.clone()),
-                q.tracks
-                    .iter()
-                    .map(|t| t.video_id.0.clone())
-                    .collect::<std::collections::HashSet<_>>(),
+                q.tracks().last().map(|t| t.video_id.0.clone()),
+                q.tracks().iter().map(|t| t.video_id.0.clone()).collect::<std::collections::HashSet<_>>(),
             )
         };
         let seed = Some(self.state.video_id())
@@ -1238,9 +968,8 @@ impl Player {
             .or(last_vid);
         let Some(seed) = seed else {
             self.infinite_fetching.set(false);
-            self.queue.borrow_mut().current = None;
-            self.stop();
-            self.mark_current(None);
+            self.queue.borrow_mut().clear_current();
+            self.apply(Step::Stop);
             return;
         };
         let api = self.net.client().api();
@@ -1269,15 +998,14 @@ impl Player {
             let Some(player) = weak.upgrade() else { return };
             player.infinite_fetching.set(false);
             if fresh.is_empty() {
-                player.queue.borrow_mut().current = None;
-                player.stop();
-                player.mark_current(None);
+                player.queue.borrow_mut().clear_current();
+                player.apply(Step::Stop);
                 return;
             }
-            let start = player.queue.borrow().tracks.len();
+            let start = player.queue.borrow().len();
             player.extend_queue(fresh);
-            player.queue.borrow_mut().current = Some(start);
-            player.load_current();
+            let step = player.queue.borrow_mut().jump(start);
+            player.apply(step);
         });
     }
 }
