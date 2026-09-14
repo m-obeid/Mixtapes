@@ -21,6 +21,9 @@ pub struct Paths {
     pub config_file: PathBuf,
     /// assets/icons in a source checkout, if present.
     pub dev_icons_dir: Option<PathBuf>,
+    /// Where downloads live, when something other than ~/Music/Mixtapes.
+    /// Tests set it, and MIXTAPES_MUSIC_DIR sets it for a demo run.
+    music_override: Option<PathBuf>,
 }
 
 impl Paths {
@@ -46,11 +49,34 @@ impl Paths {
             cache_dir,
             stream_cache_dir,
             dev_icons_dir,
+            music_override: std::env::var_os("MIXTAPES_MUSIC_DIR").map(PathBuf::from),
+        }
+    }
+
+    /// Paths rooted in a temporary directory, so a test never touches the
+    /// real music folder or preferences.
+    #[cfg(test)]
+    pub fn for_tests(root: &Path) -> Self {
+        let data_dir = root.join("data");
+        let cache_dir = root.join("cache");
+        std::fs::create_dir_all(&data_dir).expect("test data dir");
+        Self {
+            auth_file: data_dir.join("headers_auth.json"),
+            prefs_file: data_dir.join("prefs.json"),
+            config_file: data_dir.join("config.json"),
+            stream_cache_dir: cache_dir.join("streams"),
+            data_dir,
+            cache_dir,
+            dev_icons_dir: None,
+            music_override: Some(root.join("Music/Mixtapes")),
         }
     }
 
     /// ~/Music/Mixtapes, where downloads and mirrored playlist covers live.
     pub fn music_dir(&self) -> PathBuf {
+        if let Some(dir) = &self.music_override {
+            return dir.clone();
+        }
         glib::user_special_dir(glib::UserDirectory::Music).unwrap_or_else(|| glib::home_dir().join("Music")).join("Mixtapes")
     }
 

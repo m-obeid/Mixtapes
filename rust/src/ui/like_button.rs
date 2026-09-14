@@ -97,7 +97,10 @@ impl LikeButton {
     }
 
     /// Point the button at a track. Hidden when there is no track.
-    pub fn set_data(&self, video_id: Option<VideoId>, status: LikeStatus) {
+    /// `status` is what the row's own source says, or None when it does not
+    /// know: a card off a carousel carries no rating, and seeding the session
+    /// cache with its guess would tell every other row the song is unrated.
+    pub fn set_data(&self, video_id: Option<VideoId>, status: Option<LikeStatus>) {
         let Some(video_id) = video_id.filter(|v| !v.0.is_empty()) else {
             self.video_id.replace(None);
             self.status.set(LikeStatus::Indifferent);
@@ -106,12 +109,15 @@ impl LikeButton {
             return;
         };
         let client = self.player.net().client();
-        let resolved = match client.known_like_status(video_id.as_str()) {
-            Some(known) => known,
-            None => {
+        // What this session has seen wins: it is the only thing that knows
+        // about a like the listener has just made.
+        let resolved = match (client.known_like_status(video_id.as_str()), status) {
+            (Some(known), _) => known,
+            (None, Some(status)) => {
                 client.set_known_like_status(video_id.as_str(), status);
                 status
             }
+            (None, None) => LikeStatus::Indifferent,
         };
         self.video_id.replace(Some(video_id));
         self.status.set(resolved);

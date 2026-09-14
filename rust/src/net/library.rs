@@ -11,7 +11,6 @@ use super::browse::{Browse, Continuation};
 use crate::model::{ItemKind, MediaItem, Person};
 use crate::net::ytmusic::NetError;
 
-const SECTIONS: &str = "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents";
 
 /// Playlists in the library, every page. Automatic playlists (two-letter ids) sort first, as the Python page did.
 pub async fn library_playlists(api: Arc<dyn Browse>) -> Result<Vec<MediaItem>, NetError> {
@@ -61,13 +60,11 @@ async fn browse_all(api: &dyn Browse, browse_id: &str, container: Container) -> 
     };
     let mut entries = Vec::new();
     let mut token = None;
-    if let Some(sections) = response.pointer(SECTIONS).and_then(Value::as_array) {
-        for section in sections {
-            let node = section.get(container_key).or_else(|| section.pointer(&format!("/itemSectionRenderer/contents/0/{container_key}")));
-            if let Some(node) = node {
-                entries.extend(node.get(items_key).and_then(Value::as_array).cloned().unwrap_or_default());
-                token = token.or_else(|| continuation_token(node));
-            }
+    for section in crate::net::items::library_sections(&response) {
+        let node = section.get(container_key).or_else(|| section.pointer(&format!("/itemSectionRenderer/contents/0/{container_key}")));
+        if let Some(node) = node {
+            entries.extend(node.get(items_key).and_then(Value::as_array).cloned().unwrap_or_default());
+            token = token.or_else(|| continuation_token(node));
         }
     }
     let rest = Continuation::browse(api, token).pages(MAX_PAGES).collect(|page| page.iter().map(|e| (*e).clone()).collect()).await;
@@ -216,7 +213,7 @@ mod tests {
         let auth = ytmusicapi::BrowserAuth::from_file(std::env::var("HOME").unwrap() + "/.local/share/muse/headers_auth.json").unwrap();
         let api = YTMusicClient::builder().with_browser_auth(auth).build().unwrap();
         let response = api.post("browse", json!({ "browseId": "FEmusic_liked_playlists" })).await.unwrap();
-        let grid = response.pointer(&format!("{SECTIONS}/0/gridRenderer")).unwrap();
+        let grid = crate::net::items::library_sections(&response).first().and_then(|s| s.get("gridRenderer")).unwrap();
         println!("grid keys {:?}", grid.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()));
         let items = grid.get("items").and_then(Value::as_array).unwrap();
         println!("items {} last keys {:?}", items.len(), items.last().and_then(Value::as_object).map(|o| o.keys().cloned().collect::<Vec<_>>()));
@@ -233,6 +230,64 @@ mod tests {
                     println!("last keys {:?}", arr.last().and_then(Value::as_object).map(|o| o.keys().cloned().collect::<Vec<_>>()));
                 }
             }
+        }
+    }
+
+    /// Do two fetches in a row return the same card addresses?
+    /// `cargo test -- --ignored live_card_stability --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_card_stability() {
+        let paths = crate::paths::Paths::discover();
+        let client = crate::net::ytmusic::YtMusic::new(&paths).unwrap();
+        let api: std::sync::Arc<dyn crate::net::browse::Browse> = client.api();
+        let first = library_playlists(api.clone()).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let second = library_playlists(api).await.unwrap();
+
+        let mut same_url = 0;
+        let mut same_path = 0;
+        let mut identical = 0;
+        for (a, b) in first.iter().zip(second.iter()) {
+            if a.thumb == b.thumb {
+                same_url += 1;
+            }
+            let base = |t: &Option<String>| t.as_deref().unwrap_or("").split('?').next().unwrap_or("").to_owned();
+            if base(&a.thumb) == base(&b.thumb) {
+                same_path += 1;
+            }
+            if a == b {
+                identical += 1;
+            }
+        }
+        println!("{} cards: {same_url} same address, {same_path} same path, {identical} equal as items", first.len());
+        for card in second.iter().filter(|c| c.thumb.as_deref().is_some_and(|t| t.contains("/pl_c/"))).take(1) {
+            let signed = card.thumb.clone().unwrap();
+            let bare = signed.split('?').next().unwrap().to_owned();
+            let http = client.http();
+            for url in [signed, bare] {
+                let status = http.get(&url).send().await.map(|r| r.status().as_u16()).unwrap_or(0);
+                println!("HTTP {status} for {}", if url.contains('?') { "signed" } else { "unsigned" });
+            }
+        }
+        if let (Some(a), Some(b)) = (first.first(), second.first()) {
+            println!("first card before: {:?}", a.thumb);
+            println!("first card after:  {:?}", b.thumb);
+        }
+    }
+
+    /// What a library card carries, for the ownership decision.
+    /// `cargo test -- --ignored live_library_cards --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_library_cards() {
+        let paths = crate::paths::Paths::discover();
+        let client = crate::net::ytmusic::YtMusic::new(&paths).unwrap();
+        let api: std::sync::Arc<dyn crate::net::browse::Browse> = client.api();
+        let playlists = library_playlists(api).await.unwrap();
+        println!("account: {:?}", client.auth_state());
+        for p in playlists.iter().take(12) {
+            println!("{:<26} id={:<24} artists={:?} desc={:?}", p.title.chars().take(24).collect::<String>(), p.id, p.artists.iter().map(|a| a.name.clone()).collect::<Vec<_>>(), p.description);
         }
     }
 

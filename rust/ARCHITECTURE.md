@@ -56,6 +56,9 @@ src/audio/mod.rs   audio thread: playbin, spectrum, bus, ticker, commands
 src/net/mod.rs     NetHandle: tokio runtime handle, client, resolver
 src/net/ytmusic.rs session layer on the ytmusicapi crate: AuthState watch, headers_auth.json, media auth, ratings
 src/net/search.rs  search endpoint on the crate's send_request plus the shelf and card parser
+src/net/explore.rs explore feed, mood and genre categories, charts, and the page behind a pill
+src/net/home.rs    the home feed: shelves, their cards and the order they are shown in
+src/net/history.rs listening history: the plays, the token that forgets one, the ping that records one
 src/net/stream.rs  StreamResolver trait, yt-dlp subprocess impl, DemoResolver, StreamCache
 src/state/queue_entry.rs  QueueEntry GObject, one per queue row
 src/ui/mod.rs      CSS loading (style.css verbatim plus the player bar rules)
@@ -67,9 +70,8 @@ src/ui/like_button.rs LikeButton: click likes, hold or right-click dislikes, rat
 src/ui/marquee.rs  MarqueeLabel: scrolling title
 src/ui/context_menu.rs song menu builder with sections, prefix action groups, popup at pointer
 src/demo.rs        MIXTAPES_DEMO queue, autoplay and in-app PNG snapshots
-src/mock.rs        mock catalog with real video ids, stands in for the endpoints
 src/ui/context.rs  UiContext (player, net, paths, compact flag) and Navigator
-src/ui/pages/      home, explore (feed plus search results), library, stub page
+src/ui/pages/      home, explore (feed plus search results), category, all moods, library, history
 src/ui/widgets/    scroll box, media card, song list rows, SongRow, transport, visualizer, cover picture, playing tracker
 src/ui/expanded_player.rs  phone sheet: carousel, transport over visualizer, queue and lyrics tabs
 src/ui/cover_view.rs       desktop cover view: Player / Lyrics toggle, split with lyrics sidebar
@@ -77,7 +79,36 @@ src/ui/cover_view.rs       desktop cover view: Player / Lyrics toggle, split wit
 
 ## Navigation
 
-Each tab in the AdwViewStack is an AdwNavigationView whose root page is tagged "root". Pages never push directly: they call `Navigator::go` with a `NavRequest` (playlist, album, artist, category, search), and the window pushes onto the active tab, dismisses the cover view, and closes the search bar. Until those pages are ported the window pushes a stub NavigationPage, so back, Escape and the re-click-to-root gesture already work.
+Each tab in the AdwViewStack is an AdwNavigationView whose root page is tagged "root". Pages never push directly: they call `Navigator::go` with a `NavRequest` (playlist, album, artist, category, all moods, search), and the window pushes onto the active tab, dismisses the cover view, and closes the search bar. A pushed page's struct is stored on its NavigationPage under the "pushed" key: that is what keeps it alive, and it is how the window finds the page the search bar should filter and the refresh button should act on.
+
+The cover carousel keeps one page per queue entry, placeholder included: a
+hidden page shifts every page index after it, which is how a tap on the cover
+used to send the player back to the first track. The page a settle lands on is
+resolved back to its cover widget, and the player only follows a move of at
+least half a page, so a tap that snaps back changes nothing. The playing track
+falls back to the artwork the bar is showing when its queue row carries none.
+
+The cover only scrolls into place once the carousel has been laid out, which
+happens when the sheet opens, so a centre asked for while it is closed is
+repeated on the first frame after it appears.
+
+A settled carousel changes the track when three things hold: the listener
+touched it recently, it came to rest on a page, and the position moved from
+where the gesture began. The clock runs from the last movement rather than the
+gesture's start, because a slow swipe can take seconds and would otherwise be
+dropped, and the baseline is taken once per gesture, so a stream of scroll
+events cannot drag it along. Distance is not capped: a flick carries several
+covers and plays the one it lands on. A settle that never moved means the
+carousel is out of step with the queue, so it is put back on the playing
+track rather than followed.
+
+The three-dot menu is built whenever the track changes, not when it opens: a
+menu button with no model is insensitive, so a lazily built menu can never be
+clicked. Both player views carry it, with the song entries minus the ones they
+already show (play next, add to queue, go to artist, go to album) plus Stream
+Info, which asks the audio thread for the live pipeline state through
+`AudioCommand::Describe` and renders it in the dialog `present_stream_info`
+builds for either view.
 
 Expansion follows the Python split: on desktop the main GtkStack crossfades from "browser" to the cover view and the back button dismisses it; under 500px the player bar and switcher move into AdwBottomSheet's bottom bar and the expanded player becomes the sheet, so the bar's tap and drag-up (and the sheet's own swipe) open it.
 
@@ -199,15 +230,169 @@ server dropped from the application's shutdown handler, which is also what
 closing the last window reaches when background play is off; with it on, the
 window hides, the app stays up and the shell keeps its controls.
 
+## Explore
+
+`net/explore.rs` is the Explore feed's whole network side, ported from
+ytmusicapi's `get_explore`, `get_mood_categories` and `get_charts` plus
+MusicClient.get_category_page. `load_explore` is the shape `_fetch_explore`
+had: the feed decides whether the page has anything to show, while the
+categories and the charts run beside it and are dropped if they fail. The feed
+itself carries a mood and genre row of its own, which the page falls back to
+when the categories call is the one that failed.
+
+Charts read their shelves by position, the way ytmusicapi does: the country
+menu first, then the video playlists, a genre row on US only, and the artists.
+A premium account gets daily and weekly rows in place of the one video row,
+which is the extra shelf that tells them apart. Chart artists keep the rank and
+the trend arrow beside the item, since neither belongs on a `MediaItem`, and
+both are absent when the request is unauthenticated.
+
+The country menu writes `charts_country` into the prefs both apps share and
+reloads the feed. Python saved the same key but called `load_explore_data()`
+without forcing, which its own guard turned into a no-op, so the charts never
+followed the menu there.
+
+A pill opens `pages/category.rs`, which keeps the page struct on its
+NavigationPage: the fetch renders through a weak reference, so without that the
+page is dropped the moment the push returns and nothing appears. Past twenty
+pills the row ends in View All, which opens `pages/all_moods.rs`, the one page
+the search bar filters rather than searching from.
+
+## Home
+
+`net/home.rs` is the feed: `get_home` posts `FEmusic_home`, parses the shelves
+and follows the section-list token until it has the 25 rows the page asks for.
+A page that fails keeps what came before it, since a short feed beats an error
+screen.
+
+Python parsed that response twice. ytmusicapi's `parse_mixed_content` gave it
+the rows, then `get_home_full` re-read the raw response by hand for two things
+that parser drops: the strapline thumbnail on a "Based on ..." heading, and the
+`musicVideoType` that says whether a card is a song or a music video. The two
+were stitched together by shelf title. This parses once and keeps all three, so
+a shelf cannot take another's art by sharing its title, and the video type is
+there for every shelf rather than only the ones in the first response. That
+second part changes what is drawn: Python guesses at the kind of a card past
+the first page, and a shelf of songs it guesses wrong about renders as cards
+instead of the list it should be.
+
+`items::parse_mixed_item` is the dispatch those shelves share with a category
+page: the page a card's title opens says what the card is, and a card that only
+plays is told apart by its video type, then by the shelf it sits in, then by
+its thumbnail address — home.py's `_detect_kind`, in the parser rather than at
+every use.
+
+`home::arrange` is the ordering from `_populate_feed`: podcast shelves and
+empty ones go, the quick-picks row leaves the feed for the dial (borrowing
+Listen again when there is none), and the four named rows lead whatever order
+YouTube sent them in.
+
+Activating a song on Home plays its whole shelf and then keeps going, which is
+`Player::play_then_radio`: the queue is stamped with an id of its own, the
+watch playlist for the shelf's last track is fetched, and when it lands the
+stamp is replaced by the real playlist id so the infinite extender takes over.
+A listener who has moved on is left alone: the reply is dropped unless the
+stamp is still the one on the queue.
+
+## Listening history
+
+`net/history.rs` is the account's plays: `get_history` reads the shelves of
+`FEmusic_history`, keeping each row's heading ("Today", "Last week") and the
+feedback token that forgets it. A `HistoryEntry` is the track plus those two,
+since neither belongs on a `Track` that the queue and the player also carry.
+
+The page keeps its rows in one flat list. Activating one plays from there
+through the rest of the history under the source id `HISTORY`, and its menu
+carries the two entries history.py adds: Play, and Remove from History when
+the account is one YouTube offers that for. A removal is optimistic — the row
+and the cache entry go at once, the account is told afterwards — because the
+alternative is a page that sits still after a click.
+
+The cache is the `history_cache` row in the same SQLite file the downloads
+live in, which the Python app reads and writes too. It is stored in
+ytmusicapi's dict shape rather than this crate's types, so neither app can
+hand the other something it cannot read. It is what the page paints first,
+and what an offline open shows.
+
+Plays are recorded by `Player::record_play`, port of add_history_item_async:
+the `player` endpoint hands out a playback tracker URL for the video, and a
+GET to it with the session's cookies is what puts the play in the history.
+`history_mode` in the shared prefs decides when — "immediate" as the track
+loads, "after_30s" once it has played that long, "never" not at all — and the
+play is prepended to the cache so the page shows it before YouTube's own
+roll-up catches up.
+
+"Your Channel" is the same artist page as any other: the account's `@handle`
+resolves through `navigation/resolve_url` to a channel id, once per session.
+
+## Playing the audio version
+
+A music video and the song it belongs to are two videos, and the song is the
+cleaner master. `spawn_resolve` therefore looks for the twin before yt-dlp
+runs, so the id the resolver and the stream cache see is the one that will
+play. What comes back replaces the playing queue entry under its own id
+(`Queue::swap_current`, which `refine_current` refuses on purpose since a
+changed id normally means the queue moved on), keeping the album, duration and
+rating the entry already had.
+
+Two things keep the cost down. A track that already says it is the audio
+version is not asked about, and any id is asked about once per session.
+Python asks unconditionally and remembers only the hits, which is a request
+per play for every song whose twin does not exist. Gapless arming skips the
+lookup entirely: the swap belongs to the load path, as it does in Python.
+
+## Following the output device
+
+`pulsesink` fills its own `device` property in with the sink it landed on, and
+from its second connection onwards asks for that device by name. PipeWire
+never moves a stream that names its device, so plugging in headphones moved
+every other application's audio across and left this one on the speakers until
+it was restarted. Only the second track onwards was affected, which is why it
+looked like the app simply ignored the new device.
+
+The engine therefore owns its `autoaudiosink` rather than letting playbin make
+one, and clears every string `device` property under it before each load. A
+stream that asks for the default is moved with all the others, and the next
+track opens on whatever is default by then. Gapless transitions never pass
+through here, and do not need to: the stream they continue is already one that
+asked for the default.
+
 ## Not ported yet, and where it attaches
 
-- Upload tracks and non-seekable streams staged in tmpfs: a second `StreamResolver` impl that downloads to `/dev/shm` and returns a `file://` URI.
-- Mood and history pages: replace `stub::page` in `MainWindow::navigate`; playlists, albums, artists and discographies are live.
-- Home and Explore feed data: swap the remaining `mock::*` calls for browse endpoint parsers; search and the library are live already.
-- Audio-version swap (OMV to ATV): inside `spawn_resolve` before resolution, on `playlists::find_audio_version`.
-- History recording, scrobbling, Discord: subscribers to `PlayerState` property notifications, each an `Rc` on the GTK thread that spawns its own network work.
-- Downloads: a `DownloadManager` on tokio with its own progress `watch` channel.
-- GResource and style.css: `build.rs` with `glib-build-tools`, when the first real widget lands.
+Audited against the Python tree on 2026-09-14. The two smallest entries,
+library search and the audio-version swap, were closed the same day.
+
+- Lyrics, the largest gap: six providers and their ranking in `api/client.py`,
+  the per-track disk cache (`player/lyrics_cache.py`), the preferences
+  (`player/lyrics_prefs.py`) and the karaoke view itself
+  (`ui/widgets/lyrics_view.py`, 2700 lines: per-word sweep, interludes, second
+  lines, effects levels). `ui/widgets/lyrics_view.rs` is a placeholder the
+  expanded player and the cover view both show.
+- Settings dialog: `win.preferences` toasts. The prefs both apps share are
+  read and never written, so `history_mode`, the download format and the
+  folder layout still come from the Python app, and `history_mode` only takes
+  effect on the next launch.
+- Dynamic cover theming: `ui/cover_effects.py` and `ui/color_utils.py` behind
+  the blurred cover background, the cover-derived accent and the tinted
+  background. Nothing sets the `cover-bg-active` class the artist page checks,
+  and the visualizer uses the system accent instead of the cover's.
+- Scrobbling (`player/scrobbler.py`, Last.fm and ListenBrainz) and Discord
+  Rich Presence (`player/discord_rpc.py`): subscribers to `PlayerState`
+  property notifications, each an `Rc` on the GTK thread that spawns its own
+  network work.
+- Windows support: `player/smtc.py` (system media controls),
+  `ui/tray_win.py`, `ui/login_webview_win.py`. MPRIS covers Linux.
+- Non-seekable streams staged in tmpfs: a second `StreamResolver` impl that
+  downloads to `/dev/shm`. Uploads no longer need it now that PO tokens are
+  minted, so this is only for streams that refuse to seek.
+- GResource and style.css: `build.rs` with `glib-build-tools`. The CSS lives
+  in `ui/mod.rs` as string constants today.
+- Packaging: the Flatpak manifest and the AUR PKGBUILD still build the Python
+  app; nothing ships the Rust binary yet.
+
+Dead in the Python tree, deliberately skipped: `ui/pages/mix.py`,
+`ui/pages/mood.py`, `ui/pages/album.py` and `ui/queue.py` are never
+constructed by anything.
 
 ## Queue, transport and track list
 
@@ -234,3 +419,134 @@ when a page fails. Capture with `cargo test -- --ignored capture_fixtures`;
 rendered order, search text, selection and sort metrics. The page renders what
 it returns and mirrors it into the GTK store. The "which list is the source"
 question and the sort rules live there, not at fifteen call sites.
+
+## Cover sizes
+
+A cover is asked for at twice the size it will be drawn at, which is what
+`get_high_res_url(url, target_size)` did. Asking for the largest copy and
+letting GTK scale it down looks worse, not better: the scaling happens in sRGB,
+so a 544 px cover squeezed into a 56 px row comes out measurably darker and
+duller than the same picture fetched at 112 px (mean saturation 88 against 95,
+channels off by up to 95 against the Python render). It is also fifteen times
+the bytes per row, which is why history and library rows used to fill in slowly.
+
+`CoverImage` passes its own size, so a resize or a compact toggle changes what
+the next load asks for. `None` means the largest copy and is for the three
+places that want it: the cover view's full-window picture, the art written for
+the media controls, and the art embedded in a download.
+
+## Playlist covers
+
+Setting a cover goes through YouTube's resumable upload, ported from
+set_playlist_thumbnail: ask `playlist_image_upload/playlist_custom_thumbnail`
+for an upload URL with the browser session headers, send the bytes, then bind
+the blob id it returns through `browse/edit_playlist` with
+ACTION_SET_CUSTOM_THUMBNAIL. The crop is capped at 1024 pixels first.
+
+The chosen image is also mirrored under `<music>/Playlists` so the page shows
+it at once, and its `.jpg.url` sidecar is left on the address of the cover
+being replaced. The mirror then leaves the file alone until YouTube serves a
+different address, which is the uploaded image. Deleting that sidecar instead,
+as the port first did, made the mirror pull the old cover straight back over
+the new one, which looked like the change had no effect.
+
+A mirrored cover keeps its path when its picture changes, and the texture cache
+is keyed by path, so replacing the file is not enough: the page would keep
+drawing the old image a few seconds later, when the reload pulled that path
+back in. `forget_texture` drops the cached decode after an edit and after the
+mirror replaces a file, and the cover reloads if it is the one on screen.
+
+A playlist is not readable the moment it is created, so `await_playlist` polls
+until the browse endpoint serves it before the new page is opened.
+
+## Uploads
+
+`src/net/uploads.rs` is the uploaded library: `upload_song` sends a file to
+upload.youtube.com in the two resumable steps ytmusicapi uses, `delete_entity`
+removes a song or an album, `artist_songs` lists one artist's uploads, and
+`upload_stream` asks the player endpoint where an upload plays from.
+
+Uploads answer browse requests with two tabs, Library and Uploads, and the rows
+are in the second one. `items::library_sections` takes the first tab that has
+sections, which is why the uploaded library reads at all: pointing at the first
+tab returned nothing and the whole library looked empty.
+
+The upload queue lives in `ui/upload_queue.rs` behind the header's upload pie,
+one file at a time, and the library reloads when it drains. Uploaded albums can
+be deleted from their card, and an uploaded artist opens a page of their songs.
+
+Uploaded tracks stream and download like anything else, through `net/potoken.rs`.
+YouTube serves them to the `web_music` client alone, and gates that client's
+audio formats behind a GVS PO token bound to the video id. Without one, yt-dlp
+finds no formats and reports the track as "Video unavailable", which is what
+made the uploaded library look unplayable. `rustypipe-botguard` mints a token
+in about 30ms once it has a snapshot; tokens are cached until shortly before
+they expire and passed as `--extractor-args youtube:po_token=web_music.gvs+...`
+by both the resolver and the download path. The `youtubepot-rustypipebotguard`
+argument the Python app passes does nothing here, because that provider is a
+yt-dlp plugin and only the binary is installed. Minting our own token sidesteps
+the plugin entirely, and it also restores the PO-token gated Opus formats for
+ordinary songs.
+
+## Library actions
+
+`sync_store` brings a section's model in line with a fetch without disturbing
+what did not change: matching rows at each end stay, and the span between them
+is replaced in one splice. It also ignores the signature on a thumbnail
+address, because YouTube signs those per request and comparing them raw marks
+almost every row changed, which rebuilt the grid and made every cover blink on
+each reload. The cost is that a new cover keeps its old address, so the page
+that set one tells the library outright through `refresh_library_card`.
+
+The library reloads when it comes back into view, so a rename, a new cover or
+a deletion made on a playlist page is there without reaching for the refresh
+button. A page edit also asks for a reload, but that one runs while YouTube is
+still serving the old card: the address of a changed cover takes a second or
+two to turn over. A library shown again within two seconds is left alone, so
+flicking between tabs does not refetch.
+
+Right-clicking a library playlist offers what the Python library offered: one
+of yours can be deleted, one you saved can be dropped again. Ownership is read
+from the card the way `is_own_playlist` reads it from a page, so the same rule
+covers both, and a playlist page opened from the disk cache knows it too rather
+than waiting for the live fetch to enable Edit and Delete.
+
+The + beside Playlists opens the same dialog Python had (title, description,
+visibility, private by default), creates the playlist through
+`playlists::create_playlist`, refreshes the library and opens the new page.
+The uploads tab's all-songs button pushes a virtual playlist page over
+`get_upload_songs`, the way the Downloads page sits over the download library.
+
+## Downloads
+
+`src/downloads/` is the offline half of the app, a port of downloads.py.
+
+`store.rs` owns the library: one SQLite table at `<music>/.mixtapes/library.db`,
+the same file and columns the Python app writes, so a song downloaded in either
+app is known to both. It also renames a pre-rename `~/Music/YouTube Music`
+folder on first open and rewrites the rows that pointed into it. `is_downloaded`
+answers from an in-memory map because list rows ask it once per row, and a row
+whose file vanished is dropped as it is read.
+
+`mod.rs` is the manager. A job is a track plus the album it came from. It fills
+in missing metadata (`get_watch_playlist`, then `get_album` for album artist,
+year and track number), hands the audio to yt-dlp with the format from prefs,
+embeds tags and cover art with lofty, moves the file into
+`<music>/[Songs/]<artist>/<album>/`, and records it. Three downloads run at
+once. Progress comes back through an `async_channel` of `Event`, which the GTK
+side pumps in `UiContext::pump_downloads` and hands to listeners: the header
+pie and its popover rows, and the playlist page's row badges.
+
+`naming.rs` holds the layout rules (format table, folder structure, the
+filename byte budget against the filesystem limit), `tags.rs` the tag and cover
+writing, `m3u.rs` the `.m3u8` mirrors under `<music>/Playlists` that follow a
+downloaded playlist and are pruned or repointed when files go or move.
+
+The player checks the library before resolving a stream, so a downloaded track
+plays instantly and offline, gapless arming included. The cover of a downloaded
+track is cached under `<cache>/local_covers` and rows prefer it, which is what
+makes art appear with no connection.
+
+Settings for format and folder layout are not ported yet: the values come from
+the shared prefs.json, so changing them in the Python app changes both.
+`Downloads::migrate_layout` is ready for the settings page to call.

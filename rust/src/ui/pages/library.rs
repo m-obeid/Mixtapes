@@ -15,6 +15,8 @@ use crate::net::library;
 use crate::state::{MediaObject, sync_store};
 use crate::ui::context::{NavRequest, UiContext};
 use crate::ui::cover::CoverImage;
+use crate::model::LikeStatus;
+use crate::ui::context_menu::{self, MenuAction};
 use crate::ui::pages::attach_item_menu;
 use crate::ui::toast;
 use crate::ui::widgets::card_grid::CardGrid;
@@ -23,12 +25,17 @@ use crate::ui::widgets::media_card::{CardOptions, MediaCard};
 const VIEW_MODES: [&str; 2] = ["list", "grid"];
 const DEFAULT_VIEW_MODE: &str = "grid";
 const DOWNLOADS_ID: &str = "DL";
+/// A library shown again within this long is fresh enough to leave alone.
+const RELOAD_GAP: std::time::Duration = std::time::Duration::from_secs(2);
 
 struct Section {
     root: gtk::Box,
     list: gtk::ListBox,
     grid: CardGrid,
     store: gio::ListStore,
+    /// What the list and the grid show: the store with the search applied.
+    filtered: gtk::FilterListModel,
+    filter: gtk::CustomFilter,
     cards: Rc<RefCell<Vec<Rc<MediaCard>>>>,
 }
 
@@ -45,9 +52,15 @@ pub struct LibraryPage {
     empty_uploads: gtk::Label,
     sections: Vec<Rc<Section>>,
     upload_sections: Vec<Rc<Section>>,
+    uploads_tab: gtk::ToggleButton,
     ctx: Rc<UiContext>,
     is_loading: Cell<bool>,
+    /// When the last load finished, so coming back into view does not refetch
+    /// what was just fetched.
+    loaded_at: Cell<Option<std::time::Instant>>,
     compact: Rc<Cell<bool>>,
+    /// What the search bar last typed, lowercased. Shared with every filter.
+    query: Rc<RefCell<String>>,
     on_refresh_done: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
@@ -70,6 +83,8 @@ impl LibraryPage {
         let uploads_actions = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).visible(false).build();
         let all_songs = gtk::Button::builder().icon_name("audio-x-generic-symbolic").css_classes(["flat", "circular"]).valign(gtk::Align::Center).tooltip_text("All Uploaded Songs").build();
         uploads_actions.append(&all_songs);
+        let upload = gtk::Button::builder().icon_name("document-send-symbolic").css_classes(["flat", "circular"]).valign(gtk::Align::Center).tooltip_text("Upload Songs").build();
+        uploads_actions.append(&upload);
         tab_row.append(&uploads_actions);
         content_box.append(&tab_row);
 
@@ -78,17 +93,20 @@ impl LibraryPage {
 
         let lib_content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).build();
         let new_playlist = gtk::Button::builder().icon_name("list-add-symbolic").css_classes(["flat", "circular"]).valign(gtk::Align::Center).tooltip_text("New Playlist").build();
-        let playlists = Section::new("Playlists", Some(&new_playlist));
-        let albums = Section::new("Albums", None);
-        let artists = Section::new("Artists", None);
+        // One query behind every section, library and uploads alike: the
+        // search bar filters whichever sub-tab is showing, like Python's.
+        let query: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+        let playlists = Section::new("Playlists", Some(&new_playlist), &query);
+        let albums = Section::new("Albums", None, &query);
+        let artists = Section::new("Artists", None, &query);
         for s in [&playlists, &albums, &artists] {
             lib_content.append(&s.root);
         }
         lib_stack.add_titled(&lib_content, Some("library"), "Library");
 
         let uploads_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).vexpand(true).build();
-        let up_albums = Section::new("Albums", None);
-        let up_artists = Section::new("Artists", None);
+        let up_albums = Section::new("Albums", None, &query);
+        let up_artists = Section::new("Artists", None, &query);
         uploads_box.append(&up_albums.root);
         uploads_box.append(&up_artists.root);
         let empty_uploads = gtk::Label::builder().label("No uploaded music").css_classes(["dim-label"]).visible(false).build();
@@ -118,9 +136,12 @@ impl LibraryPage {
             empty_uploads,
             sections: vec![playlists, albums, artists],
             upload_sections: vec![up_albums, up_artists],
+            uploads_tab: upl_tab.clone(),
             ctx,
             is_loading: Cell::new(false),
+            loaded_at: Cell::new(None),
             compact: Rc::new(Cell::new(false)),
+            query,
             on_refresh_done: RefCell::new(None),
         });
         for section in page.sections.iter().chain(page.upload_sections.iter()) {
@@ -160,10 +181,32 @@ impl LibraryPage {
                     p.apply_layout();
                 }
             });
+            let weak = Rc::downgrade(&page);
+            new_playlist.connect_clicked(move |_| {
+                if let Some(p) = weak.upgrade() {
+                    p.ask_new_playlist();
+                }
+            });
             let root = page.root.clone();
-            new_playlist.connect_clicked(move |_| toast(&root, "New playlist dialog not ported yet"));
-            let root = page.root.clone();
-            all_songs.connect_clicked(move |_| toast(&root, "Uploaded songs page not ported yet"));
+            all_songs.connect_clicked(move |_| {
+                let _ = root.activate_action("win.open-uploads", None);
+            });
+            let ctx = page.ctx.clone();
+            upload.connect_clicked(move |_| ctx.nav.pick_uploads());
+        }
+        {
+            // Coming back from a playlist shows the library again. Reload then,
+            // so a rename, a new cover or a deletion is there without reaching
+            // for the refresh button. A page edit asks for a reload too, but
+            // that runs while YouTube is still serving the old card.
+            let weak = Rc::downgrade(&page);
+            page.root.connect_map(move |_| {
+                let Some(p) = weak.upgrade() else { return };
+                let recent = p.loaded_at.get().is_some_and(|at| at.elapsed() < RELOAD_GAP);
+                if !recent {
+                    p.load_library(true);
+                }
+            });
         }
         for section in page.sections.iter().chain(page.upload_sections.iter()) {
             page.bind_section(section);
@@ -313,6 +356,7 @@ impl LibraryPage {
             page.loading.set_visible(false);
             page.uploads_loading.set_visible(false);
             page.is_loading.set(false);
+            page.loaded_at.set(Some(std::time::Instant::now()));
             page.apply_layout();
             if let Some(done) = page.on_refresh_done.borrow_mut().take() {
                 done();
@@ -335,24 +379,159 @@ impl LibraryPage {
         }
     }
 
+    /// Port of LibraryPage.filter_content: the global search bar filters the
+    /// library's own cards instead of searching YouTube, and a section the
+    /// query empties goes with it. Uploads filter too, so whichever sub-tab
+    /// is showing reacts.
+    pub fn filter_content(&self, text: &str) {
+        self.query.replace(text.trim().to_lowercase());
+        for section in self.sections.iter().chain(self.upload_sections.iter()) {
+            section.filter.changed(gtk::FilterChange::Different);
+        }
+        self.apply_layout();
+    }
+
     fn apply_layout(&self) {
         let show_grid = self.view_mode() == "grid";
         for section in self.sections.iter().chain(self.upload_sections.iter()) {
             section.list.set_visible(!show_grid);
             section.grid.set_visible(show_grid);
-            section.root.set_visible(section.store.n_items() > 0);
+            section.root.set_visible(section.filtered.n_items() > 0);
         }
         self.sync_view_toggle();
     }
 
     /// The list binds to the store; the grid rebuilds from it on every change.
+    /// Port of _on_artist_activated for uploads: a page of that artist's
+    /// uploaded songs, filled once the fetch lands.
+    fn open_upload_artist(&self, item: &MediaItem) {
+        let (browse_id, name) = (item.id.clone(), item.title.clone());
+        let _ = self.root.activate_action("win.open-upload-artist", Some(&(browse_id, name).to_variant()));
+    }
+
+    /// A card whose picture changed, though its address looks the same.
+    ///
+    /// Clearing the thumbnail makes the next sync see a difference and rebind
+    /// that one row with the fresh address, rather than keeping the picture it
+    /// already has.
+    pub fn invalidate_card(self: &Rc<Self>, playlist_id: &str) {
+        let Some(section) = self.sections.first() else { return };
+        for index in 0..section.store.n_items() {
+            let Some(object) = section.store.item(index).and_downcast::<MediaObject>() else { continue };
+            let item = object.item();
+            if item.id != playlist_id {
+                continue;
+            }
+            if let Some(url) = &item.thumb {
+                crate::ui::cover::forget_texture(url);
+            }
+            section.store.splice(index, 1, &[MediaObject::new(MediaItem { thumb: None, ..item })]);
+            return;
+        }
+    }
+
+    /// Demo hook: switch to the uploads tab.
+    pub fn show_uploads_for_demo(&self) {
+        self.uploads_tab.set_active(true);
+    }
+
+    /// Demo hook: what each library playlist card offers in its menu.
+    pub fn card_menus_for_demo(&self) {
+        let Some(section) = self.sections.first() else { return };
+        for index in 0..section.store.n_items().min(10) {
+            let Some(object) = section.store.item(index).and_downcast::<MediaObject>() else { continue };
+            let item = object.item();
+            if item.kind != ItemKind::Playlist || item.id == DOWNLOADS_ID {
+                continue;
+            }
+            let labels: Vec<String> = playlist_extras(&self.ctx, self.root.upcast_ref(), &item).into_iter().map(|action| action.label).collect();
+            tracing::info!(title = %item.title, id = %item.id, ?labels, "card menu");
+        }
+    }
+
+    /// Demo hook: open the new playlist dialog.
+    pub fn new_playlist_for_demo(self: &Rc<Self>) {
+        self.ask_new_playlist();
+    }
+
+    /// Port of on_new_playlist_clicked: title, description and visibility,
+    /// then create it and open it.
+    fn ask_new_playlist(self: &Rc<Self>) {
+        if !self.ctx.net.client().is_authenticated() {
+            toast(&self.root, "Sign in to create playlists");
+            return;
+        }
+        let dialog = adw::Dialog::builder().title("New Playlist").content_width(500).build();
+        let main_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        let header = adw::HeaderBar::builder().css_classes(["flat"]).build();
+        let create_btn = gtk::Button::builder().label("Create").css_classes(["suggested-action"]).build();
+        header.pack_start(&create_btn);
+        main_box.append(&header);
+
+        let prefs_page = adw::PreferencesPage::new();
+        let group = adw::PreferencesGroup::builder().title("Playlist Details").margin_start(12).margin_end(12).margin_top(12).margin_bottom(12).build();
+        let title_row = adw::EntryRow::builder().title("Title").activates_default(true).build();
+        let desc_row = adw::EntryRow::builder().title("Description").build();
+        let privacy_row = adw::ComboRow::builder().title("Visibility").model(&gtk::StringList::new(&["Public", "Private", "Unlisted"])).selected(1).build();
+        group.add(&title_row);
+        group.add(&desc_row);
+        group.add(&privacy_row);
+        prefs_page.add(&group);
+        main_box.append(&prefs_page);
+        dialog.set_child(Some(&main_box));
+
+        let page = self.clone();
+        let dialog_c = dialog.clone();
+        let (title_c, desc_c, privacy_c) = (title_row.clone(), desc_row.clone(), privacy_row.clone());
+        create_btn.connect_clicked(move |_| {
+            let title = title_c.text().trim().to_owned();
+            if title.is_empty() {
+                return;
+            }
+            let description = desc_c.text().trim().to_owned();
+            let privacy = ["PUBLIC", "PRIVATE", "UNLISTED"][privacy_c.selected().min(2) as usize];
+            page.create_playlist(title, description, privacy);
+            dialog_c.close();
+        });
+        dialog.present(Some(&self.root));
+        title_row.grab_focus();
+    }
+
+    /// Create it on the runtime, then refresh the library and open the page.
+    fn create_playlist(self: &Rc<Self>, title: String, description: String, privacy: &'static str) {
+        let api = self.ctx.net.client().api();
+        let title_c = title.clone();
+        let handle = self.ctx.net.spawn(async move {
+            let id = crate::net::playlists::create_playlist(&api, &title_c, &description, privacy).await?;
+            // The browse endpoint needs a moment before it will serve it.
+            crate::net::playlists::await_playlist(&api, &id).await;
+            Ok::<String, crate::net::ytmusic::NetError>(id)
+        });
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some(page) = weak.upgrade() else { return };
+            match handle.await {
+                Ok(Ok(playlist_id)) => {
+                    tracing::info!(playlist_id, title, "playlist created");
+                    page.load_library(true);
+                    page.ctx.nav.go(NavRequest::Playlist { id: playlist_id, title, thumb: None });
+                }
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, "playlist creation failed");
+                    toast(&page.root, "Could not create the playlist");
+                }
+                Err(_) => {}
+            }
+        });
+    }
+
     fn bind_section(self: &Rc<Self>, section: &Rc<Section>) {
         let ctx = self.ctx.clone();
-        section.list.bind_model(Some(&section.store), move |object| {
+        section.list.bind_model(Some(&section.filtered), move |object| {
             let item = object.downcast_ref::<MediaObject>().map(MediaObject::item).unwrap_or_default();
             let row = list_row(&ctx, &item);
             if item.id != DOWNLOADS_ID {
-                attach_item_menu(&ctx, &row, item.clone());
+                attach_playlist_menu(&ctx, &row, item.clone());
             }
             row.upcast()
         });
@@ -361,13 +540,13 @@ impl LibraryPage {
         section.list.connect_row_activated(move |list, row| {
             let (Some(page), Some(section)) = (weak_page.upgrade(), weak_section.upgrade()) else { return };
             let _ = list;
-            if let Some(item) = section.store.item(row.index().max(0) as u32).and_downcast::<MediaObject>() {
+            if let Some(item) = section.filtered.item(row.index().max(0) as u32).and_downcast::<MediaObject>() {
                 page.activate(&item.item());
             }
         });
         let weak_page = Rc::downgrade(self);
         let weak_section = Rc::downgrade(section);
-        section.store.connect_items_changed(move |_, _, _, _| {
+        section.filtered.connect_items_changed(move |_, _, _, _| {
             if let (Some(page), Some(section)) = (weak_page.upgrade(), weak_section.upgrade()) {
                 page.rebuild_grid(&section);
             }
@@ -377,8 +556,8 @@ impl LibraryPage {
     fn rebuild_grid(self: &Rc<Self>, section: &Rc<Section>) {
         section.grid.remove_all();
         section.cards.borrow_mut().clear();
-        for i in 0..section.store.n_items() {
-            let Some(item) = section.store.item(i).and_downcast::<MediaObject>().map(|o| o.item()) else { continue };
+        for i in 0..section.filtered.n_items() {
+            let Some(item) = section.filtered.item(i).and_downcast::<MediaObject>().map(|o| o.item()) else { continue };
             let (subtitle, fallback_icon, custom_icon) = card_style(&item);
             let card = MediaCard::new(&self.ctx, item.clone(), CardOptions { title_lines: 2, subtitle: Some(subtitle), fallback_icon, custom_icon });
             let weak = Rc::downgrade(self);
@@ -388,7 +567,7 @@ impl LibraryPage {
                 }
             });
             if item.id != DOWNLOADS_ID {
-                attach_item_menu(&self.ctx, card.widget(), item.clone());
+                attach_playlist_menu(&self.ctx, card.widget(), item.clone());
             }
             section.grid.append(card.widget());
             section.cards.borrow_mut().push(card);
@@ -404,6 +583,11 @@ impl LibraryPage {
             }
             ItemKind::Playlist => self.ctx.nav.go(NavRequest::Playlist { id: item.id.clone(), title: item.title.clone(), thumb: item.thumb.clone() }),
             ItemKind::Album => self.ctx.nav.go(NavRequest::Album { id: item.id.clone(), title: item.title.clone(), thumb: item.thumb.clone() }),
+            // An uploaded artist has no artist page, only the songs of theirs
+            // that were uploaded.
+            ItemKind::Artist if item.id.starts_with("FEmusic_library_privately_owned_artist") => {
+                self.open_upload_artist(item);
+            }
             ItemKind::Artist => self.ctx.nav.go(NavRequest::Artist { id: Some(item.id.clone()), name: item.title.clone() }),
             _ => {}
         }
@@ -411,7 +595,7 @@ impl LibraryPage {
 }
 
 impl Section {
-    fn new(title: &str, action: Option<&gtk::Button>) -> Rc<Self> {
+    fn new(title: &str, action: Option<&gtk::Button>, query: &Rc<RefCell<String>>) -> Rc<Self> {
         let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).visible(false).build();
         let header = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).height_request(34).build();
         header.append(&gtk::Label::builder().label(title).css_classes(["heading"]).halign(gtk::Align::Start).valign(gtk::Align::Center).hexpand(true).build());
@@ -425,8 +609,24 @@ impl Section {
         grid.set_valign(gtk::Align::Start);
         grid.set_visible(false);
         root.append(&grid);
-        Rc::new(Self { root, list, grid, store: gio::ListStore::new::<MediaObject>(), cards: Rc::new(RefCell::new(Vec::new())) })
+        let store = gio::ListStore::new::<MediaObject>();
+        let query = query.clone();
+        let filter = gtk::CustomFilter::new(move |object| {
+            let query = query.borrow();
+            query.is_empty() || object.downcast_ref::<MediaObject>().is_some_and(|object| matches_query(&object.item(), &query))
+        });
+        let filtered = gtk::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
+        Rc::new(Self { root, list, grid, store, filtered, filter, cards: Rc::new(RefCell::new(Vec::new())) })
     }
+}
+
+/// Port of _apply_library_filter's match: the title, and for an album the
+/// artists behind it as well.
+fn matches_query(item: &MediaItem, query: &str) -> bool {
+    if item.title.to_lowercase().contains(query) {
+        return true;
+    }
+    item.kind == ItemKind::Album && item.artists_text().to_lowercase().contains(query)
 }
 
 /// The synthetic Downloads playlist library.py inserts at index one.
@@ -533,4 +733,232 @@ fn list_rows(list: &gtk::ListBox) -> Vec<gtk::ListBoxRow> {
         }
     }
     rows
+}
+
+/// A library card's menu, with the entries only the library offers: a
+/// playlist of your own can be deleted, one you saved can be dropped again.
+fn attach_playlist_menu(ctx: &Rc<UiContext>, widget: &impl IsA<gtk::Widget>, item: MediaItem) {
+    let is_playlist = item.kind == ItemKind::Playlist && item.id != DOWNLOADS_ID;
+    if !is_playlist && !is_upload_album(&item) {
+        attach_item_menu(ctx, widget, item);
+        return;
+    }
+    let open = {
+        let ctx = ctx.clone();
+        let widget = widget.clone().upcast::<gtk::Widget>();
+        Rc::new(move |x: f64, y: f64| {
+            // Built at each open: signing in or out changes what is offered.
+            let extras = playlist_extras(&ctx, &widget, &item);
+            crate::ui::context_menu::show_item_menu_with(&widget, x, y, &item, &ctx, extras);
+        })
+    };
+    let right = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).build();
+    let o = open.clone();
+    right.connect_released(move |_, _, x, y| o(x, y));
+    widget.add_controller(right);
+    let long = gtk::GestureLongPress::new();
+    long.connect_pressed(move |_, x, y| open(x, y));
+    widget.add_controller(long);
+}
+
+/// An album that lives in the uploaded library rather than on YouTube Music.
+fn is_upload_album(item: &MediaItem) -> bool {
+    item.kind == ItemKind::Album && item.id.starts_with("FEmusic_library_privately_owned_release")
+}
+
+fn playlist_extras(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) -> Vec<MenuAction> {
+    if !ctx.net.client().is_authenticated() {
+        return Vec::new();
+    }
+    let (id, title) = (item.id.clone(), item.title.clone());
+    if is_upload_album(item) {
+        let (ctx, anchor) = (ctx.clone(), anchor.clone());
+        return vec![MenuAction::new("Delete Album", context_menu::Section::Remove, move || confirm_delete_upload(&ctx, &anchor, &id, &title))];
+    }
+    if owns_playlist(account_name(ctx).as_deref(), item) {
+        let (ctx, anchor) = (ctx.clone(), anchor.clone());
+        return vec![MenuAction::new("Delete Playlist", context_menu::Section::Remove, move || confirm_delete(&ctx, &anchor, &id, &title))];
+    }
+    let (ctx, anchor) = (ctx.clone(), anchor.clone());
+    vec![MenuAction::new("Remove from Library", context_menu::Section::Remove, move || {
+        let api = ctx.net.client().api();
+        let pid = id.clone();
+        let handle = ctx.net.spawn(async move { crate::net::playlists::rate_playlist(&api, &pid, LikeStatus::Indifferent).await });
+        let (ctx, anchor) = (ctx.clone(), anchor.clone());
+        glib::spawn_future_local(async move {
+            match handle.await {
+                Ok(Ok(())) => {
+                    ctx.net.caches().clear_library_ids();
+                    toast(&anchor, "Removed from library");
+                    ctx.nav.refresh_library();
+                }
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, "remove from library failed");
+                    toast(&anchor, "Failed to remove");
+                }
+                Err(_) => {}
+            }
+        });
+    })]
+}
+
+/// Port of is_own_playlist read from a library card: the system lists are
+/// never owned, and otherwise the card's author is the account holder.
+fn owns_playlist(account: Option<&str>, item: &MediaItem) -> bool {
+    let Some(account) = account.filter(|name| !name.is_empty()) else { return false };
+    if ["LM", "SE", "SS", "VLLM"].contains(&item.id.as_str()) {
+        return false;
+    }
+    if !(item.id.starts_with("PL") || item.id.starts_with("VL")) {
+        return false;
+    }
+    match item.artists.first() {
+        Some(author) => author.name == account,
+        None => true,
+    }
+}
+
+/// The signed in account's name, which is what a card's author is compared to.
+fn account_name(ctx: &Rc<UiContext>) -> Option<String> {
+    match ctx.net.client().auth_state() {
+        crate::net::ytmusic::AuthState::Authenticated(info) => Some(info.name),
+        _ => None,
+    }
+}
+
+/// Port of _confirm_delete_upload: an uploaded album and its songs, gone.
+fn confirm_delete_upload(ctx: &Rc<UiContext>, anchor: &gtk::Widget, entity_id: &str, title: &str) {
+    let dialog = adw::AlertDialog::builder()
+        .heading("Delete Upload?")
+        .body(format!("Are you sure you want to delete \"{title}\"?\nThis cannot be undone."))
+        .build();
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("delete", "Delete");
+    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    let parent = anchor.clone();
+    let (ctx, anchor, id) = (ctx.clone(), anchor.clone(), entity_id.to_owned());
+    dialog.connect_response(None, move |_, response| {
+        if response != "delete" {
+            return;
+        }
+        let api = ctx.net.client().api();
+        let entity = id.clone();
+        let handle = ctx.net.spawn(async move { crate::net::uploads::delete_entity(&api, &entity).await });
+        let (ctx, anchor) = (ctx.clone(), anchor.clone());
+        glib::spawn_future_local(async move {
+            match handle.await {
+                Ok(Ok(())) => {
+                    toast(&anchor, "Upload deleted");
+                    ctx.nav.refresh_library();
+                }
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, "delete upload failed");
+                    toast(&anchor, "Failed to delete the upload");
+                }
+                Err(_) => {}
+            }
+        });
+    });
+    dialog.present(Some(&parent));
+}
+
+/// Port of _confirm_delete_playlist, the same wording the playlist page uses.
+fn confirm_delete(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: &str, title: &str) {
+    let dialog = adw::AlertDialog::builder()
+        .heading("Delete Playlist?")
+        .body(format!("Are you sure you want to delete \"{title}\"?\nThis action cannot be undone."))
+        .build();
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("delete", "Delete");
+    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    let parent = anchor.clone();
+    let (ctx, anchor, id) = (ctx.clone(), anchor.clone(), playlist_id.to_owned());
+    dialog.connect_response(None, move |_, response| {
+        if response != "delete" {
+            return;
+        }
+        let api = ctx.net.client().api();
+        let pid = id.clone();
+        let handle = ctx.net.spawn(async move { crate::net::playlists::delete_playlist(&api, &pid).await });
+        let (ctx, anchor) = (ctx.clone(), anchor.clone());
+        glib::spawn_future_local(async move {
+            match handle.await {
+                Ok(Ok(())) => {
+                    toast(&anchor, "Playlist deleted");
+                    ctx.nav.refresh_library();
+                }
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, "delete playlist failed");
+                    toast(&anchor, "Failed to delete the playlist");
+                }
+                Err(_) => {}
+            }
+        });
+    });
+    dialog.present(Some(&parent));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Person;
+
+    #[test]
+    fn the_search_matches_a_title_anywhere_in_it() {
+        let playlist = MediaItem { kind: ItemKind::Playlist, title: "Miku Favorites".into(), ..MediaItem::default() };
+        assert!(matches_query(&playlist, "miku"));
+        assert!(matches_query(&playlist, "favorites"), "not just the start");
+        assert!(!matches_query(&playlist, "luka"));
+    }
+
+    #[test]
+    fn an_album_also_matches_the_artist_behind_it() {
+        let album = MediaItem {
+            kind: ItemKind::Album,
+            title: "Draining Love Story".into(),
+            artists: vec![Person { name: "Sewerslvt".into(), id: None }],
+            ..MediaItem::default()
+        };
+        assert!(matches_query(&album, "sewerslvt"));
+
+        // A playlist by the same author does not: only albums carry artists
+        // into the match, which is the rule _apply_library_filter used.
+        let playlist = MediaItem { kind: ItemKind::Playlist, artists: album.artists.clone(), ..MediaItem::default() };
+        assert!(!matches_query(&playlist, "sewerslvt"));
+    }
+
+    fn card(id: &str, author: Option<&str>) -> MediaItem {
+        MediaItem {
+            kind: ItemKind::Playlist,
+            id: id.to_owned(),
+            title: "A playlist".to_owned(),
+            artists: author.into_iter().map(|name| Person { name: name.to_owned(), id: None }).collect(),
+            ..MediaItem::default()
+        }
+    }
+
+    #[test]
+    fn a_card_in_your_own_name_is_yours() {
+        assert!(owns_playlist(Some("Mohamad Obeid"), &card("PLl4feRsMPyje", Some("Mohamad Obeid"))));
+        assert!(owns_playlist(Some("Mohamad Obeid"), &card("PLnoauthor", None)), "your own lists often show no author");
+        assert!(!owns_playlist(Some("Mohamad Obeid"), &card("PLsaved", Some("Someone Else"))));
+    }
+
+    #[test]
+    fn the_lists_youtube_keeps_are_never_yours() {
+        for id in ["LM", "SE", "SS", "VLLM"] {
+            assert!(!owns_playlist(Some("Mohamad Obeid"), &card(id, Some("Mohamad Obeid"))), "{id}");
+        }
+        assert!(!owns_playlist(Some("Mohamad Obeid"), &card("MPREb_abc", Some("Mohamad Obeid"))), "an album is not a playlist of yours");
+    }
+
+    #[test]
+    fn signed_out_nothing_is_yours() {
+        assert!(!owns_playlist(None, &card("PLl4feRsMPyje", Some("Mohamad Obeid"))));
+        assert!(!owns_playlist(Some(""), &card("PLl4feRsMPyje", None)));
+    }
 }

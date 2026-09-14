@@ -6,14 +6,35 @@
 //! MIXTAPES_DEMO_AUTOPLAY=1   press play three seconds after the window shows
 //! MIXTAPES_DEMO_SNAPSHOT=p   write p-1.png at 2.5 s and p-2.png at 11 s from inside GTK
 //! MIXTAPES_DEMO_QUEUE=1      open the queue sidebar after staging
-//! MIXTAPES_DEMO_EXPAND=1     open the expanded player five seconds in
+//! MIXTAPES_DEMO_EXPAND=1|ms  open the expanded player, five seconds in by default
 //! MIXTAPES_DEMO_TAB=name     select home, library or search at startup
 //! MIXTAPES_DEMO_SEARCH=text  run a search at startup
 //! MIXTAPES_DEMO_ACTIVATE=1   five seconds in, activate the first playable search result
+//! MIXTAPES_DEMO_HOME_PLAY=ms  play the first playable row of the Home feed
+//! MIXTAPES_DEMO_HISTORY=ms   open the listening history page
+//! MIXTAPES_DEMO_HISTORY_MENU=ms  log what a history row's menu offers
+//! MIXTAPES_DEMO_CHANNEL=ms   open the account's own channel
 //! MIXTAPES_DEMO_WIDTH=px     initial window width, under 500 for the phone layout
+//! MIXTAPES_DEMO_HEIGHT=px    initial window height, for capturing a whole long page
+//! MIXTAPES_DEMO_SCROLL=ms[,px]  scroll the visible page down before the snapshot
+//! MIXTAPES_DEMO_CATEGORY=ms  open the first genre page from Explore
+//! MIXTAPES_DEMO_ALL_MOODS=ms  open the full genre list from Explore
+//! MIXTAPES_DEMO_CHARTS_COUNTRY=code[,ms]  pick a country in the charts menu
 //! MIXTAPES_DEMO_LOGIN=1      open the sign-in dialog and snapshot it as <prefix>-login.png
 //! MIXTAPES_DEMO_SNAPSHOT_AT=ms  delay of the second snapshot, default 11000
 //! MIXTAPES_DEMO_SIFT=text,sort  search and sort the open playlist
+//! MIXTAPES_DEMO_DOWNLOAD=[title|]ids  download video ids, optionally as a playlist
+//! MIXTAPES_DEMO_DOWNLOADS=1   open the Downloads page
+//! MIXTAPES_DEMO_UPLOADS=ms    open the Uploaded Songs page
+//! MIXTAPES_DEMO_UPLOADS_TAB=ms  switch the library to its uploads tab
+//! MIXTAPES_DEMO_UPLOAD_ARTIST=id[,name]  open an uploaded artist's songs
+//! MIXTAPES_DEMO_SET_COVER=path  set the open playlist's cover from an image
+//! MIXTAPES_DEMO_NEW_PLAYLIST=ms  open the new playlist dialog
+//! MIXTAPES_DEMO_CARD_MENUS=ms  log what the library card menus offer
+//! MIXTAPES_DEMO_BACK=ms      press the back button
+//! MIXTAPES_DEMO_STREAM_INFO=ms  open the expanded player's Stream Info dialog
+//! MIXTAPES_DEMO_SWIPE=ms[,covers]  swipe the carousel over two seconds
+//! MIXTAPES_DEMO_DELETE_DOWNLOAD=id  delete one download
 //! MIXTAPES_DEMO_PLAYLIST=id  open a playlist or album page 1.5 s in
 //! MIXTAPES_DEMO_PLAYLIST_PLAY=1  press Play on that page six seconds in
 //! MIXTAPES_DEMO_DISCOGRAPHY=id  open a discography grid for a browse id 1.5 s in
@@ -90,8 +111,41 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     tracing::info!(tracks = demo.tracks.len(), autoplay = demo.autoplay, "demo queue staged");
     ctx.player.stage_tracks(demo.tracks.clone(), 0);
     let window = main_window.window();
+    let height = std::env::var("MIXTAPES_DEMO_HEIGHT").ok().and_then(|h| h.parse::<i32>().ok()).unwrap_or(700);
     if let Some(width) = std::env::var("MIXTAPES_DEMO_WIDTH").ok().and_then(|w| w.parse::<i32>().ok()) {
-        window.set_default_size(width, 700);
+        window.set_default_size(width, height);
+    }
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_CHARTS_COUNTRY") {
+        let (code, ms) = spec.split_once(',').unwrap_or((spec.as_str(), "7000"));
+        let (code, delay) = (code.to_owned(), ms.parse::<u64>().unwrap_or(7000));
+        let ctx_w = ctx.clone();
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!(code, picked = mw.pick_chart_country_for_demo(&code), "demo: picking a chart country");
+            }
+        });
+    }
+    for (var, open) in [("MIXTAPES_DEMO_CATEGORY", true), ("MIXTAPES_DEMO_ALL_MOODS", false)] {
+        let Ok(ms) = std::env::var(var) else { continue };
+        let ctx_w = ctx.clone();
+        let delay = ms.parse::<u64>().unwrap_or(6000);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                let opened = if open { mw.open_category_for_demo() } else { mw.open_all_moods_for_demo() };
+                tracing::info!(opened, "demo: opening a category page");
+            }
+        });
+    }
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SCROLL") {
+        let mut parts = spec.split(',');
+        let ms: u64 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(8_000);
+        let pixels: f64 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(800.0);
+        let ctx_w = ctx.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!(pixels, scrolled = mw.scroll_visible_page(pixels), "demo scroll");
+            }
+        });
     }
     if let Ok(tab) = std::env::var("MIXTAPES_DEMO_TAB") {
         main_window.select_tab(&tab);
@@ -107,6 +161,145 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
+    if let Ok(path) = std::env::var("MIXTAPES_DEMO_SET_COVER") {
+        let ctx_w = ctx.clone();
+        glib::timeout_add_local_once(Duration::from_millis(6000), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                let set = mw.set_cover_on_visible_playlist(PathBuf::from(&path));
+                tracing::info!(path, set, "demo: setting a playlist cover");
+            }
+        });
+    }
+
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_UPLOAD_ARTIST") {
+        let ctx_w = ctx.clone();
+        glib::timeout_add_local_once(Duration::from_millis(4000), move || {
+            let (browse_id, name) = spec.split_once(',').unwrap_or((spec.as_str(), "Uploads"));
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!(browse_id, "demo: opening an uploaded artist");
+                mw.open_upload_artist(browse_id, name);
+            }
+        });
+    }
+
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_UPLOADS_TAB") {
+        let ctx_w = ctx.clone();
+        let delay = ms.parse::<u64>().unwrap_or(4000);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                mw.window().present();
+                mw.show_uploads_tab();
+            }
+        });
+    }
+
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_UPLOADS") {
+        let ctx_w = ctx.clone();
+        let delay = ms.parse::<u64>().unwrap_or(2500);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!("demo: opening uploaded songs");
+                mw.open_uploads();
+            }
+        });
+    }
+
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_BACK") {
+        let ctx_w = ctx.clone();
+        let delay = ms.parse::<u64>().unwrap_or(9000);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!("demo: going back");
+                mw.go_back();
+            }
+        });
+    }
+
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_CARD_MENUS") {
+        let ctx_w = ctx.clone();
+        let delay = ms.parse::<u64>().unwrap_or(6000);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                mw.card_menus();
+            }
+        });
+    }
+
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_NEW_PLAYLIST") {
+        let ctx_w = ctx.clone();
+        let delay = ms.parse::<u64>().unwrap_or(3000);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!("demo: new playlist dialog");
+                mw.window().present();
+                mw.new_playlist_dialog();
+            }
+        });
+    }
+
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SWIPE") {
+        let ctx_w = ctx.clone();
+        let (ms, covers) = spec.split_once(',').unwrap_or((spec.as_str(), "1"));
+        let delay = ms.parse::<u64>().unwrap_or(8000);
+        let covers = covers.parse::<i32>().unwrap_or(1);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!(covers, "demo: swipe");
+                mw.slow_swipe(covers);
+            }
+        });
+    }
+
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_STREAM_INFO") {
+        let ctx_w = ctx.clone();
+        let delay = ms.parse::<u64>().unwrap_or(9000);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                // Painting stops while the window is hidden, and so do the
+                // callbacks the sheet needs. Raise it like a user would.
+                mw.window().present();
+                mw.show_stream_info();
+            }
+        });
+    }
+
+    if std::env::var("MIXTAPES_DEMO_DOWNLOADS").is_ok() {
+        let ctx_w = ctx.clone();
+        glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                mw.open_downloads();
+            }
+        });
+    }
+
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_DL_POPOVER").ok().map(|v| v.parse::<u64>().unwrap_or(6000)).map(Ok::<u64, ()>).unwrap_or(Err(())) {
+        let ctx_w = ctx.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                mw.show_download_popover();
+            }
+        });
+    }
+
+    if let Ok(video_id) = std::env::var("MIXTAPES_DEMO_DELETE_DOWNLOAD") {
+        let ctx_w = ctx.clone();
+        glib::timeout_add_local_once(Duration::from_millis(4000), move || {
+            let removed = ctx_w.downloads.delete(&video_id);
+            tracing::info!(video_id, removed, "demo: deleting a download");
+        });
+    }
+
+    if let Ok(video_id) = std::env::var("MIXTAPES_DEMO_DOWNLOAD") {
+        let ctx_w = ctx.clone();
+        glib::timeout_add_local_once(Duration::from_millis(2500), move || {
+            let Some(mw) = ctx_w.window.borrow().as_ref().cloned() else { return };
+            let (title, ids) = video_id.split_once('|').unwrap_or(("", video_id.as_str()));
+            let tracks: Vec<Track> = ids.split(',').filter(|v| !v.is_empty()).map(|v| Track { video_id: VideoId(v.to_owned()), ..Track::default() }).collect();
+            tracing::info!(count = tracks.len(), title, "demo: downloading");
+            mw.download_tracks(tracks, title, "PLDEMO");
+        });
+    }
+
     if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SIFT") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(9000), move || {
@@ -210,11 +403,44 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if std::env::var("MIXTAPES_DEMO_EXPAND").ok().as_deref() == Some("1") {
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_HISTORY_MENU") {
         let ctx_w = ctx.clone();
-        glib::timeout_add_local_once(Duration::from_millis(5000), move || {
+        let delay = ms.parse::<u64>().unwrap_or(9000);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!(extras = ?mw.history_menu_for_demo(), "demo: history row menu");
+            }
+        });
+    }
+    for (var, history) in [("MIXTAPES_DEMO_HISTORY", true), ("MIXTAPES_DEMO_CHANNEL", false)] {
+        let Ok(ms) = std::env::var(var) else { continue };
+        let ctx_w = ctx.clone();
+        let delay = ms.parse::<u64>().unwrap_or(4000);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!(history, "demo: opening an account page");
+                if history { mw.open_history() } else { mw.open_own_channel() }
+            }
+        });
+    }
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_HOME_PLAY") {
+        let ctx_w = ctx.clone();
+        let delay = ms.parse::<u64>().unwrap_or(8000);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!(played = mw.activate_first_home_row(), "demo: playing a home row");
+            }
+        });
+    }
+    if let Ok(value) = std::env::var("MIXTAPES_DEMO_EXPAND") {
+        let ctx_w = ctx.clone();
+        let delay = value.parse::<u64>().ok().filter(|ms| *ms > 1).unwrap_or(5000);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
                 tracing::info!("demo: expanding player");
+                // Painting stops while the window is hidden, and the sheet
+                // needs a frame to lay itself out. Raise it like a user would.
+                mw.window().present();
                 mw.expand_player();
             }
         });
@@ -345,6 +571,10 @@ fn snapshot_any(window: &gtk::Window, path: &Path) {
         }
     });
     handler.replace(Some(id));
+    // A window the compositor thinks is hidden stops painting, and then the
+    // after-paint callback never comes. Raising it first keeps captures
+    // reliable when the terminal is in front.
+    window.present();
     window.queue_draw();
 }
 

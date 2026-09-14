@@ -1,7 +1,7 @@
 //! Port of ui/context_menu.py for songs. Sections keep the Python order:
 //! queue, nav, actions, remove, clipboard. Entries whose backing API is
-//! not ported yet (radio, playlists, downloads, metadata refresh) are
-//! added when those land, so the builder never offers a dead item.
+//! not ported yet (metadata refresh) are added when those land, so the
+//! builder never offers a dead item.
 
 use std::rc::Rc;
 
@@ -19,9 +19,11 @@ pub enum Section {
     Actions,
     Remove,
     Clipboard,
+    /// Diagnostics, last in the menu like the Python section of the same name.
+    Debug,
 }
 
-const SECTIONS: [Section; 5] = [Section::Queue, Section::Nav, Section::Actions, Section::Remove, Section::Clipboard];
+const SECTIONS: [Section; 6] = [Section::Queue, Section::Nav, Section::Actions, Section::Remove, Section::Clipboard, Section::Debug];
 
 /// A page-specific entry merged into one of the standard sections.
 pub struct MenuAction {
@@ -49,6 +51,8 @@ pub struct SongMenuOptions {
     pub selection: Vec<Track>,
     /// Needed for the entries that talk to the network: Start Radio and Add to Playlist.
     pub ctx: Option<Rc<UiContext>>,
+    /// The playlist or album the rows came from, so a download is tagged with it.
+    pub album: Option<(String, String)>,
 }
 
 struct Builder<'a> {
@@ -164,6 +168,30 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
             builder.add(Section::Actions, &label, "add-to-playlist", false, Rc::new(move || {
                 add_to_playlist_via_popover(&ctx, &anchor, video_ids.clone());
             }));
+        }
+    }
+
+    if let Some(ctx) = opts.ctx.clone() {
+        if !tracks.is_empty() && !hidden("download") {
+            let (album_title, album_id) = opts.album.clone().unwrap_or_default();
+            let pending: Vec<Track> = tracks.iter().filter(|t| !ctx.downloads.is_downloaded(&t.video_id.0)).cloned().collect();
+            let downloaded_single = !multi && !vid.is_empty() && ctx.downloads.is_downloaded(&vid);
+            if multi && !pending.is_empty() && online {
+                let label = format!("Download {} Songs", pending.len());
+                let ctx = ctx.clone();
+                builder.add(Section::Actions, &label, "download", false, Rc::new(move || ctx.download(pending.clone(), &album_title, &album_id)));
+            } else if downloaded_single {
+                let anchor = anchor.clone();
+                let (ctx, vid_c) = (ctx.clone(), vid.clone());
+                builder.add(Section::Actions, "Remove Download", "remove-download", false, Rc::new(move || {
+                    ctx.downloads.delete(&vid_c);
+                    toast(&anchor, "Download removed");
+                }));
+            } else if !multi && !vid.is_empty() && online {
+                let ctx = ctx.clone();
+                let tracks = tracks.clone();
+                builder.add(Section::Actions, "Download", "download", false, Rc::new(move || ctx.download(tracks.clone(), &album_title, &album_id)));
+            }
         }
     }
 

@@ -676,7 +676,8 @@ impl Mpris {
 /// Fetch the art, centre-crop it to a square, upscale anything small and
 /// write it as JPEG under the cache. Returns the file it wrote.
 async fn write_art_file(http: reqwest::Client, auth: Option<HttpAuth>, dir: PathBuf, video_id: String, thumbnail: String) -> Option<PathBuf> {
-    let bytes = fetch_cover_bytes(&http, auth.as_ref(), &thumbnail).await?;
+    // None: the media controls want the largest copy, not a row-sized one.
+    let bytes = fetch_cover_bytes(&http, auth.as_ref(), &thumbnail, None).await?;
     // A unique name per track: clients cache art by address.
     let safe: String = video_id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
     let path = dir.join(format!("mpris_art_{safe}.jpg"));

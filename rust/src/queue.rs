@@ -339,6 +339,16 @@ impl Queue {
 
     // -- listener preferences ---------------------------------------------
 
+    /// Hand the queue over to a radio it did not start as.
+    ///
+    /// A section played from Home is a plain queue with a stamp on it; once
+    /// its radio arrives the stamp is replaced by the playlist behind it, and
+    /// from there the infinite extender keeps it going.
+    pub fn adopt_source(&mut self, source_id: String, infinite: bool) {
+        self.source_id = Some(source_id);
+        self.infinite = infinite;
+    }
+
     pub fn set_repeat(&mut self, mode: RepeatMode) {
         self.repeat = mode;
     }
@@ -377,6 +387,21 @@ impl Queue {
     }
 
     // -- track upkeep -----------------------------------------------------
+
+    /// Replace the playing track with its audio twin, which carries a
+    /// different video id. `refine_current` refuses that on purpose, since
+    /// everywhere else a changed id means the queue moved on.
+    pub fn swap_current(&mut self, previous: &VideoId, replacement: Track) -> bool {
+        let Some(slot) = self.current.and_then(|i| self.tracks.get_mut(i)) else { return false };
+        if slot.video_id != *previous {
+            return false;
+        }
+        if let Some(original) = self.original.iter_mut().find(|t| t.video_id == *previous) {
+            *original = replacement.clone();
+        }
+        *slot = replacement;
+        true
+    }
 
     /// Replace the playing track with a richer copy, once the resolver has
     /// filled in the title, artist or art a search result lacked.
@@ -421,6 +446,22 @@ mod tests {
 
     fn track(id: &str) -> Track {
         Track { video_id: VideoId(id.into()), title: id.into(), ..Track::default() }
+    }
+
+    #[test]
+    fn the_audio_twin_takes_the_playing_slot_under_its_own_id() {
+        let mut q = queue(&["video", "other"], 0);
+        let mut twin = track("audio");
+        twin.title = "Album master".into();
+
+        assert!(q.swap_current(&VideoId("video".into()), twin));
+        assert_eq!(q.current_track().map(|t| t.video_id.0.clone()), Some("audio".into()));
+        assert_eq!(q.current_track().map(|t| t.title.clone()), Some("Album master".into()));
+        assert_eq!(q.len(), 2, "the swap replaces the entry, it does not add one");
+
+        // A queue that moved on while the lookup ran is left alone.
+        assert!(!q.swap_current(&VideoId("video".into()), track("late")));
+        assert_eq!(q.current_track().map(|t| t.video_id.0.clone()), Some("audio".into()));
     }
 
     fn queue(ids: &[&str], current: usize) -> Queue {

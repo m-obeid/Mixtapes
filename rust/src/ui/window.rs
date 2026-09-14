@@ -15,18 +15,23 @@ use gtk::{gdk, gio, glib};
 use crate::App;
 use crate::net::ytmusic::AuthState;
 use crate::state::PlayerState;
+use crate::model::Track;
 use crate::ui::context::{NavRequest, UiContext};
 use crate::ui::cover::load_texture;
 use crate::ui::cover_view::DesktopCoverView;
+use crate::ui::download_queue::DownloadQueue;
+use crate::ui::upload_queue::UploadQueue;
 use crate::ui::expanded_player::ExpandedPlayer;
 use crate::ui::login::LoginDialog;
 use crate::ui::pages::artist::ArtistPage;
+use crate::ui::pages::all_moods::AllMoodsPage;
+use crate::ui::pages::category::CategoryPage;
 use crate::ui::pages::discography::DiscographyPage;
+use crate::ui::pages::history::HistoryPage;
 use crate::ui::pages::explore::ExplorePage;
 use crate::ui::pages::home::HomePage;
 use crate::ui::pages::library::LibraryPage;
 use crate::ui::pages::playlist::{InitialData, PlaylistPage};
-use crate::ui::pages::stub;
 use crate::ui::player_bar::{PlayerBar, PlayerBarCallbacks};
 use crate::ui::queue_panel::QueuePanel;
 
@@ -66,8 +71,14 @@ pub struct MainWindow {
     sidebar_explicitly_opened: Cell<bool>,
     prev_transition: Cell<(gtk::StackTransitionType, u32)>,
     search_timer: RefCell<Option<glib::SourceId>>,
+    /// The channel behind the account's handle, resolved once per session.
+    own_channel: RefCell<Option<String>>,
     upload_progress: Rc<ProgressButton>,
     download_progress: Rc<ProgressButton>,
+    /// Rows in the download popover, one per queued track.
+    download_queue: Rc<DownloadQueue>,
+    /// Rows in the upload popover, one per file on its way out.
+    upload_queue: Rc<UploadQueue>,
     lib_refresh: LibraryRefresh,
 }
 
@@ -75,7 +86,10 @@ impl MainWindow {
     pub fn new(app: &adw::Application, ctx: &Rc<App>) -> Rc<Self> {
         let player = ctx.player.clone();
         let state = player.state().clone();
-        let ui = UiContext::new(player.clone(), ctx.net.clone(), ctx.paths.clone());
+        let ui = UiContext::new(player.clone(), ctx.net.clone(), ctx.paths.clone(), ctx.downloads.clone());
+        if let Some(events) = ctx.download_events.borrow_mut().take() {
+            ui.pump_downloads(events);
+        }
 
         let window = adw::ApplicationWindow::builder()
             .application(app)
@@ -260,6 +274,8 @@ impl MainWindow {
         toast_overlay.set_child(Some(&bottom_sheet));
         window.set_content(Some(&toast_overlay));
 
+        let ui_for_queue = ui.clone();
+        let upload_items = upload_progress.items_box().clone();
         let this = Rc::new(Self {
             window,
             toast_overlay,
@@ -289,11 +305,37 @@ impl MainWindow {
             sidebar_explicitly_opened: Cell::new(false),
             prev_transition: Cell::new((gtk::StackTransitionType::SlideLeftRight, 300)),
             search_timer: RefCell::new(None),
+            own_channel: RefCell::new(None),
             upload_progress,
+            download_queue: DownloadQueue::new(ui_for_queue.clone(), download_progress.items_box().clone()),
+            upload_queue: UploadQueue::new(ui_for_queue, upload_items),
             download_progress,
             lib_refresh,
         });
 
+        {
+            let weak = Rc::downgrade(&this);
+            this.ui.set_download_sink(move |tracks, title, id| {
+                if let Some(window) = weak.upgrade() {
+                    window.download_tracks(tracks, &title, &id);
+                }
+            });
+        }
+        {
+            let weak = Rc::downgrade(&this);
+            this.upload_queue.set_on_progress(move |fraction| {
+                if let Some(window) = weak.upgrade() {
+                    window.upload_progress.set_fraction(fraction);
+                    if fraction.is_none() {
+                        window.add_toast("Uploads complete");
+                    }
+                }
+            });
+            let queue = this.upload_queue.clone();
+            let root = this.window.clone();
+            this.ui.nav.set_upload_picker(move || queue.pick_files(&root));
+        }
+        this.wire_downloads();
         this.wire_refresh();
         this.wire_player_bar();
         this.wire_navigation(&header_bar, &queue_header_of(&this.queue_panel));
@@ -338,6 +380,42 @@ impl MainWindow {
 
     pub fn select_tab(&self, name: &str) {
         self.view_stack.set_visible_child_name(name);
+    }
+
+    /// Demo hooks: open a genre page and the full genre list from Explore.
+    pub fn open_category_for_demo(&self) -> bool {
+        self.explore.open_first_category_for_demo()
+    }
+
+    pub fn open_all_moods_for_demo(&self) -> bool {
+        self.explore.open_all_moods_for_demo()
+    }
+
+    /// Demo hook: what the visible history page's first row menu offers.
+    pub fn history_menu_for_demo(&self) -> Vec<String> {
+        match self.visible_pushed_page() {
+            Some(PushedPage::History(page)) => page.menu_extras_for_demo(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Demo hook: play the first playable row of the Home feed.
+    pub fn activate_first_home_row(&self) -> bool {
+        self.home.activate_first_playable()
+    }
+
+    pub fn pick_chart_country_for_demo(&self, code: &str) -> bool {
+        self.explore.pick_chart_country_for_demo(code)
+    }
+
+    /// Demo hook: scroll the visible page down, so a capture can reach a
+    /// section below the fold. Returns false when nothing there scrolls.
+    pub fn scroll_visible_page(&self, pixels: f64) -> bool {
+        let Some(page) = self.active_nav().and_then(|nav| nav.visible_page()) else { return false };
+        let Some(scroller) = first_scroller(page.upcast_ref::<gtk::Widget>()) else { return false };
+        let adj = scroller.vadjustment();
+        adj.set_value((adj.value() + pixels).clamp(0.0, (adj.upper() - adj.page_size()).max(0.0)));
+        true
     }
 
     pub fn search(self: &Rc<Self>, query: &str) {
@@ -489,6 +567,85 @@ impl MainWindow {
     }
 
     /// Header pie for downloads. `None` hides the button.
+    /// Queue tracks for offline playback. Port of window.py's download_tracks:
+    /// the popover lists them, the pie follows the queue, and a playlist title
+    /// also registers an .m3u8 mirror.
+    pub fn download_tracks(&self, tracks: Vec<Track>, album_title: &str, album_id: &str) {
+        let queued = self.download_queue.start(tracks, album_title, album_id);
+        if queued == 0 {
+            self.add_toast("Already downloaded");
+            return;
+        }
+        self.download_progress.set_fraction(Some(0.0));
+    }
+
+    /// Follow the queue: the pie shows how far it is, a toast says when it is done.
+    fn wire_downloads(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        self.ui.on_download(move |event| {
+            let Some(this) = weak.upgrade() else { return false };
+            match event {
+                crate::downloads::Event::Advanced { done, total, .. } => {
+                    this.download_progress.set_fraction(Some(*done as f64 / (*total).max(1) as f64));
+                }
+                crate::downloads::Event::Idle { downloaded } => {
+                    if *downloaded > 0 {
+                        this.add_toast("Downloads complete");
+                    }
+                    this.download_queue.clear_later();
+                    this.download_progress.set_fraction(None);
+                    this.ui.nav.refresh_library();
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+
+    /// Port of _open_upload_picker: choose files and send them to the
+    /// uploaded library.
+    pub fn open_upload_picker(&self) {
+        self.upload_queue.pick_files(&self.window);
+    }
+
+    /// Demo hook: press the back button.
+    pub fn go_back(self: &Rc<Self>) {
+        self.on_back_clicked();
+    }
+
+    /// Demo hook: switch the library to its uploads tab.
+    pub fn show_uploads_tab(&self) {
+        self.library.show_uploads_for_demo();
+    }
+
+    /// Demo hook: log what each library card menu offers.
+    pub fn card_menus(&self) {
+        self.library.card_menus_for_demo();
+    }
+
+    /// Demo hook: open the new playlist dialog on the library page.
+    pub fn new_playlist_dialog(&self) {
+        self.library.new_playlist_for_demo();
+    }
+
+    /// Demo hook: swipe the cover carousel slowly, `covers` along.
+    pub fn slow_swipe(&self, covers: i32) {
+        self.expanded_player.slow_swipe_for_demo(covers);
+    }
+
+    /// Demo hook: open the Stream Info dialog of whichever player view shows.
+    pub fn show_stream_info(&self) {
+        match self.is_compact.get() {
+            true => self.expanded_player.show_stream_info(),
+            false => self.cover_view.show_stream_info(),
+        }
+    }
+
+    /// Demo hook: open the download popover.
+    pub fn show_download_popover(&self) {
+        self.download_progress.popup();
+    }
+
     pub fn set_download_progress(&self, fraction: Option<f64>) {
         self.download_progress.set_fraction(fraction);
     }
@@ -711,6 +868,17 @@ impl MainWindow {
         self.open_playlist(id, None);
     }
 
+    /// Demo hook: set the cover of the visible playlist page.
+    pub fn set_cover_on_visible_playlist(&self, image: std::path::PathBuf) -> bool {
+        match self.visible_pushed_page() {
+            Some(PushedPage::Playlist(p)) => {
+                p.set_cover_for_demo(image);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Demo hook: search and sort the visible playlist page.
     pub fn sift_visible_playlist(&self, filter: Option<&str>, sort: Option<u32>) -> bool {
         match self.visible_pushed_page() {
@@ -802,7 +970,7 @@ impl MainWindow {
         });
     }
 
-    /// Port of _open_downloads_from_menu. Without the downloads database the list is empty.
+    /// Port of _open_downloads_from_menu: a playlist page over the download library.
     pub fn open_downloads(self: &Rc<Self>) {
         let page = PlaylistPage::new(self.ui.clone());
         page.prepare_virtual("DOWNLOADS");
@@ -818,10 +986,88 @@ impl MainWindow {
             }
         });
         let page_c = page.clone();
+        let downloads = self.ui.downloads.clone();
         nav_page.connect_shown(move |_| {
             let page = page_c.clone();
+            let downloads = downloads.clone();
             glib::idle_add_local_once(move || {
-                page.show_virtual("Downloaded Songs", Vec::new(), "0 songs available offline")
+                let tracks: Vec<Track> = downloads.all().iter().map(|entry| entry.track()).collect();
+                let meta = format!("{} {} available offline", tracks.len(), if tracks.len() == 1 { "song" } else { "songs" });
+                page.show_virtual("Downloaded Songs", tracks, &meta);
+            });
+        });
+        unsafe { nav_page.set_data("pushed", PushedPage::Playlist(page)) };
+        self.push_page(nav_page);
+    }
+
+    /// Port of _open_all_songs: every uploaded track on one page.
+    ///
+    /// The page opens at once and fills when the fetch lands, the way the
+    /// Python page pushed first and loaded after.
+    pub fn open_uploads(self: &Rc<Self>) {
+        let page = PlaylistPage::new(self.ui.clone());
+        page.prepare_virtual("UPLOADS");
+        let nav_page = adw::NavigationPage::builder().child(page.widget()).title("Uploaded Songs").build();
+        let weak = Rc::downgrade(self);
+        page.set_on_header_title(move |title| {
+            if let Some(w) = weak.upgrade() {
+                w.title_widget.set_title(if title.is_empty() { APP_NAME } else { title });
+            }
+        });
+        let page_c = page.clone();
+        let net = self.ui.net.clone();
+        nav_page.connect_shown(move |_| {
+            let page = page_c.clone();
+            let api = net.client().api();
+            let handle = net.spawn(async move { crate::net::playlists::get_upload_songs(&api).await });
+            glib::spawn_future_local(async move {
+                let tracks = match handle.await {
+                    Ok(Ok(tracks)) => tracks,
+                    Ok(Err(err)) => {
+                        tracing::warn!(%err, "uploaded songs fetch failed");
+                        Vec::new()
+                    }
+                    Err(_) => return,
+                };
+                let meta = format!("{} uploaded {}", tracks.len(), if tracks.len() == 1 { "song" } else { "songs" });
+                page.show_virtual("Uploaded Songs", tracks, &meta);
+            });
+        });
+        unsafe { nav_page.set_data("pushed", PushedPage::Playlist(page)) };
+        self.push_page(nav_page);
+    }
+
+    /// Port of _on_artist_activated for uploads: one page with that artist's
+    /// uploaded songs.
+    pub fn open_upload_artist(self: &Rc<Self>, browse_id: &str, name: &str) {
+        let page = PlaylistPage::new(self.ui.clone());
+        page.prepare_virtual("UPLOADS");
+        let nav_page = adw::NavigationPage::builder().child(page.widget()).title(name).build();
+        let weak = Rc::downgrade(self);
+        page.set_on_header_title(move |title| {
+            if let Some(w) = weak.upgrade() {
+                w.title_widget.set_title(if title.is_empty() { APP_NAME } else { title });
+            }
+        });
+        let page_c = page.clone();
+        let net = self.ui.net.clone();
+        let (browse_id, name) = (browse_id.to_owned(), name.to_owned());
+        nav_page.connect_shown(move |_| {
+            let (page, name) = (page_c.clone(), name.clone());
+            let api = net.client().api();
+            let browse_id = browse_id.clone();
+            let handle = net.spawn(async move { crate::net::uploads::artist_songs(&api, &browse_id, 200).await });
+            glib::spawn_future_local(async move {
+                let tracks = match handle.await {
+                    Ok(Ok(tracks)) => tracks,
+                    Ok(Err(err)) => {
+                        tracing::warn!(%err, "uploaded artist fetch failed");
+                        Vec::new()
+                    }
+                    Err(_) => return,
+                };
+                let meta = format!("{} uploaded {}", tracks.len(), if tracks.len() == 1 { "song" } else { "songs" });
+                page.show_virtual(&name, tracks, &meta);
             });
         });
         unsafe { nav_page.set_data("pushed", PushedPage::Playlist(page)) };
@@ -854,6 +1100,95 @@ impl MainWindow {
         page.load_discography(channel_id, title, browse_id, params, initial);
     }
 
+    /// Port of _open_own_channel: the account's @handle names a channel, and
+    /// that channel is an artist page like any other.
+    pub fn open_own_channel(self: &Rc<Self>) {
+        if let Some(channel) = self.own_channel.borrow().clone() {
+            self.open_artist(&channel, None);
+            return;
+        }
+        let AuthState::Authenticated(account) = self.ui.net.client().auth_state() else { return };
+        let Some(handle) = account.handle.clone().filter(|h| !h.is_empty()) else { return };
+        let name = account.name.clone();
+        let api = self.ui.net.client().api();
+        let handle_c = handle.clone();
+        let task = self.ui.net.spawn(async move { crate::net::artist::resolve_handle(&api, &handle_c).await });
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some(w) = weak.upgrade() else { return };
+            match task.await {
+                Ok(Ok(Some(channel))) => {
+                    w.own_channel.replace(Some(channel.clone()));
+                    w.open_artist(&channel, Some(&name));
+                }
+                _ => w.add_toast("Couldn't open your channel"),
+            }
+        });
+    }
+
+    /// Port of _open_history_from_menu: the page builds its rows once it is
+    /// on screen, so the push animation is not stalled by a few hundred of them.
+    pub fn open_history(self: &Rc<Self>) {
+        if !self.ui.online.is_online() {
+            self.add_toast("History requires an internet connection");
+            return;
+        }
+        if !matches!(self.ui.net.client().auth_state(), AuthState::Authenticated(_)) {
+            self.add_toast("Sign in to view listening history");
+            return;
+        }
+        let page = HistoryPage::new(self.ui.clone());
+        let weak = Rc::downgrade(self);
+        page.set_on_header_title(move |title| {
+            if let Some(w) = weak.upgrade() {
+                w.title_widget
+                    .set_title(if title.is_empty() { APP_NAME } else { title });
+            }
+        });
+        let nav_page = adw::NavigationPage::builder()
+            .child(page.widget())
+            .title("Listening History")
+            .build();
+        let page_c = page.clone();
+        nav_page.connect_shown(move |_| page_c.load());
+        unsafe { nav_page.set_data("pushed", PushedPage::History(page)) };
+        self.push_page(nav_page);
+    }
+
+    /// Port of open_category: the carousels behind one mood or genre pill.
+    fn open_category(self: &Rc<Self>, params: &str, title: &str) {
+        let page = CategoryPage::new(self.ui.clone());
+        let weak = Rc::downgrade(self);
+        page.set_on_header_title(move |title| {
+            if let Some(w) = weak.upgrade() {
+                w.title_widget
+                    .set_title(if title.is_empty() { APP_NAME } else { title });
+            }
+        });
+        let nav_page = adw::NavigationPage::builder()
+            .child(page.widget())
+            .title(title)
+            .build();
+        // The page struct lives on the navigation page: without this it is
+        // dropped the moment this returns and its fetch renders nothing.
+        unsafe { nav_page.set_data("pushed", PushedPage::Category(page.clone())) };
+        self.push_page(nav_page);
+        page.load_category(params, title);
+    }
+
+    /// Port of open_all_moods: the full pill list of one category row.
+    fn open_all_moods(self: &Rc<Self>, title: &str, items: Vec<crate::net::explore::Category>) {
+        let page = AllMoodsPage::new(self.ui.clone(), title, items);
+        let display = crate::ui::pages::all_moods::display_title(title);
+        let nav_page = adw::NavigationPage::builder()
+            .child(page.widget())
+            .title(&display)
+            .build();
+        unsafe { nav_page.set_data("pushed", PushedPage::AllMoods(page)) };
+        self.push_page(nav_page);
+        self.title_widget.set_title(&display);
+    }
+
     /// The page struct behind the visible navigation page, if it is one of ours.
     fn visible_pushed_page(&self) -> Option<PushedPage> {
         let nav_page = self.active_nav()?.visible_page()?;
@@ -863,6 +1198,26 @@ impl MainWindow {
     /// Port of _get_active_filterable_child: the visible playlist or discography page.
     fn active_filterable(&self) -> Option<PushedPage> {
         self.visible_pushed_page().filter(PushedPage::is_filterable)
+    }
+
+    /// What the search bar types into instead of searching YouTube.
+    ///
+    /// Python finds it by asking the visible page for a `filter_content`, so
+    /// the library root answers too: typing on the Library tab filters its
+    /// own cards. Here the library is not a pushed page, so it is named.
+    fn active_filter(&self) -> Option<SearchFilter> {
+        if self.view_stack.visible_child_name().as_deref() == Some("library") {
+            let at_root = self
+                .active_nav()
+                .and_then(|nav| nav.visible_page().map(|page| nav.previous_page(&page).is_none()))
+                .unwrap_or(false);
+            if at_root {
+                let library = self.library.clone();
+                return Some(Rc::new(move |text: &str| library.filter_content(text)));
+            }
+        }
+        let page = self.active_filterable()?;
+        Some(Rc::new(move |text: &str| page.filter_content(text)))
     }
 
     /// Port of _get_refresh_target and _playlist_page_refresh.
@@ -875,6 +1230,7 @@ impl MainWindow {
         }
         match self.visible_pushed_page()? {
             PushedPage::Playlist(p) if p.is_refreshable() => Some(RefreshTarget::Playlist(p)),
+            PushedPage::History(p) => Some(RefreshTarget::History(p)),
             _ => None,
         }
     }
@@ -908,6 +1264,16 @@ impl MainWindow {
                     // The page hides its inline spinner once the fetch completes; poll for that.
                     glib::timeout_add_local(Duration::from_millis(250), move || {
                         if page.content_spinner_visible() {
+                            return glib::ControlFlow::Continue;
+                        }
+                        done();
+                        glib::ControlFlow::Break
+                    });
+                }
+                RefreshTarget::History(page) => {
+                    page.refresh();
+                    glib::timeout_add_local(Duration::from_millis(250), move || {
+                        if page.is_loading() {
                             return glib::ControlFlow::Continue;
                         }
                         done();
@@ -970,9 +1336,8 @@ impl MainWindow {
                 Some(id) => self.open_artist(&id, Some(&name)),
                 None => self.resolve_artist_from_player(),
             },
-            NavRequest::Category { title } => {
-                self.push_page(stub::page(&title, "Mood and genre pages not ported yet"))
-            }
+            NavRequest::Category { title, params } => self.open_category(&params, &title),
+            NavRequest::AllMoods { title, items } => self.open_all_moods(&title, items),
             NavRequest::Search { query } => {
                 self.search_bar.set_search_mode(true);
                 self.search_entry.set_text(&query);
@@ -996,6 +1361,10 @@ impl MainWindow {
         self.ui
             .nav
             .set_library_refresh(move || library.load_library(false));
+        {
+            let library = self.library.clone();
+            self.ui.nav.set_library_card_refresh(move |playlist_id| library.invalidate_card(playlist_id));
+        }
 
         let weak = Rc::downgrade(self);
         self.back_btn.connect_clicked(move |_| {
@@ -1100,7 +1469,7 @@ impl MainWindow {
                 let Some(w) = weak.upgrade() else { return };
                 if bar.is_search_mode() {
                     w.search_entry.grab_focus();
-                    if w.active_filterable().is_some() {
+                    if w.active_filter().is_some() {
                         return;
                     }
                     if w.view_stack.visible_child_name().as_deref() != Some("search") {
@@ -1125,9 +1494,9 @@ impl MainWindow {
                 id.remove();
             }
             let text = entry.text().to_string();
-            // A visible playlist or discography page filters its rows instead.
-            if let Some(page) = w.active_filterable() {
-                page.filter_content(&text);
+            // The library, a playlist or a discography filters its own rows instead.
+            if let Some(filter) = w.active_filter() {
+                filter(&text);
                 return;
             }
             let weak = Rc::downgrade(&w);
@@ -1143,8 +1512,8 @@ impl MainWindow {
         self.search_entry.connect_stop_search(move |_| {
             if let Some(w) = weak.upgrade() {
                 w.search_bar.set_search_mode(false);
-                if let Some(page) = w.active_filterable() {
-                    page.filter_content("");
+                if let Some(filter) = w.active_filter() {
+                    filter("");
                 }
             }
         });
@@ -1495,6 +1864,11 @@ impl ProgressButton {
         })
     }
 
+    /// Open the popover, what a click on the pie does.
+    pub fn popup(&self) {
+        self.button.emit_clicked();
+    }
+
     /// Container for per-item rows inside the popover, filled by the download manager later.
     pub fn items_box(&self) -> &gtk::Box {
         &self.items_box
@@ -1546,12 +1920,42 @@ fn build_library_refresh() -> LibraryRefresh {
     }
 }
 
+/// The first scrolled window under `widget` that has somewhere to scroll.
+fn first_scroller(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
+    if let Some(scroller) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+        let adj = scroller.vadjustment();
+        if adj.upper() > adj.page_size() {
+            return Some(scroller.clone());
+        }
+    }
+    let mut child = widget.first_child();
+    while let Some(node) = child {
+        child = node.next_sibling();
+        if let Some(found) = first_scroller(&node) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// The bigger of the two avatars, which is the size its photo is fetched for.
+const AVATAR_LARGE: u32 = 48;
+
+/// What the search bar types into when a page filters itself.
+type SearchFilter = Rc<dyn Fn(&str)>;
+
 /// A page pushed onto a tab's navigation view, kept beside its widget.
 #[derive(Clone)]
 pub enum PushedPage {
     Playlist(Rc<PlaylistPage>),
     Discography(Rc<DiscographyPage>),
     Artist(Rc<ArtistPage>),
+    /// Held only so the page outlives the call that pushed it.
+    #[allow(dead_code)]
+    Category(Rc<CategoryPage>),
+    #[allow(dead_code)]
+    History(Rc<HistoryPage>),
+    AllMoods(Rc<AllMoodsPage>),
 }
 
 impl PushedPage {
@@ -1559,19 +1963,21 @@ impl PushedPage {
         match self {
             PushedPage::Playlist(p) => p.filter_content(text),
             PushedPage::Discography(p) => p.filter_content(text),
-            PushedPage::Artist(_) => {}
+            PushedPage::AllMoods(p) => p.filter_content(text),
+            PushedPage::Artist(_) | PushedPage::Category(_) | PushedPage::History(_) => {}
         }
     }
 
     /// Whether the search bar filters this page instead of running a search.
     fn is_filterable(&self) -> bool {
-        !matches!(self, PushedPage::Artist(_))
+        !matches!(self, PushedPage::Artist(_) | PushedPage::Category(_) | PushedPage::History(_))
     }
 }
 
 enum RefreshTarget {
     Library,
     Playlist(Rc<PlaylistPage>),
+    History(Rc<HistoryPage>),
 }
 
 /// Hamburger with the theme swatches row on top, then the app entries.
@@ -1728,7 +2134,7 @@ impl AvatarProfile {
             let net = net.clone();
             let weak = Rc::downgrade(profile);
             glib::spawn_future_local(async move {
-                let texture = load_texture(&net, &url).await;
+                let texture = load_texture(&net, &url, Some(AVATAR_LARGE)).await;
                 let Some(profile) = weak.upgrade() else {
                     return;
                 };
@@ -1802,7 +2208,7 @@ fn build_avatar_menu() -> (gtk::MenuButton, Rc<AvatarProfile>) {
         .margin_start(6)
         .margin_end(6)
         .build();
-    let large = adw::Avatar::new(48, None, false);
+    let large = adw::Avatar::new(AVATAR_LARGE as i32, None, false);
     header.append(&large);
     let name_col = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -1905,16 +2311,6 @@ fn install_actions(
             }
         })
     };
-    let push_stub =
-        |ctx: &Rc<App>, title: &'static str, description: &'static str| -> Box<dyn Fn()> {
-            let ctx = ctx.clone();
-            Box::new(move || {
-                if let Some(win) = ctx.window.borrow().as_ref() {
-                    win.push_page(stub::page(title, description));
-                }
-            })
-        };
-
     {
         let app = app.downgrade();
         let player = ctx.player.clone();
@@ -1966,21 +2362,42 @@ fn install_actions(
         true,
         toast(overlay, "Preferences not ported yet"),
     );
-    add(
-        "open-channel",
-        false,
-        push_stub(ctx, "Your Channel", "Artist page not ported yet"),
-    );
-    add(
-        "open-upload",
-        false,
-        toast(overlay, "Upload not ported yet"),
-    );
-    add(
-        "open-history",
-        false,
-        push_stub(ctx, "Listening History", "History page not ported yet"),
-    );
+    {
+        let ctx = ctx.clone();
+        add(
+            "open-channel",
+            false,
+            Box::new(move || {
+                if let Some(win) = ctx.window.borrow().as_ref() {
+                    win.open_own_channel();
+                }
+            }),
+        );
+    }
+    {
+        let ctx = ctx.clone();
+        add(
+            "open-upload",
+            false,
+            Box::new(move || {
+                if let Some(win) = ctx.window.borrow().as_ref() {
+                    win.ui.nav.pick_uploads();
+                }
+            }),
+        );
+    }
+    {
+        let ctx = ctx.clone();
+        add(
+            "open-history",
+            false,
+            Box::new(move || {
+                if let Some(win) = ctx.window.borrow().as_ref() {
+                    win.open_history();
+                }
+            }),
+        );
+    }
     {
         let ctx = ctx.clone();
         add(
@@ -1992,6 +2409,30 @@ fn install_actions(
                 }
             }),
         );
+    }
+    {
+        let ctx = ctx.clone();
+        add(
+            "open-uploads",
+            true,
+            Box::new(move || {
+                if let Some(win) = ctx.window.borrow().as_ref() {
+                    win.open_uploads();
+                }
+            }),
+        );
+    }
+    {
+        // Carries the artist's browse id and name, which the library card has.
+        let ctx = ctx.clone();
+        let action = gio::SimpleAction::new("open-upload-artist", Some(&<(String, String)>::static_variant_type()));
+        action.connect_activate(move |_, parameter| {
+            let Some((browse_id, name)) = parameter.and_then(|p| p.get::<(String, String)>()) else { return };
+            if let Some(win) = ctx.window.borrow().as_ref() {
+                win.open_upload_artist(&browse_id, &name);
+            }
+        });
+        window.add_action(&action);
     }
     {
         let ctx = ctx.clone();

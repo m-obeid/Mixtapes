@@ -39,6 +39,8 @@ const AUTO_REFRESH_DELAY: Duration = Duration::from_millis(2000);
 /// Long enough for AdwNavigationView's page transition to finish.
 const TRANSITION_GATE: Duration = Duration::from_millis(350);
 const FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
+/// Longest side of an uploaded playlist cover.
+const COVER_MAX_PIXELS: i32 = 1024;
 const INITIAL_LIMIT: usize = 200;
 const PLACEHOLDER_ICON: &str = "media-playlist-audio-symbolic";
 
@@ -346,6 +348,7 @@ impl PlaylistPage {
         page.wire_factory(&factory);
         page.wire_header(&play_btn, &shuffle_btn, &sel_play_btn, &sel_cancel_btn);
         page.install_actions();
+        page.wire_downloads();
         {
             let weak = Rc::downgrade(&page);
             scrolled.vadjustment().connect_value_changed(move |adj| {
@@ -397,6 +400,18 @@ impl PlaylistPage {
     }
 
     /// Demo hook: what the Play button does.
+    /// Demo hook: set the playlist cover from a file, what the edit dialog
+    /// does once a crop has been chosen.
+    pub fn set_cover_for_demo(self: &Rc<Self>, image: PathBuf) {
+        let old_cover = self.cover.url().unwrap_or_default();
+        let title = self.title_text.borrow().clone();
+        let desc = self.description_text.borrow().clone();
+        let privacy = self.privacy_text.borrow().clone().unwrap_or_else(|| "PUBLIC".to_owned());
+        self.is_previewing_cover.set(true);
+        self.cover.load(&image.to_string_lossy());
+        self.save_edits(title.clone(), desc.clone(), privacy.clone(), title, desc, privacy, Some(image), old_cover);
+    }
+
     /// Demo hook: type into the search box and pick a sort order.
     pub fn sift_for_demo(self: &Rc<Self>, filter: Option<&str>, sort: Option<u32>) {
         if let Some(sort) = sort {
@@ -584,6 +599,25 @@ impl PlaylistPage {
     }
 
     /// The "page." actions the more menu and selection overflow use.
+    /// Repaint row badges as downloads are queued, finish, or are removed.
+    fn wire_downloads(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        self.ctx.on_download(move |event| {
+            let Some(page) = weak.upgrade() else { return false };
+            let video_id = match event {
+                crate::downloads::Event::Queued { video_id } | crate::downloads::Event::Removed { video_id } => video_id.clone(),
+                crate::downloads::Event::Item { video_id, ok: true, .. } => video_id.clone(),
+                _ => return true,
+            };
+            for row in page.live_rows() {
+                if row.video_id().as_deref() == Some(video_id.as_str()) {
+                    row.show_download_state(&video_id);
+                }
+            }
+            true
+        });
+    }
+
     fn install_actions(self: &Rc<Self>) {
         let group = gio::SimpleActionGroup::new();
         let add = |name: &str, f: PageAction| {
@@ -779,6 +813,12 @@ impl PlaylistPage {
         }
         self.is_album_view.set(is_album);
         self.sort_row.set_visible(n > 0 && !is_album);
+        // Ownership is in the cached header too, so the menu offers Edit and
+        // Delete right away rather than only once the live fetch lands.
+        let owned = playlists::owns_playlist(&cached.playlist_id, cached.meta.author_raw.first().map(|a| a.name.as_str()), cached.meta.collaborators.as_deref(), self.account_name().as_deref());
+        self.is_owned.set(owned);
+        self.is_editable.set(self.ctx.net.client().is_authenticated() && !is_album && owned);
+        self.refresh_more_menu(owned);
         self.set_description(&cached.meta.description);
         if let Some(url) = thumbnails.last() {
             if self.cover.url().as_deref() != Some(url.as_str()) {
@@ -1481,8 +1521,12 @@ impl PlaylistPage {
     }
 
     /// Offline the queue keeps downloaded songs only. None are known, so it empties.
+    /// Port of _filter_queue_offline: with no connection only downloaded songs play.
     fn offline_filter_queue(&self, tracks: Vec<Track>) -> Vec<Track> {
-        if self.ctx.online.is_online() { tracks } else { Vec::new() }
+        if self.ctx.online.is_online() {
+            return tracks;
+        }
+        tracks.into_iter().filter(|t| self.ctx.downloads.is_downloaded(&t.video_id.0)).collect()
     }
 
     fn on_play_clicked(self: &Rc<Self>) {
@@ -1581,9 +1625,19 @@ impl PlaylistPage {
         toast(&self.stack, "Starting radio...");
     }
 
+    /// Port of _on_download_all: every track the page knows, tagged with the
+    /// playlist so the .m3u8 mirror follows.
     fn on_download_all(&self) {
-        // The download manager is not ported yet.
-        toast(&self.stack, "Downloads are not available yet");
+        let tracks = self.all_tracks();
+        if tracks.is_empty() {
+            return;
+        }
+        if !self.ctx.online.is_online() {
+            toast(&self.stack, "Downloads need an internet connection");
+            return;
+        }
+        let title = self.title_text.borrow().clone();
+        self.ctx.download(tracks, &title, &self.playlist_id().unwrap_or_default());
     }
 
     fn on_show_add_all_to_playlist(self: &Rc<Self>) {
@@ -2005,7 +2059,8 @@ impl PlaylistPage {
                 extras.push(MenuAction::new("Copy Selection Data (Debug)", Section::Clipboard, move || page.copy_selection_debug()));
             }
         }
-        let opts = SongMenuOptions { prefix: "ctx", selection, extras, nav: Some(self.ctx.nav.clone()), ctx: Some(self.ctx.clone()), ..SongMenuOptions::default() };
+        let album = Some((self.title_text.borrow().clone(), self.playlist_id().unwrap_or_default()));
+        let opts = SongMenuOptions { prefix: "ctx", selection, extras, nav: Some(self.ctx.nav.clone()), ctx: Some(self.ctx.clone()), album, ..SongMenuOptions::default() };
         show_song_menu(row.widget(), x, y, &track, &self.ctx.player, opts);
     }
 
@@ -2131,11 +2186,25 @@ impl PlaylistPage {
         self.update_ui(HeaderText { title: title.to_owned(), description: String::new(), meta1: meta1.to_owned(), meta2: short_duration(total) }, thumbnails, tracks, false, None, false);
     }
 
-    fn save_playlist_cover_async(&self, title: &str, url: &str) {
+    fn save_playlist_cover_async(self: &Rc<Self>, title: &str, url: &str) {
         let Some(path) = self.ctx.paths.playlist_cover_path(title) else { return };
         let http = self.ctx.net.client().http().clone();
         let auth = self.ctx.net.client().media_auth();
-        self.ctx.net.spawn(save_playlist_cover(http, auth, path, url.to_owned()));
+        let shown = path.to_string_lossy().into_owned();
+        let handle = self.ctx.net.spawn(save_playlist_cover(http, auth, path, url.to_owned()));
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            // A replaced file keeps its path, and the texture cache is keyed by
+            // path, so the page would keep drawing the old picture.
+            if handle.await.unwrap_or(false) {
+                if let Some(page) = weak.upgrade() {
+                    crate::ui::cover::forget_texture(&shown);
+                    if page.cover.url().as_deref() == Some(shown.as_str()) {
+                        page.cover.reload();
+                    }
+                }
+            }
+        });
     }
 
     // -- cover menu, edit, delete -----------------------------------------
@@ -2280,6 +2349,12 @@ impl PlaylistPage {
                     let cover_row = cover_row.clone();
                     crate::ui::crop_dialog::show(&window, pixbuf, move |cropped| {
                         let temp = std::env::temp_dir().join(format!("mixtape_crop_{}.png", std::process::id()));
+                        // YouTube shows the cover at 1024 at most, and a phone
+                        // photo would otherwise be a several megabyte upload.
+                        let cropped = match cropped.width().max(cropped.height()) > COVER_MAX_PIXELS {
+                            true => cropped.scale_simple(COVER_MAX_PIXELS, COVER_MAX_PIXELS, gtk::gdk_pixbuf::InterpType::Bilinear).unwrap_or(cropped),
+                            false => cropped,
+                        };
                         if cropped.savev(&temp, "png", &[]).is_ok() {
                             if let Some(p) = weak.upgrade() {
                                 p.selected_cover_path.replace(Some(temp));
@@ -2301,6 +2376,7 @@ impl PlaylistPage {
                 let new_desc = desc_row.text().to_string();
                 let new_privacy = ["PUBLIC", "PRIVATE", "UNLISTED"][privacy_row.selected().min(2) as usize].to_owned();
                 let img_path = p.selected_cover_path.borrow().clone();
+                let old_cover = p.cover.url().unwrap_or_default();
                 let old_title = p.title_text.borrow().clone();
                 let old_desc = p.description_text.borrow().clone();
                 let old_privacy = p.privacy_text.borrow().clone().unwrap_or_else(|| "PUBLIC".to_owned()).to_uppercase();
@@ -2320,7 +2396,7 @@ impl PlaylistPage {
                     p.is_previewing_cover.set(true);
                     p.cover.load(&path.to_string_lossy());
                 }
-                p.save_edits(new_title, new_desc, new_privacy, old_title, old_desc, old_privacy, img_path);
+                p.save_edits(new_title, new_desc, new_privacy, old_title, old_desc, old_privacy, img_path, old_cover);
                 dialog.close();
             });
         }
@@ -2328,13 +2404,17 @@ impl PlaylistPage {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn save_edits(self: &Rc<Self>, new_title: String, new_desc: String, new_privacy: String, old_title: String, old_desc: String, old_privacy: String, img_path: Option<PathBuf>) {
+    fn save_edits(self: &Rc<Self>, new_title: String, new_desc: String, new_privacy: String, old_title: String, old_desc: String, old_privacy: String, img_path: Option<PathBuf>, old_cover: String) {
         let Some(pid) = self.playlist_id() else { return };
         let clean_title = new_title.trim().to_owned();
         let clean_desc = new_desc.trim().to_owned();
         let changed = clean_title != old_title.trim() || clean_desc != old_desc.trim() || new_privacy != old_privacy;
         let api = self.ctx.net.client().api();
+        let http = self.ctx.net.client().http().clone();
+        let headers = self.ctx.net.client().browser_headers();
         let cover_dst = self.ctx.paths.playlist_cover_path(if clean_title.is_empty() { &old_title } else { &clean_title });
+        let mirrored = cover_dst.clone();
+        let had_cover = img_path.is_some();
         let pid_c = pid.clone();
         let handle = self.ctx.net.spawn(async move {
             if changed {
@@ -2346,20 +2426,41 @@ impl PlaylistPage {
                     tracing::warn!(%err, "edit playlist failed");
                 }
             }
-            if let (Some(src), Some(dst)) = (img_path, cover_dst) {
+            let Some(src) = img_path else { return };
+            match headers {
+                Some(headers) => match playlists::set_playlist_thumbnail(&api, &http, &headers, &pid_c, &src).await {
+                    Ok(()) => tracing::info!(playlist_id = %pid_c, "playlist cover uploaded"),
+                    Err(err) => tracing::warn!(%err, "playlist cover upload failed"),
+                },
+                None => tracing::warn!("no session for the cover upload"),
+            }
+            // Keep a local copy so the page shows the new cover at once. The
+            // sidecar stays on the address of the cover being replaced: the
+            // mirror then leaves this file alone until YouTube serves a
+            // different one, which is the uploaded image.
+            if let Some(dst) = cover_dst {
                 if let Some(dir) = dst.parent() {
                     let _ = tokio::fs::create_dir_all(dir).await;
                 }
                 if let Err(err) = tokio::fs::copy(&src, &dst).await {
                     tracing::warn!(%err, "local cover mirror failed");
                 }
-                let _ = tokio::fs::remove_file(dst.with_extension("jpg.url")).await;
+                crate::net::covers::mark_mirror(&dst, &old_cover).await;
             }
         });
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let _ = handle.await;
             let Some(page) = weak.upgrade() else { return };
+            // The cover behind that path is a different picture now.
+            if let Some(path) = mirrored {
+                crate::ui::cover::forget_texture(&path.to_string_lossy());
+            }
+            // A new cover keeps the address it had, so the library is told
+            // outright rather than left to spot a difference.
+            if had_cover {
+                page.ctx.nav.refresh_library_card(&pid);
+            }
             page.ctx.net.caches().drop_cached_tracks(&pid);
             page.load_playlist(&pid, None);
             page.ctx.nav.refresh_library();

@@ -498,11 +498,11 @@ impl PlayerBar {
 
         let video_id = state.video_id();
         if video_id.is_empty() {
-            self.like.set_data(None, LikeStatus::Indifferent);
+            self.like.set_data(None, None);
         } else {
             self.like.set_data(
                 Some(VideoId(video_id)),
-                LikeStatus::parse(&state.like_status()),
+                Some(LikeStatus::parse(&state.like_status())),
             );
         }
     }

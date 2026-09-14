@@ -29,6 +29,7 @@ pub struct DesktopCoverView {
     #[allow(dead_code)]
     transport: Rc<Transport>,
     visualizer: Rc<Visualizer>,
+    more_btn: gtk::MenuButton,
     ctx: Rc<UiContext>,
     lyrics_intent: Cell<bool>,
     suppress_sync: Cell<bool>,
@@ -274,6 +275,7 @@ impl DesktopCoverView {
             like,
             transport,
             visualizer,
+            more_btn: more_btn.clone(),
             ctx,
             lyrics_intent: Cell::new(false),
             suppress_sync: Cell::new(false),
@@ -296,18 +298,11 @@ impl DesktopCoverView {
                     }
                 }
             });
-            let weak = Rc::downgrade(&this);
-            more_btn.connect_notify_local(Some("active"), move |btn, _| {
-                if btn.is_active() {
-                    if let Some(v) = weak.upgrade() {
-                        v.refresh_more_menu(btn);
-                    }
-                }
-            });
         }
         this.connect_lyrics(&cover_overlay);
         this.bind_state();
         this.refresh_metadata();
+        this.refresh_more_menu();
 
         let initial = this
             .ctx
@@ -444,6 +439,7 @@ impl DesktopCoverView {
             state.connect_notify_local(Some(prop), move |_, _| {
                 if let Some(v) = weak.upgrade() {
                     v.refresh_metadata();
+                    v.refresh_more_menu();
                 }
             });
         }
@@ -519,28 +515,39 @@ impl DesktopCoverView {
         }
         let video_id = state.video_id();
         if video_id.is_empty() {
-            self.like.set_data(None, LikeStatus::Indifferent);
+            self.like.set_data(None, None);
         } else {
             self.like.set_data(
                 Some(VideoId(video_id)),
-                LikeStatus::parse(&state.like_status()),
+                Some(LikeStatus::parse(&state.like_status())),
             );
         }
     }
 
-    fn refresh_more_menu(&self, btn: &gtk::MenuButton) {
+    /// The menu is rebuilt whenever the track changes, like the Python view.
+    /// A menu button with no model is insensitive, so a menu built on activate
+    /// could never be opened.
+    fn refresh_more_menu(self: &Rc<Self>) {
         let Some(track) = self.ctx.player.current_track() else {
-            btn.set_menu_model(gtk::gio::MenuModel::NONE);
+            self.more_btn.set_menu_model(gtk::gio::MenuModel::NONE);
             return;
         };
+        let this = self.clone();
+        let extras = vec![crate::ui::context_menu::MenuAction::new("Stream Info (Debug)", crate::ui::context_menu::Section::Debug, move || this.show_stream_info())];
         let opts = crate::ui::context_menu::SongMenuOptions {
             prefix: "cv",
-            hide: ["play_next", "add_to_queue"].as_slice(),
+            hide: ["play_next", "add_to_queue", "goto_artist", "goto_album"].as_slice(),
             nav: Some(self.ctx.nav.clone()),
             ctx: Some(self.ctx.clone()),
+            extras,
             ..Default::default()
         };
-        let model = crate::ui::context_menu::build_song_menu(btn, &track, &self.ctx.player, opts);
-        btn.set_menu_model(model.as_ref());
+        let model = crate::ui::context_menu::build_song_menu(&self.more_btn, &track, &self.ctx.player, opts);
+        self.more_btn.set_menu_model(model.as_ref());
+    }
+
+    /// Port of _show_stream_info: what is playing and how the pipeline sees it.
+    pub fn show_stream_info(self: &Rc<Self>) {
+        crate::ui::expanded_player::present_stream_info(&self.ctx, self.root.upcast_ref::<gtk::Widget>());
     }
 }

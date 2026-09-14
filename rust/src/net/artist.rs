@@ -293,6 +293,20 @@ pub async fn channel_of_video(api: &dyn Browse, video_id: &str) -> Result<Option
     Ok(channel.map(|c| (c, author)))
 }
 
+/// Port of resolve_channel_handle: turn the account's @handle into the
+/// channel it opens, which is what "Your Channel" needs before it can push an
+/// artist page.
+pub async fn resolve_handle(api: &dyn Browse, handle: &str) -> Result<Option<String>, NetError> {
+    let handle = handle.trim_start_matches('@');
+    if handle.is_empty() {
+        return Ok(None);
+    }
+    let body = json!({ "url": format!("https://music.youtube.com/@{handle}") });
+    let response = api.post("navigation/resolve_url", body).await?;
+    // The key nesting has moved between YouTube revisions; try both spellings.
+    Ok(owned_at(&response, "/endpoint/browseEndpoint/browseId").or_else(|| owned_at(&response, "/endpoint/browse/browseId")))
+}
+
 pub async fn subscribe(api: &dyn Browse, channel_id: &str) -> Result<(), NetError> {
     api.post("subscription/subscribe", json!({ "channelIds": [channel_id] })).await?;
     Ok(())

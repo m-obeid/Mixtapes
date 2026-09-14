@@ -42,6 +42,9 @@ pub enum AudioCommand {
     Pause,
     Stop,
     Seek { seconds: f64 },
+    /// Report what the pipeline is doing, for the Stream Info panel. The
+    /// answer goes back on `reply` because only this thread may ask playbin.
+    Describe { reply: async_channel::Sender<String> },
     SetVolume(f64),
     SetMute(bool),
     Shutdown,
@@ -124,6 +127,8 @@ struct Shared {
 
 struct Engine {
     playbin: gst::Element,
+    /// The sink playbin plays into, held so its remembered device can be cleared.
+    audio_sink: Option<gst::Element>,
     shared: Arc<Shared>,
     control: Sender<AudioEvent>,
     telemetry: Sender<AudioTelemetry>,
@@ -228,6 +233,19 @@ impl Engine {
             Err(err) => tracing::warn!(%err, "spectrum element unavailable; visualizer stays inert"),
         }
 
+        // Our own sink, so `clear_remembered_device` has something to reach.
+        // What playbin would have built on its own is this same element.
+        let audio_sink = match gst::ElementFactory::make("autoaudiosink").name("audio-sink").build() {
+            Ok(sink) => {
+                playbin.set_property("audio-sink", &sink);
+                Some(sink)
+            }
+            Err(err) => {
+                tracing::warn!(%err, "no autoaudiosink; playbin picks its own and the output device cannot be reset");
+                None
+            }
+        };
+
         let shared = Arc::new(Shared {
             generation: AtomicU64::new(0),
             armed_next: Mutex::new(None),
@@ -278,6 +296,7 @@ impl Engine {
 
         Ok(Self {
             playbin,
+            audio_sink,
             shared,
             control,
             telemetry,
@@ -301,6 +320,51 @@ impl Engine {
         }
     }
 
+    /// Live pipeline state, queried at call time.
+    ///
+    /// The seeking query is the telling one: when its end is below the
+    /// position, or the source cannot do byte ranges, that is why a seek is
+    /// refused even with seekable true.
+    fn describe(&self) -> String {
+        let mut lines = Vec::new();
+        let (_, state, _) = self.playbin.state(gst::ClockTime::ZERO);
+        lines.push(format!("State:      {state:?}"));
+        let source: Option<gst::Element> = self.playbin.property("source");
+        let factory = source.and_then(|s| s.factory().map(|f| f.name().to_string()));
+        lines.push(format!("Src elem:   {}", factory.unwrap_or_else(|| "unknown".to_owned())));
+        let position = self.playbin.query_position::<gst::ClockTime>();
+        let duration = self.playbin.query_duration::<gst::ClockTime>();
+        lines.push(format!("Position:   {}", clock(position)));
+        lines.push(format!("Duration:   {}", clock(duration)));
+        let mut seeking = gst::query::Seeking::new(gst::Format::Time);
+        if self.playbin.query(&mut seeking) {
+            let (seekable, start, end) = seeking.result();
+            lines.push(format!("Seekable:   {seekable}"));
+            let span = |value: gst::GenericFormattedValue| match value {
+                gst::GenericFormattedValue::Time(t) => clock(t),
+                _ => "unknown".to_owned(),
+            };
+            lines.push(format!("Seek range: {} to {}", span(start), span(end)));
+        } else {
+            lines.push("Seekable:   query failed".to_owned());
+        }
+        lines.join("\n")
+    }
+
+    /// Forget which output device the sink last played to, so the next stream
+    /// asks for the default again.
+    ///
+    /// `pulsesink` fills its own `device` property in with the sink it landed
+    /// on, and from then on connects there explicitly. PipeWire never moves a
+    /// stream that names its device, so plugging in headphones moved every
+    /// other app across and left this one on the speakers until it was
+    /// restarted. A stream that asks for the default is moved with the rest.
+    fn clear_remembered_device(&self) {
+        if let Some(sink) = &self.audio_sink {
+            clear_device(sink);
+        }
+    }
+
     fn handle(&self, cmd: AudioCommand) -> glib::ControlFlow {
         match cmd {
             AudioCommand::Load { uri, generation, auth } => {
@@ -314,6 +378,7 @@ impl Engine {
                 self.emit(AudioEvent::StateChanged { generation, status: PlaybackStatus::Loading });
                 // Null flushes the bus, so no message from the old stream survives this point.
                 let _ = self.playbin.set_state(gst::State::Null);
+                self.clear_remembered_device();
                 self.playbin.set_property("uri", &uri);
                 if let Err(err) = self.playbin.set_state(gst::State::Playing) {
                     self.loading.set(false);
@@ -350,6 +415,9 @@ impl Engine {
                         tracing::warn!(%err, seconds, "seek rejected by pipeline");
                     }
                 }
+            }
+            AudioCommand::Describe { reply } => {
+                let _ = reply.send_blocking(self.describe());
             }
             AudioCommand::SetVolume(v) => {
                 if let Some(sv) = self.playbin.dynamic_cast_ref::<gst_audio::StreamVolume>() {
@@ -437,6 +505,26 @@ impl Engine {
     }
 }
 
+/// Reset every string `device` property under `sink`, so the next stream asks
+/// for the default output rather than the one it last used.
+///
+/// Only string properties: an integer `device` on some sinks names a card,
+/// which is not ours to reset.
+fn clear_device(sink: &gst::Element) {
+    let Some(bin) = sink.dynamic_cast_ref::<gst::Bin>() else { return };
+    let mut iter = bin.iterate_recurse();
+    while let Ok(Some(element)) = iter.next() {
+        let Some(spec) = element.find_property("device") else { continue };
+        if spec.value_type() != glib::Type::STRING || !spec.flags().contains(glib::ParamFlags::WRITABLE) {
+            continue;
+        }
+        if let Some(device) = element.property::<Option<String>>("device") {
+            tracing::debug!(element = %element.name(), device, "clearing the sink's remembered device");
+            element.set_property("device", None::<String>);
+        }
+    }
+}
+
 fn cubic_volume(playbin: &gst::Element) -> f64 {
     playbin
         .dynamic_cast_ref::<gst_audio::StreamVolume>()
@@ -460,5 +548,64 @@ fn apply_http_auth(source: &gst::Element, auth: Option<&HttpAuth>) {
             headers = headers.field("Authorization", authorization.as_str());
         }
         source.set_property("extra-headers", headers.build());
+    }
+}
+
+/// A pipeline time as minutes and seconds, or unknown.
+fn clock(time: Option<gst::ClockTime>) -> String {
+    match time {
+        Some(t) => {
+            let seconds = t.seconds_f64();
+            format!("{}:{:02} ({seconds:.1}s)", seconds as u64 / 60, seconds as u64 % 60)
+        }
+        None => "unknown".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A sink that has played once carries the device it landed on and
+    /// connects there explicitly from then on, which is what kept playback on
+    /// the speakers after headphones were plugged in.
+    #[test]
+    fn clearing_the_sink_forgets_the_device_it_last_used() {
+        if gst::init().is_err() {
+            println!("no gstreamer");
+            return;
+        }
+        let Ok(sink) = gst::ElementFactory::make("autoaudiosink").build() else {
+            println!("no autoaudiosink");
+            return;
+        };
+        // READY is where autoaudiosink picks and builds the real sink.
+        if sink.set_state(gst::State::Ready).is_err() {
+            println!("no audio output available");
+            let _ = sink.set_state(gst::State::Null);
+            return;
+        }
+        let bin = sink.dynamic_cast_ref::<gst::Bin>().expect("autoaudiosink is a bin");
+        let mut iter = bin.iterate_recurse();
+        let mut pinned = Vec::new();
+        while let Ok(Some(element)) = iter.next() {
+            let Some(spec) = element.find_property("device") else { continue };
+            if spec.value_type() == glib::Type::STRING && spec.flags().contains(glib::ParamFlags::WRITABLE) {
+                element.set_property("device", "some-device-it-played-to");
+                pinned.push(element);
+            }
+        }
+        if pinned.is_empty() {
+            println!("this sink names no device");
+            let _ = sink.set_state(gst::State::Null);
+            return;
+        }
+
+        clear_device(&sink);
+
+        for element in &pinned {
+            assert_eq!(element.property::<Option<String>>("device"), None, "{} still names a device", element.name());
+        }
+        let _ = sink.set_state(gst::State::Null);
     }
 }

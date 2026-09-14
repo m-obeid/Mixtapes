@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 
-use crate::model::MediaItem;
+use crate::model::{ItemKind, MediaItem};
 use crate::ui::context::UiContext;
 use crate::ui::widgets::card_grid::CardLayout;
 use crate::ui::cover::CoverImage;
@@ -177,6 +177,14 @@ fn resolve_subtitle(item: &MediaItem) -> String {
     }
     if !parts.is_empty() {
         return parts.join(" • ");
+    }
+    // A playlist card shows its whole description, "Author • N tracks":
+    // ytmusicapi files that author under `author`, which _resolve_subtitle
+    // never reads, so the description is what it falls through to.
+    if item.kind == ItemKind::Playlist {
+        if let Some(description) = item.description.clone().filter(|d| !d.is_empty()) {
+            return description;
+        }
     }
     let artists = item.artists_text();
     if !artists.is_empty() {

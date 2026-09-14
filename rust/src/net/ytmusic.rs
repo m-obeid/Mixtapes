@@ -157,6 +157,26 @@ impl YtMusic {
         Some(HttpAuth { cookie, user_agent, authorization })
     }
 
+    /// The captured browser headers, with a fresh SAPISIDHASH.
+    ///
+    /// The InnerTube endpoints go through the crate client; this is for the
+    /// plain HTTP endpoints that still need the session, such as the playlist
+    /// cover upload.
+    pub fn browser_headers(&self) -> Option<BTreeMap<String, String>> {
+        if !self.auth.borrow().has_session() {
+            return None;
+        }
+        let session = self.session.read().unwrap();
+        if session.headers.is_empty() {
+            return None;
+        }
+        let mut headers = session.headers.clone();
+        if let Some(auth) = session.browser_auth.as_ref().and_then(|a| a.get_authorization().ok()) {
+            headers.insert("Authorization".to_owned(), auth);
+        }
+        Some(headers)
+    }
+
     /// Load headers_auth.json the way MusicClient.try_login(skip_validation=True) did.
     fn load_saved_session(&self) {
         let Ok(text) = std::fs::read_to_string(&self.auth_file) else {

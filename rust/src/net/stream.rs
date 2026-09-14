@@ -46,20 +46,15 @@ const YTDLP_PLAYER_CLIENTS: &str = "youtube:player_client=web_music,mweb,tv,web_
 
 pub struct YtDlpResolver {
     binary: PathBuf,
-    botguard: Option<PathBuf>,
+    tokens: Arc<crate::net::potoken::PoTokens>,
     tmp_dir: PathBuf,
     cache: StreamCache,
 }
 
 impl YtDlpResolver {
-    pub fn new(paths: &Paths) -> Self {
+    pub fn new(paths: &Paths, tokens: Arc<crate::net::potoken::PoTokens>) -> Self {
         let binary = find_executable("yt-dlp").unwrap_or_else(|| PathBuf::from("yt-dlp"));
-        let botguard = find_executable("rustypipe-botguard");
-        match &botguard {
-            Some(p) => tracing::info!(path = %p.display(), "rustypipe-botguard found"),
-            None => tracing::warn!("rustypipe-botguard not found; PO-token gated formats unavailable"),
-        }
-        Self { binary, botguard, tmp_dir: paths.cache_dir.clone(), cache: StreamCache::new(paths.stream_cache_dir.clone()) }
+        Self { binary, tokens, tmp_dir: paths.cache_dir.clone(), cache: StreamCache::new(paths.stream_cache_dir.clone()) }
     }
 
     async fn run(&self, video_id: &VideoId, auth: Option<&HttpAuth>) -> Result<StreamInfo, ResolveError> {
@@ -68,8 +63,12 @@ impl YtDlpResolver {
         cmd.args(["-j", "--no-playlist", "--no-warnings", "-f", YTDLP_FORMAT, "-S", YTDLP_FORMAT_SORT])
             .args(["--extractor-args", YTDLP_PLAYER_CLIENTS])
             .args(["--js-runtimes", "node"]);
-        if let Some(bg) = &self.botguard {
-            cmd.arg("--extractor-args").arg(format!("youtubepot-rustypipebotguard:rustypipe_bg_bin={}", bg.display()));
+        // YouTube serves the web_music client's formats only against a PO
+        // token bound to the video. Uploaded songs come from no other client,
+        // so without this they look unavailable, and ordinary songs lose their
+        // seekable Opus formats.
+        if let Some(token) = self.tokens.for_video(video_id.as_str()).await {
+            cmd.arg("--extractor-args").arg(crate::net::potoken::extractor_arg(&token));
         }
         let cookie_file = match auth {
             Some(auth) => {
@@ -241,7 +240,7 @@ fn now_secs() -> f64 {
 }
 
 /// Netscape cookie jar for yt-dlp, created 0600 and removed after the run.
-async fn write_netscape_cookies(dir: &Path, cookie_header: &str) -> std::io::Result<PathBuf> {
+pub async fn write_netscape_cookies(dir: &Path, cookie_header: &str) -> std::io::Result<PathBuf> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let path = dir.join(format!("ytdlp-cookies-{}-{nanos}.txt", std::process::id()));
     let expiry = now_secs() as u64 + 365 * 24 * 3600;
@@ -269,7 +268,7 @@ async fn write_netscape_cookies(dir: &Path, cookie_header: &str) -> std::io::Res
 }
 
 /// PATH lookup plus the install spots the Python app checked.
-fn find_executable(name: &str) -> Option<PathBuf> {
+pub fn find_executable(name: &str) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).map(|d| d.join(name)).collect())
         .unwrap_or_default();

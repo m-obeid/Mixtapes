@@ -14,6 +14,9 @@ pub const MTRIR: &str = "musicTwoRowItemRenderer";
 
 static DURATION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d+:)*\d+:\d+$").unwrap());
 static YEAR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}$").unwrap());
+/// The run YouTube puts between subtitle values.
+pub const DOT_SEPARATOR: &str = " \u{2022} ";
+
 static VIEWS_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\D*?[\s:\x{ff1a}\x{200e}-\x{200f}\x{202a}-\x{202e}]").unwrap());
 
 // -- json helpers ---------------------------------------------------------
@@ -47,6 +50,23 @@ pub fn walk_key<'a>(root: &'a Value, key: &str) -> Vec<&'a Value> {
         }
     }
     out
+}
+
+/// The sections of a library browse, whichever tab holds them.
+///
+/// An uploads response comes back with two tabs, Library and Uploads, and the
+/// rows are in the second one. Reading the first is why the uploaded library
+/// looked empty. Taking the first tab that has sections covers both shapes.
+pub fn library_sections(response: &Value) -> &[Value] {
+    for column in ["singleColumnBrowseResultsRenderer", "twoColumnBrowseResultsRenderer"] {
+        for tab in array_at(response, &format!("/contents/{column}/tabs")) {
+            let sections = array_at(tab, "/tabRenderer/content/sectionListRenderer/contents");
+            if !sections.is_empty() {
+                return sections;
+            }
+        }
+    }
+    &[]
 }
 
 /// Continuation token of the shelf whose rows use one of `row_keys`.
@@ -162,7 +182,8 @@ fn parse_views(text: &str) -> Option<String> {
     if !prefixed && stripped.is_ascii() && !stripped.contains(' ') {
         return None;
     }
-    Some(stripped)
+    // ytmusicapi keeps the count alone: "1.2M views" is shown as "1.2M".
+    Some(stripped.split(' ').next().unwrap_or_default().to_owned())
 }
 
 fn parse_song_run(run: &Value) -> RunKind {
@@ -198,6 +219,14 @@ pub fn parse_song_runs(runs: &[Value]) -> SongRuns {
         }
     }
     out
+}
+
+/// ytmusicapi's parse_song_runs with skip_type_spec: a carousel row leads its
+/// subtitle with the kind word ("Song \u{2022} Eminem"), which is not an artist.
+pub fn parse_song_runs_after_type(runs: &[Value]) -> SongRuns {
+    let is_artist = |run: &Value| matches!(parse_song_run(run), RunKind::Artist(_));
+    let leads_with_kind = runs.len() > 2 && is_artist(&runs[0]) && str_at(&runs[1], "/text") == Some(DOT_SEPARATOR) && is_artist(&runs[2]);
+    parse_song_runs(if leads_with_kind { &runs[2..] } else { runs })
 }
 
 /// ytmusicapi's parse_artists_runs: every even run is an artist.
@@ -338,6 +367,21 @@ pub fn parse_playlist_items<'a>(contents: impl IntoIterator<Item = &'a Value>, i
     contents.into_iter().filter_map(|r| r.get(MRLIR)).filter_map(|d| parse_playlist_item(d, is_album, is_collaborative)).collect()
 }
 
+/// The token that removes one play from the history, out of the row's menu.
+///
+/// ytmusicapi reads it in parse_song_menu_data, which the port skips: this is
+/// the only entry off that menu any page here uses.
+pub fn history_feedback_token(data: &Value) -> Option<String> {
+    array_at(data, "/menu/menuRenderer/items").iter().find_map(|item| {
+        let menu_item = item.get("menuServiceItemRenderer")?;
+        let icon = str_at(menu_item, "/icon/iconType").or_else(|| str_at(menu_item, "/defaultIcon/iconType"))?;
+        if icon != "REMOVE_FROM_HISTORY" {
+            return None;
+        }
+        owned_at(menu_item, "/serviceEndpoint/feedbackEndpoint/feedbackToken")
+    })
+}
+
 /// Port of parse_uploaded_items: upload rows carry the entity id used to delete them.
 pub fn parse_uploaded_item(data: &Value) -> Option<Track> {
     data.get("menu")?;
@@ -415,6 +459,227 @@ pub fn parse_watch_playlist<'a>(results: impl IntoIterator<Item = &'a Value>) ->
         }
     }
     out
+}
+
+// -- browse cards ---------------------------------------------------------
+//
+// The carousels on Home, Explore and a category page are made of two-row
+// cards and list rows. These are ytmusicapi's parsers for them, answering with
+// a `MediaItem` so the pages never re-derive what a card is.
+
+/// A two-row card keeps its picture here, a list row under `THUMBNAILS`.
+pub const THUMBNAIL_RENDERER: &str = "/thumbnailRenderer/musicThumbnailRenderer/thumbnail/thumbnails";
+pub const THUMBNAILS: &str = "/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails";
+const SUBTITLE_BADGE_LABEL: &str = "/subtitleBadges/0/musicInlineBadgeRenderer/accessibilityData/accessibilityData/label";
+const PLAY_ENDPOINT: &str = "/overlay/musicItemThumbnailOverlayRenderer/content/musicPlayButtonRenderer/playNavigationEndpoint";
+const MUSIC_VIDEO_TYPE: &str = "/watchEndpointMusicSupportedConfigs/watchEndpointMusicConfig/musicVideoType";
+/// The page a card's title opens, which is what says what the card is.
+const CARD_PAGE_TYPE: &str = "/title/runs/0/navigationEndpoint/browseEndpoint/browseEndpointContextSupportedConfigs/browseEndpointContextMusicConfig/pageType";
+
+pub fn is_year(text: &str) -> bool {
+    text.len() == 4 && text.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Port of ytmusicapi's parse_mixed_content item dispatch: one card of a home
+/// or browse carousel, whatever kind it turns out to be.
+///
+/// `section_title` comes along because a card with no video type is told apart
+/// by the shelf it sits in, the way home.py's _detect_kind reads it. Podcast
+/// shows and episodes answer None: no page here draws them.
+pub fn parse_mixed_item(entry: &Value, section_title: &str) -> Option<MediaItem> {
+    if let Some(data) = entry.get(MTRIR) {
+        return match str_at(data, CARD_PAGE_TYPE) {
+            // No page type means it plays: a song, or a card that opens a mix.
+            None => match owned_at(data, "/navigationEndpoint/watchPlaylistEndpoint/playlistId") {
+                Some(playlist_id) => Some(MediaItem {
+                    kind: ItemKind::Playlist,
+                    id: playlist_id,
+                    title: owned_at(data, "/title/runs/0/text").unwrap_or_default(),
+                    thumb: last_thumbnail_url(array_at(data, THUMBNAIL_RENDERER)),
+                    ..MediaItem::default()
+                }),
+                None => parse_song_card(data, section_title),
+            },
+            Some("MUSIC_PAGE_TYPE_ALBUM" | "MUSIC_PAGE_TYPE_AUDIOBOOK") => Some(parse_album_card(data)),
+            Some("MUSIC_PAGE_TYPE_ARTIST" | "MUSIC_PAGE_TYPE_USER_CHANNEL") => parse_artist_card(data),
+            Some("MUSIC_PAGE_TYPE_PLAYLIST") => parse_playlist_card(data),
+            Some(_) => None,
+        };
+    }
+    entry.get(MRLIR).and_then(|data| parse_song_row(data, section_title))
+}
+
+/// Port of ytmusicapi's parse_album for a `musicTwoRowItemRenderer`.
+pub fn parse_album_card(data: &Value) -> MediaItem {
+    let artists = array_at(data, "/subtitle/runs")
+        .iter()
+        .filter(|run| run.get("navigationEndpoint").is_some())
+        .map(|run| Person { name: str_at(run, "/text").unwrap_or_default().to_owned(), id: owned_at(run, "/navigationEndpoint/browseEndpoint/browseId") })
+        .collect();
+    let mut item = MediaItem {
+        kind: ItemKind::Album,
+        id: owned_at(data, "/title/runs/0/navigationEndpoint/browseEndpoint/browseId").unwrap_or_default(),
+        title: owned_at(data, "/title/runs/0/text").unwrap_or_default(),
+        artists,
+        thumb: last_thumbnail_url(array_at(data, THUMBNAIL_RENDERER)),
+        explicit: data.pointer(SUBTITLE_BADGE_LABEL).is_some(),
+        playlist_id: owned_at(data, "/thumbnailOverlay/musicItemThumbnailOverlayRenderer/content/musicPlayButtonRenderer/playNavigationEndpoint/watchPlaylistEndpoint/playlistId"),
+        ..MediaItem::default()
+    };
+    // The subtitle leads with either the year on its own or the release type
+    // followed by it.
+    match str_at(data, "/subtitle/runs/0/text") {
+        Some(text) if is_year(text) => item.year = Some(text.to_owned()),
+        Some(text) => {
+            item.item_type = Some(text.to_owned());
+            item.year = str_at(data, "/subtitle/runs/2/text").filter(|y| is_year(y)).map(str::to_owned);
+        }
+        None => {}
+    }
+    item
+}
+
+/// Port of ytmusicapi's parse_video: artists up to the dot, views after it.
+pub fn parse_video_card(data: &Value) -> Option<MediaItem> {
+    let runs = array_at(data, "/subtitle/runs");
+    let dot = runs.iter().position(|run| str_at(run, "/text") == Some(DOT_SEPARATOR)).unwrap_or(runs.len());
+    let video_id = owned_at(data, "/navigationEndpoint/watchEndpoint/videoId")
+        .or_else(|| array_at(data, "/menu/menuRenderer/items").iter().find_map(|entry| owned_at(entry, "/menuServiceItemRenderer/serviceEndpoint/queueAddEndpoint/queueTarget/videoId")))?;
+    Some(MediaItem {
+        kind: ItemKind::Video,
+        id: video_id,
+        title: owned_at(data, "/title/runs/0/text").unwrap_or_default(),
+        artists: parse_artists_runs(&runs[..dot]),
+        thumb: last_thumbnail_url(array_at(data, THUMBNAIL_RENDERER)),
+        views: runs.last().and_then(|run| str_at(run, "/text")).map(|text| text.split(' ').next().unwrap_or_default().to_owned()),
+        ..MediaItem::default()
+    })
+}
+
+/// Port of ytmusicapi's parse_song: a two-row card that plays.
+pub fn parse_song_card(data: &Value, section_title: &str) -> Option<MediaItem> {
+    let video_id = owned_at(data, "/navigationEndpoint/watchEndpoint/videoId")?;
+    let runs = parse_song_runs_after_type(array_at(data, "/subtitle/runs"));
+    let item = MediaItem {
+        kind: ItemKind::Song,
+        id: video_id,
+        title: owned_at(data, "/title/runs/0/text").unwrap_or_default(),
+        artists: runs.artists,
+        album: runs.album,
+        thumb: last_thumbnail_url(array_at(data, THUMBNAIL_RENDERER)),
+        year: runs.year,
+        views: runs.views,
+        duration_seconds: runs.duration.as_deref().and_then(parse_duration),
+        explicit: data.pointer(SUBTITLE_BADGE_LABEL).is_some(),
+        ..MediaItem::default()
+    };
+    let video_type = str_at(data, &format!("/navigationEndpoint/watchEndpoint{MUSIC_VIDEO_TYPE}"));
+    with_playable_kind(item, video_type, section_title)
+}
+
+/// Port of ytmusicapi's parse_playlist: the card of a playlist, with the
+/// "Author • N songs" subtitle split back up.
+pub fn parse_playlist_card(data: &Value) -> Option<MediaItem> {
+    let browse_id = str_at(data, "/title/runs/0/navigationEndpoint/browseEndpoint/browseId")?;
+    let runs = array_at(data, "/subtitle/runs");
+    let mut item = MediaItem {
+        kind: ItemKind::Playlist,
+        id: browse_id.trim_start_matches("VL").to_owned(),
+        title: owned_at(data, "/title/runs/0/text").unwrap_or_default(),
+        thumb: last_thumbnail_url(array_at(data, THUMBNAIL_RENDERER)),
+        ..MediaItem::default()
+    };
+    if !runs.is_empty() {
+        item.description = Some(runs_text(runs));
+        // Three runs are "Author • N songs"; anything else is a description.
+        let third = str_at(data, "/subtitle/runs/2/text").unwrap_or_default();
+        if runs.len() == 3 && third.split(' ').next().is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) {
+            item.count = third.split(' ').next().map(str::to_owned);
+            item.artists = parse_artists_runs(&runs[..1]);
+        }
+    }
+    Some(item)
+}
+
+/// Port of ytmusicapi's parse_related_artist.
+pub fn parse_artist_card(data: &Value) -> Option<MediaItem> {
+    let browse_id = owned_at(data, "/title/runs/0/navigationEndpoint/browseEndpoint/browseId")?;
+    Some(MediaItem {
+        kind: ItemKind::Artist,
+        id: browse_id,
+        title: owned_at(data, "/title/runs/0/text").unwrap_or_default(),
+        // "12M subscribers" is shown as the count alone.
+        subscribers: str_at(data, "/subtitle/runs/0/text").map(|text| text.split(' ').next().unwrap_or_default().to_owned()),
+        thumb: last_thumbnail_url(array_at(data, THUMBNAIL_RENDERER)),
+        ..MediaItem::default()
+    })
+}
+
+/// Port of parse_song_flat: the `musicResponsiveListItemRenderer` a carousel
+/// uses instead of a card.
+pub fn parse_song_row(data: &Value, section_title: &str) -> Option<MediaItem> {
+    let title = owned_at(data, "/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")?;
+    let video_id = owned_at(data, "/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/navigationEndpoint/watchEndpoint/videoId")
+        .or_else(|| owned_at(data, &format!("{PLAY_ENDPOINT}/watchEndpoint/videoId")))?;
+    let runs = parse_song_runs_after_type(array_at(data, "/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs"));
+    let album_column = "/flexColumns/2/musicResponsiveListItemFlexColumnRenderer/text/runs/0";
+    let album = match data.pointer(&format!("{album_column}/navigationEndpoint")) {
+        Some(_) => Some(Named { name: owned_at(data, &format!("{album_column}/text")).unwrap_or_default(), id: owned_at(data, &format!("{album_column}/navigationEndpoint/browseEndpoint/browseId")) }),
+        None => runs.album,
+    };
+    let item = MediaItem {
+        kind: ItemKind::Song,
+        id: video_id,
+        title,
+        artists: runs.artists,
+        album,
+        thumb: last_thumbnail_url(array_at(data, THUMBNAILS)),
+        views: runs.views,
+        duration_seconds: runs.duration.as_deref().and_then(parse_duration),
+        explicit: data.pointer(BADGE_LABEL).is_some(),
+        ..MediaItem::default()
+    };
+    let video_type = str_at(data, &format!("{PLAY_ENDPOINT}/watchEndpoint{MUSIC_VIDEO_TYPE}"));
+    with_playable_kind(item, video_type, section_title)
+}
+
+/// Port of home.py _detect_kind for something that plays: the video type
+/// decides, then the shelf it sits in, then the thumbnail address, then the
+/// shape of what was parsed. None means a podcast episode, which no page draws.
+pub fn with_playable_kind(mut item: MediaItem, video_type: Option<&str>, section_title: &str) -> Option<MediaItem> {
+    item.kind = detect_kind(video_type, item.thumb.as_deref(), section_title, &item)?;
+    Some(item)
+}
+
+/// Shelves whose name says what their untyped rows are.
+const SONG_SECTION_KEYS: [&str; 13] = ["song", "track", "favorite", "listen again", "quick pick", "forgotten", "rediscover", "hidden gem", "recap", "your library", "from your library", "mix", "hits"];
+const VIDEO_SECTION_KEYS: [&str; 6] = ["music video", "remix", "live performance", "performances", "video for you", "videos for you"];
+
+pub fn detect_kind(video_type: Option<&str>, thumb: Option<&str>, section_title: &str, item: &MediaItem) -> Option<ItemKind> {
+    if let Some(video_type) = video_type {
+        if video_type == "MUSIC_VIDEO_TYPE_ATV" {
+            return Some(ItemKind::Song);
+        }
+        if video_type.contains("PODCAST") || video_type.contains("EPISODE") {
+            return None;
+        }
+        return Some(ItemKind::Video);
+    }
+    let low = section_title.to_lowercase();
+    if VIDEO_SECTION_KEYS.iter().any(|k| low.contains(k)) {
+        return Some(ItemKind::Video);
+    }
+    if SONG_SECTION_KEYS.iter().any(|k| low.contains(k)) {
+        return Some(ItemKind::Song);
+    }
+    if thumb.is_some_and(|url| url.contains("/vi/") || url.contains("/vi_webp/")) {
+        return Some(ItemKind::Video);
+    }
+    // A view count with none of a song's own metadata reads as a video.
+    if item.views.is_some() && item.album.is_none() && item.duration_seconds.is_none() && item.year.is_none() {
+        return Some(ItemKind::Video);
+    }
+    Some(ItemKind::Song)
 }
 
 // -- channel content items (raw fallback parsing) -------------------------
@@ -539,7 +804,7 @@ mod tests {
         assert_eq!(parsed.artists.len(), 1);
         assert_eq!(parsed.album.as_ref().map(|a| a.name.as_str()), Some("Revival"));
         assert_eq!(parsed.year.as_deref(), Some("2017"));
-        assert_eq!(parsed.views.as_deref(), Some("1.2M views"));
+        assert_eq!(parsed.views.as_deref(), Some("1.2M"));
     }
 
     #[test]

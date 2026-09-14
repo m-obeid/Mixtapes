@@ -48,3 +48,54 @@ the search text, the selection and the sort metrics.
 **Sort metric**: a number YouTube keeps off the track itself (view count, date
 added). Fetched once per playlist, then rows the metric does not know about
 keep their order at the end.
+
+## Home
+
+**Shelf** (`src/net/home.rs`): one titled row of the feed, its cards, and the
+seed picture a "Based on ..." heading shows beside its title.
+
+**Bucket**: the four rows that lead the feed whatever order they arrived in:
+your library, listen again, discover, forgotten.
+
+**Dial**: the quick-picks grid at the top. It takes the quick-picks shelf out
+of the feed, or borrows Listen again when the feed has none.
+
+**Stamp**: the id `play_then_radio` puts on a queue while its radio is being
+fetched, so a reply that arrives after the listener moved on can tell.
+
+## Explore
+
+**Category** (`src/net/explore.rs`): one mood or genre pill. A title and the
+`params` that open its page; the pill row on Explore and the View All list are
+both made of these.
+
+**Chart artist**: a charted artist plus where the chart put them, the rank and
+the trend arrow. Both are absent when the request is unauthenticated, and
+neither belongs on a `MediaItem`.
+
+## Listening history
+
+**Play** (`src/net/history.rs`): one entry of the history: the track, the
+heading YouTube filed it under, and the feedback token that forgets it.
+
+**History mode**: the shared `history_mode` pref deciding when a play is
+written to the account: immediate, after_30s, or never.
+
+## Downloads
+
+**Store** (`src/downloads/store.rs`): the download library, one SQLite table
+shared with the Python app. Holds one row per downloaded track: where the file
+is, what it was tagged with, and when it arrived.
+
+**Job**: a track queued for download, plus the album it came from and its
+position in it.
+
+**Run**: what every download in one queue pass shares: the audio format, the
+cookie jar written once, and the session.
+
+**Mirror**: the `.m3u8` file under `<music>/Playlists` that tracks a downloaded
+playlist. Only songs on disk are listed, and paths are relative.
+
+**Layout**: how downloads are arranged on disk, from the folder structure
+preference: Artist/Album/Song, Artist/Song, or no folders, optionally under a
+`Songs` subfolder. Changing it moves existing files (`migrate_layout`).

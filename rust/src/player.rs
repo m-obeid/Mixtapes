@@ -7,19 +7,31 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 
 use gio::prelude::*;
 use tokio::task::AbortHandle;
 
 use crate::audio::{AudioCommand, AudioEvent, AudioEvents, AudioHandle, AudioTelemetry};
-use crate::model::{LikeStatus, PlaybackStatus, RepeatMode, Track, VideoId};
+use crate::model::{LikeStatus, PlaybackStatus, RepeatMode, StreamInfo, Track, VideoId};
+use crate::downloads::Downloads;
 use crate::net::NetHandle;
+use crate::paths::Paths;
 use crate::net::ytmusic::AuthState;
 use crate::queue::{Bounds, Queue, Step};
 use crate::state::{PlayerState, QueueEntry};
 use gtk::glib;
 
 const STREAM_RETRY_MAX: u8 = 2;
+
+/// `history_mode`, the pref both apps read: when a play is recorded.
+const HISTORY_IMMEDIATE: &str = "immediate";
+const HISTORY_AFTER_30S: &str = "after_30s";
+const HISTORY_NEVER: &str = "never";
+/// The video type of a song, as opposed to a music video.
+const AUDIO_VIDEO_TYPE: &str = "MUSIC_VIDEO_TYPE_ATV";
+/// How long "after_30s" waits. YT Music counts a play at about this point.
+const HISTORY_THRESHOLD_SECS: f64 = 30.0;
 
 /// The track handed to playbin ahead of time, so the switch has no gap.
 #[derive(Clone)]
@@ -36,6 +48,10 @@ pub struct Player {
     audio: AudioHandle,
     audio_events: RefCell<Option<AudioEvents>>,
     net: NetHandle,
+    /// What is already on disk, checked before a stream is resolved.
+    downloads: Arc<Downloads>,
+    /// The stream behind what is playing, for the Stream Info panel.
+    loaded: RefCell<Option<StreamInfo>>,
     /// Allocator for load generations. Monotonic, never reused.
     counter: Cell<u64>,
     /// Generation of the stream the pipeline should be playing right now.
@@ -56,12 +72,22 @@ pub struct Player {
     position_mark: Cell<Option<(std::time::Instant, f64)>>,
     /// A radio extension is in flight, like _is_fetching_infinite.
     infinite_fetching: Cell<bool>,
+    /// Counter behind the queue stamps play_then_radio hands out.
+    stamp: Cell<u64>,
+    /// When a play is written to the account's history.
+    history_mode: RefCell<String>,
+    /// The video this session has already recorded, so it records once.
+    history_recorded: RefCell<Option<String>>,
+    /// Videos already looked up for an audio twin, so the lookup is paid once.
+    swap_checked: RefCell<std::collections::HashSet<String>>,
 }
 
 impl Player {
-    pub fn new(net: NetHandle, audio: AudioHandle, events: AudioEvents) -> Rc<Self> {
+    pub fn new(net: NetHandle, downloads: Arc<Downloads>, audio: AudioHandle, events: AudioEvents, paths: &Paths) -> Rc<Self> {
         Rc::new_cyclic(|me| Self {
             me: me.clone(),
+            downloads,
+            loaded: RefCell::new(None),
             state: PlayerState::new(),
             queue: RefCell::new(Queue::default()),
             audio,
@@ -76,6 +102,10 @@ impl Player {
             viz_generation: Cell::new(0),
             position_mark: Cell::new(None),
             infinite_fetching: Cell::new(false),
+            stamp: Cell::new(0),
+            history_mode: RefCell::new(paths.read_prefs().get("history_mode").and_then(|v| v.as_str()).unwrap_or(HISTORY_IMMEDIATE).to_owned()),
+            history_recorded: RefCell::new(None),
+            swap_checked: RefCell::new(std::collections::HashSet::new()),
         })
     }
 
@@ -488,13 +518,42 @@ impl Player {
 
     /// Resolve `track` on the runtime; on success either load it or arm it for gapless.
     fn spawn_resolve(&self, track: Track, generation: u64, arm_only: bool) {
+        // A downloaded file needs no resolve and plays offline.
+        if let Some(uri) = self.downloads.local_path(track.video_id.as_str()).and_then(|p| glib::filename_to_uri(&p, None).ok()) {
+            tracing::debug!(video_id = %track.video_id, "playing the downloaded file");
+            if !arm_only {
+                *self.loaded.borrow_mut() = Some(StreamInfo { uri: uri.to_string(), is_local: true, ..StreamInfo::default() });
+            }
+            match arm_only {
+                true if self.armed_next.borrow().as_ref().is_some_and(|a| a.generation == generation) => self.audio.send(AudioCommand::ArmNext { uri: uri.to_string(), generation }),
+                true => {}
+                false => self.audio.send(AudioCommand::Load { uri: uri.to_string(), generation, auth: None }),
+            }
+            return;
+        }
         let auth = self.net.client().media_auth();
         let resolver = self.net.resolver().clone();
         let video_id = track.video_id.clone();
         let resolve_auth = auth.clone();
-        let handle = self
-            .net
-            .spawn(async move { resolver.resolve(video_id, resolve_auth).await });
+        // Port of the swap _fetch_and_play does before yt-dlp runs: a music
+        // video's audio twin is the cleaner album master, and its id is what
+        // the stream cache should be keyed on, so this has to happen first.
+        let swap = !arm_only && self.wants_audio_version(&track);
+        let api = self.net.client().api();
+        let handle = self.net.spawn(async move {
+            let twin = match swap {
+                true => match crate::net::playlists::find_audio_version(&api, video_id.as_str()).await {
+                    Ok(twin) => twin,
+                    Err(err) => {
+                        tracing::warn!(%err, video_id = %video_id, "audio-version lookup failed");
+                        None
+                    }
+                },
+                false => None,
+            };
+            let resolve_id = twin.as_ref().map(|t| t.video_id.clone()).unwrap_or(video_id);
+            (twin, resolver.resolve(resolve_id, resolve_auth).await)
+        });
         if !arm_only {
             *self.inflight.borrow_mut() = Some(handle.abort_handle());
         }
@@ -503,7 +562,7 @@ impl Player {
         glib::spawn_future_local(async move {
             let outcome = handle.await;
             let Some(player) = weak.upgrade() else { return };
-            let Ok(result) = outcome else { return };
+            let Ok((twin, result)) = outcome else { return };
             if arm_only {
                 if let Ok(info) = result {
                     if player.armed_next.borrow().as_ref().is_some_and(|a| a.generation == generation) {
@@ -520,8 +579,14 @@ impl Player {
                 return;
             }
             player.inflight.borrow_mut().take();
+            // Everything below reads the track that is actually going to play.
+            let track = match twin {
+                Some(twin) => player.apply_audio_version(&track, twin),
+                None => track,
+            };
             match result {
                 Ok(info) => {
+                    *player.loaded.borrow_mut() = Some(info.clone());
                     if !info.from_cache {
                         player.refine_metadata(
                             &track,
@@ -547,6 +612,44 @@ impl Player {
                 }
             }
         });
+    }
+
+    /// What is playing and how, for the Stream Info panel in the expanded
+    /// player. The pipeline half is queried on the audio thread; `full` keeps
+    /// the whole signed URI, which is what the Copy button wants.
+    pub async fn stream_debug(&self, full: bool) -> String {
+        let mut lines = Vec::new();
+        let track = self.current_track();
+        lines.push(format!("Track:      {}", track.as_ref().map(|t| t.video_id.0.clone()).unwrap_or_else(|| "none".to_owned())));
+        if let Some(track) = &track {
+            lines.push(format!("Title:      {} - {}", track.artist, track.title));
+        }
+        let loaded = self.loaded.borrow().clone();
+        match &loaded {
+            Some(info) if info.is_local => lines.push("Source:     local file".to_owned()),
+            Some(info) if info.from_cache => lines.push("Source:     cached stream url".to_owned()),
+            Some(_) => lines.push("Source:     fresh resolution".to_owned()),
+            None => lines.push("Source:     nothing loaded".to_owned()),
+        }
+        if let Some(info) = &loaded {
+            let format = [info.format_id.as_deref(), info.protocol.as_deref(), info.ext.as_deref(), info.acodec.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" - ");
+            if !format.is_empty() {
+                lines.push(format!("Format:     {format}"));
+            }
+            // Signed urls run to several hundred characters, too wide for the panel.
+            let uri = match full || info.uri.len() <= 96 {
+                true => info.uri.clone(),
+                false => format!("{}…", &info.uri[..96]),
+            };
+            lines.push(format!("URI:        {uri}"));
+        }
+        let (reply, answers) = async_channel::bounded(1);
+        self.audio.send(AudioCommand::Describe { reply });
+        match answers.recv().await {
+            Ok(text) => lines.push(text),
+            Err(_) => lines.push("State:      the audio thread did not answer".to_owned()),
+        }
+        lines.join("\n")
     }
 
     fn advance_after_failure(&self) {
@@ -673,6 +776,12 @@ impl Player {
                 self.state.set_position(position);
                 self.position_mark
                     .set(Some((std::time::Instant::now(), position)));
+                if self.history_mode.borrow().as_str() == HISTORY_AFTER_30S
+                    && position >= HISTORY_THRESHOLD_SECS
+                    && self.state.status() == PlaybackStatus::Playing
+                {
+                    self.record_play(&self.state.video_id());
+                }
                 if let Some(d) = duration {
                     if (self.state.duration() - d).abs() > 0.1 {
                         self.state.set_duration(d);
@@ -723,6 +832,13 @@ impl Player {
     // -- state mirroring --------------------------------------------------
 
     fn apply_track_metadata(&self, track: Option<&Track>) {
+        // A new track is a fresh gate, whichever way it started playing.
+        if track.map(|t| t.video_id.0.as_str()) != self.history_recorded.borrow().as_deref() {
+            self.history_recorded.replace(None);
+        }
+        if let Some(t) = track.filter(|_| self.history_mode.borrow().as_str() == HISTORY_IMMEDIATE) {
+            self.record_play(&t.video_id.0);
+        }
         match track {
             Some(t) => {
                 self.state.set_title(t.title.clone());
@@ -745,7 +861,52 @@ impl Player {
         }
     }
 
-    /// Fill placeholder metadata from the resolver, like _fetch_and_play did.
+    /// Whether this track is worth a lookup for its audio twin.
+    ///
+    /// Uploads have no counterpart, and a track that says it is already the
+    /// audio version needs no lookup. Anything else is asked about once per
+    /// session: the answer costs a request, and it does not change.
+    fn wants_audio_version(&self, track: &Track) -> bool {
+        if track.video_id.0.is_empty() || track.entity_id.is_some() {
+            return false;
+        }
+        if track.video_type.as_deref() == Some(AUDIO_VIDEO_TYPE) {
+            return false;
+        }
+        self.swap_checked.borrow_mut().insert(track.video_id.0.clone())
+    }
+
+    /// Put the audio twin in the playing slot, keeping what the queue entry
+    /// already knew. Port of the swap block in _fetch_and_play: the id, the
+    /// type, and the three display fields move over, the rest stays.
+    fn apply_audio_version(&self, previous: &Track, twin: Track) -> Track {
+        let mut swapped = previous.clone();
+        swapped.video_id = twin.video_id.clone();
+        swapped.video_type = Some(AUDIO_VIDEO_TYPE.to_owned());
+        if !twin.title.is_empty() {
+            swapped.title = twin.title;
+        }
+        if !twin.artist.is_empty() {
+            swapped.artist = twin.artist;
+            swapped.artists = twin.artists;
+        }
+        if twin.thumb.is_some() {
+            swapped.thumb = twin.thumb;
+        }
+        tracing::info!(from = %previous.video_id, to = %swapped.video_id, title = %swapped.title, "playing the audio version");
+
+        if !self.queue.borrow_mut().swap_current(&previous.video_id, swapped.clone()) {
+            return swapped;
+        }
+        // This is the same play under a new id: the history entry the load
+        // already recorded stands, so mark it before the metadata goes out.
+        self.history_recorded.replace(Some(swapped.video_id.0.clone()));
+        self.sync_queue_model();
+        self.apply_track_metadata(Some(&swapped));
+        swapped
+    }
+
+    /// Fill placeholder metadata from the resolver, like _fetch_and_play did.    /// Fill placeholder metadata from the resolver, like _fetch_and_play did.
     fn refine_metadata(
         &self,
         track: &Track,
@@ -846,6 +1007,41 @@ impl Player {
         self.queue.borrow().is_infinite()
     }
 
+    /// Port of add_history_item_async: tell the account this played, once per
+    /// track, and put it at the top of the shared cache so the history page
+    /// shows it before YouTube's own roll-up catches up.
+    ///
+    /// `history_mode` in the prefs both apps share decides when this runs:
+    /// "immediate" as the track loads, "after_30s" once it has played that
+    /// long, "never" not at all.
+    fn record_play(&self, video_id: &str) {
+        if video_id.is_empty() || self.history_mode.borrow().as_str() == HISTORY_NEVER {
+            return;
+        }
+        if self.history_recorded.borrow().as_deref() == Some(video_id) {
+            return;
+        }
+        if !matches!(self.net.client().auth_state(), crate::net::ytmusic::AuthState::Authenticated(_)) {
+            return;
+        }
+        self.history_recorded.replace(Some(video_id.to_owned()));
+
+        let api = self.net.client().api();
+        let http = self.net.client().http().clone();
+        let auth = self.net.client().media_auth();
+        let downloads = self.downloads.clone();
+        let video_id = video_id.to_owned();
+        self.net.spawn(async move {
+            match crate::net::history::record_play(&api, &http, auth.as_ref(), &video_id).await {
+                Ok(track) => {
+                    tracing::debug!(video_id = %track.video_id, "play recorded");
+                    crate::net::history::prepend_cached(downloads.store(), &track);
+                }
+                Err(err) => tracing::warn!(%err, video_id, "recording the play failed"),
+            }
+        });
+    }
+
     /// Port of Player.extend_queue: append at the end. Under shuffle the new
     /// tracks mix into the upcoming part, never into history or the current song.
     pub fn extend_queue(&self, tracks: Vec<Track>) {
@@ -854,6 +1050,57 @@ impl Player {
         }
         self.queue.borrow_mut().append(tracks);
         self.sync_queue_model();
+    }
+
+    /// Port of Player.play_then_radio: play a section, then keep going with a
+    /// radio seeded from its last track.
+    ///
+    /// The queue is stamped with an id of its own so the reply can tell it is
+    /// still the queue that asked; the real radio playlist replaces the stamp
+    /// once the tracks land, and the infinite extender takes it from there.
+    pub fn play_then_radio(self: &Rc<Self>, tracks: Vec<Track>, start_index: usize, seed: &str) {
+        if tracks.is_empty() || seed.is_empty() {
+            self.play_tracks(tracks, start_index, false, None, false);
+            return;
+        }
+        let stamp = format!("home-radio:{seed}:{}", self.next_stamp());
+        self.play_tracks(tracks, start_index, false, Some(stamp.clone()), false);
+
+        let api = self.net.client().api();
+        let seed = seed.to_owned();
+        let handle = self.net.spawn(async move { crate::net::playlists::radio_tracks(&api, Some(&seed), None).await });
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let watch = match handle.await {
+                Ok(Ok(watch)) => watch,
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, "section radio failed");
+                    return;
+                }
+                Err(_) => return,
+            };
+            let Some(player) = weak.upgrade() else { return };
+            // The listener has moved on; their queue is not ours to extend.
+            if player.queue.borrow().source_id() != Some(stamp.as_str()) {
+                return;
+            }
+            let existing: std::collections::HashSet<String> = player.queue.borrow().tracks().iter().map(|t| t.video_id.0.clone()).collect();
+            let fresh: Vec<Track> = watch.tracks.into_iter().map(|t| t.track).filter(|t| !t.video_id.0.is_empty() && !existing.contains(&t.video_id.0)).collect();
+            if !fresh.is_empty() {
+                player.extend_queue(fresh);
+            }
+            if let Some(playlist_id) = watch.playlist_id {
+                player.queue.borrow_mut().adopt_source(playlist_id, true);
+            }
+        });
+    }
+
+    /// A number that is not the last one, so two sections played in a row
+    /// cannot share a stamp.
+    fn next_stamp(&self) -> u64 {
+        let next = self.stamp.get().wrapping_add(1);
+        self.stamp.set(next);
+        next
     }
 
     /// Port of Player.start_radio: fetch a mix for a song or playlist on the

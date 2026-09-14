@@ -9,6 +9,7 @@ pub mod context_menu;
 pub mod cover;
 pub mod cover_view;
 pub mod crop_dialog;
+pub mod download_queue;
 pub mod expanded_player;
 pub mod like_button;
 pub mod login;
@@ -16,6 +17,7 @@ pub mod marquee;
 pub mod pages;
 pub mod player_bar;
 pub mod queue_panel;
+pub mod upload_queue;
 pub mod widgets;
 pub mod window;
 

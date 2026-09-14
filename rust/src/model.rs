@@ -1,7 +1,13 @@
 //! Plain data types shared by every layer. No GTK, no GStreamer, no reqwest.
 //! Everything here is Send + Sync so it can cross threads by value.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
 use serde::{Deserialize, Serialize};
+
+/// The "161 songs" or "50K views" a playlist description leads or trails with.
+static PLAYLIST_UNIT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\b\d[\d.,]*\s*[KMB]?\s*(songs?|episodes?|videos?|tracks?|views?|plays?|subscribers?|monthly listeners?|listeners?)\b").unwrap());
 
 /// YouTube video id. Newtype so it never gets mixed up with browse or playlist ids.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -235,6 +241,10 @@ pub struct MediaItem {
     /// Album cards: the OLAK playlist behind the browse id, from the card menu.
     #[serde(default)]
     pub playlist_id: Option<String>,
+    /// What the like button starts on. Rows that come from a playlist or the
+    /// history know it; cards off a carousel do not, and say so with None.
+    #[serde(default)]
+    pub like_status: Option<LikeStatus>,
 }
 
 impl MediaItem {
@@ -260,16 +270,37 @@ impl MediaItem {
     pub fn detail(&self) -> String {
         let join = |parts: Vec<String>| parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ");
         match self.kind {
-            ItemKind::Playlist => self
-                .count
-                .as_ref()
-                .map(|c| format!("{c} songs"))
-                .or_else(|| self.description.clone())
-                .unwrap_or_else(|| self.artists_text()),
+            ItemKind::Playlist => self.playlist_detail(),
             ItemKind::Video => join(vec![self.artists_text(), self.views.clone().unwrap_or_default(), self.duration_text().unwrap_or_default()]),
             ItemKind::Album => join(vec![self.artists_text(), self.year.clone().unwrap_or_default()]),
-            ItemKind::Artist => self.subscribers.clone().unwrap_or_default(),
-            ItemKind::Song => join(vec![self.artists_text(), self.album.as_ref().map(|a| a.name.clone()).unwrap_or_default(), self.duration_text().unwrap_or_default()]),
+            ItemKind::Artist => match self.subscribers.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                // "12M" alone is a count; "12M monthly listeners" says so itself.
+                Some(subs) if subs.chars().any(char::is_alphabetic) => subs.to_owned(),
+                Some(subs) => format!("{subs} subscribers"),
+                None => String::new(),
+            },
+            // An album named after its only song says nothing twice.
+            ItemKind::Song => {
+                let album = self.album.as_ref().map(|a| a.name.as_str()).filter(|name| *name != self.title).unwrap_or_default();
+                join(vec![self.artists_text(), album.to_owned(), self.duration_text().unwrap_or_default()])
+            }
+        }
+    }
+
+    /// Port of _playlist_detail: the count or view total out of the
+    /// description, whatever the rest of it says.
+    fn playlist_detail(&self) -> String {
+        if let Some(description) = self.description.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+            if let Some(unit) = PLAYLIST_UNIT_RE.find(description) {
+                return unit.as_str().to_owned();
+            }
+            if let Some(last) = description.rsplit(['\u{2022}', '\u{b7}']).map(str::trim).find(|part| !part.is_empty()) {
+                return last.to_owned();
+            }
+        }
+        match self.count.as_deref().filter(|c| !c.is_empty()) {
+            Some(count) => format!("{count} songs"),
+            None => self.artists_text(),
         }
     }
 
@@ -286,6 +317,7 @@ impl MediaItem {
             album: self.album.clone(),
             thumb: self.thumb.clone(),
             duration_seconds: self.duration_seconds,
+            like_status: self.like_status.unwrap_or_default(),
             video_type: Some(if self.kind == ItemKind::Song { "MUSIC_VIDEO_TYPE_ATV".to_owned() } else { "MUSIC_VIDEO_TYPE_OMV".to_owned() }),
             is_explicit: self.explicit,
             ..Track::default()

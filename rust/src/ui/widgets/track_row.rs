@@ -264,6 +264,56 @@ impl TrackRow {
     }
 
     #[allow(dead_code)]
+    /// The cover kept beside a downloaded file, extracting it the first time.
+    fn local_cover(self: &Rc<Self>, video_id: &str) -> Option<String> {
+        if video_id.is_empty() || !self.ctx.downloads.is_downloaded(video_id) {
+            return None;
+        }
+        if let Some(path) = self.ctx.downloads.cached_cover(video_id) {
+            return Some(path.to_string_lossy().into_owned());
+        }
+        let downloads = self.ctx.downloads.clone();
+        let id = video_id.to_owned();
+        let weak = Rc::downgrade(self);
+        let handle = self.ctx.net.spawn(async move { tokio::task::spawn_blocking(move || downloads.extract_cover(&id)).await.ok().flatten() });
+        let wanted = video_id.to_owned();
+        glib::spawn_future_local(async move {
+            let Ok(Some(path)) = handle.await else { return };
+            let Some(row) = weak.upgrade() else { return };
+            if row.track().map(|t| t.video_id.0) == Some(wanted) {
+                row.img.load(&path.to_string_lossy());
+            }
+        });
+        None
+    }
+
+    /// The badge at the end of the row: downloaded, waiting in the queue, or
+    /// nothing at all.
+    pub fn show_download_state(&self, video_id: &str) {
+        let downloads = &self.ctx.downloads;
+        let (icon_name, queued) = match video_id {
+            "" => (None, false),
+            id if downloads.is_downloaded(id) => (Some("folder-download-symbolic"), false),
+            id if downloads.is_queued(id) => (Some("content-loading-symbolic"), true),
+            _ => (None, false),
+        };
+        let Some(name) = icon_name else {
+            if let Some(icon) = self.dl_icon.borrow().as_ref() {
+                icon.remove_css_class("queued-icon");
+                icon.set_visible(false);
+            }
+            return;
+        };
+        let icon = self.ensure_dl_icon();
+        icon.set_icon_name(Some(name));
+        if queued {
+            icon.add_css_class("queued-icon");
+        } else {
+            icon.remove_css_class("queued-icon");
+        }
+        icon.set_visible(true);
+    }
+
     fn ensure_dl_icon(&self) -> gtk::Image {
         if let Some(i) = self.dl_icon.borrow().as_ref() {
             return i.clone();
@@ -337,8 +387,11 @@ impl TrackRow {
                 num.set_visible(false);
             }
             self.img.widget().set_visible(true);
-            match &thumb_url {
-                Some(url) => self.img.load(url),
+            // A downloaded track carries its own cover, which is what offline
+            // rows render. Extraction only happens for files this app did not
+            // download itself.
+            match self.local_cover(&video_id).or_else(|| thumb_url.clone()) {
+                Some(url) => self.img.load(&url),
                 None => self.img.set_placeholder("media-optical-symbolic"),
             }
         }
@@ -358,18 +411,14 @@ impl TrackRow {
 
         if has_id {
             self.like
-                .set_data(Some(VideoId(video_id.clone())), track.like_status);
+                .set_data(Some(VideoId(video_id.clone())), Some(track.like_status));
             self.like.widget().set_visible(!multi);
         } else {
-            self.like.set_data(None, track.like_status);
+            self.like.set_data(None, Some(track.like_status));
         }
-        // Downloads are not ported: no row is marked downloaded or queued.
-        if let Some(icon) = self.dl_icon.borrow().as_ref() {
-            icon.remove_css_class("queued-icon");
-            icon.set_visible(false);
-        }
+        self.show_download_state(&video_id);
 
-        let online = self.ctx.online.is_online();
+        let online = self.ctx.online.is_online() || self.ctx.downloads.is_downloaded(&video_id);
         if has_id && !online {
             self.button.set_sensitive(false);
             self.button.set_opacity(0.4);

@@ -12,7 +12,7 @@
 mod audio;
 mod bootstrap;
 mod demo;
-mod mock;
+mod downloads;
 mod model;
 mod mpris;
 mod net;
@@ -42,6 +42,10 @@ const APP_NAME: &str = "Mixtapes";
 pub struct App {
     pub player: Rc<Player>,
     pub net: net::NetHandle,
+    /// Offline downloads: the library on disk and the queue filling it.
+    pub downloads: Arc<downloads::Downloads>,
+    /// Handed to the window, which pumps it on the GTK thread.
+    pub download_events: RefCell<Option<async_channel::Receiver<downloads::Event>>>,
     pub paths: Paths,
     pub demo: Option<demo::Demo>,
     pub window: RefCell<Option<Rc<MainWindow>>>,
@@ -98,9 +102,12 @@ fn main() -> glib::ExitCode {
         }
     };
 
+    let (downloads, download_events) = downloads::Downloads::new(paths.clone(), net.clone());
     let app_ctx = Rc::new(App {
-        player: Player::new(net.clone(), audio, audio_events),
+        player: Player::new(net.clone(), downloads.clone(), audio, audio_events, &paths),
         net,
+        downloads,
+        download_events: RefCell::new(Some(download_events)),
         paths,
         demo,
         window: RefCell::new(None),

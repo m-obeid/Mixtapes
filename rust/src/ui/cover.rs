@@ -27,7 +27,12 @@ thread_local! {
 }
 
 /// Texture for a URL or local path, from cache, disk, or the network. Must run on the GTK thread.
-pub async fn load_texture(net: &NetHandle, url: &str) -> Option<gdk::Texture> {
+/// `target` is the size the image will be drawn at, which decides how big a
+/// copy is asked for. Scaling a 544 px cover down into a 56 px row is done in
+/// sRGB, so it comes out darker and duller than the same picture fetched at
+/// the size it is shown; it also costs fifteen times the bytes. None asks for
+/// the largest, which is what the media controls want.
+pub async fn load_texture(net: &NetHandle, url: &str, target: Option<u32>) -> Option<gdk::Texture> {
     if url.is_empty() {
         return None;
     }
@@ -47,7 +52,7 @@ pub async fn load_texture(net: &NetHandle, url: &str) -> Option<gdk::Texture> {
         };
     }
     // The upscaled address first, then the original, then lower ytimg qualities.
-    let candidates = fallback_chain(url);
+    let candidates = fallback_chain(url, target);
     let http = net.client().http().clone();
     // Fetch and decode on the runtime: GdkTexture is thread-safe, and decoding
     // a cover on the GTK thread is what Python avoided with its worker pool.
@@ -235,6 +240,13 @@ impl CoverImage {
         self.current.borrow().clone()
     }
 
+    /// Load again from the same address, for a file that changed underneath.
+    pub fn reload(self: &Rc<Self>) {
+        let Some(url) = self.current.replace(None) else { return };
+        forget_texture(&url);
+        self.load(&url);
+    }
+
     pub fn load(self: &Rc<Self>, url: &str) {
         if url.is_empty() {
             self.current.replace(None);
@@ -251,9 +263,10 @@ impl CoverImage {
         }
 
         let net = self.net.clone();
+        let size = self.base_size.get().max(1) as u32;
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let texture = load_texture(&net, &url).await;
+            let texture = load_texture(&net, &url, Some(size)).await;
             let Some(this) = weak.upgrade() else { return };
             if this.current.borrow().as_deref() != Some(url.as_str()) {
                 return;
@@ -267,8 +280,8 @@ impl CoverImage {
 
 /// Bytes of the first address in the fallback chain that answers. For
 /// consumers outside the texture cache, such as the MPRIS art file.
-pub async fn fetch_cover_bytes(http: &reqwest::Client, auth: Option<&HttpAuth>, url: &str) -> Option<Vec<u8>> {
-    for candidate in fallback_chain(url) {
+pub async fn fetch_cover_bytes(http: &reqwest::Client, auth: Option<&HttpAuth>, url: &str, target: Option<u32>) -> Option<Vec<u8>> {
+    for candidate in fallback_chain(url, target) {
         let mut request = http.get(&candidate);
         // Private covers on YouTube's hosts need the session cookie.
         if let Some(auth) = auth.filter(|_| ["youtube.com", "ytimg.com", "googleusercontent.com", "ggpht.com"].iter().any(|d| candidate.contains(d))) {
@@ -286,7 +299,7 @@ pub async fn fetch_cover_bytes(http: &reqwest::Client, auth: Option<&HttpAuth>, 
 }
 
 /// Addresses to try in order: the upscaled form, the original, then each lower ytimg quality.
-fn fallback_chain(url: &str) -> Vec<String> {
+fn fallback_chain(url: &str, target: Option<u32>) -> Vec<String> {
     const QUALITIES: [&str; 5] = ["maxresdefault", "sddefault", "hqdefault", "mqdefault", "default"];
     let mut out = Vec::new();
     let mut push = |candidate: String| {
@@ -294,7 +307,7 @@ fn fallback_chain(url: &str) -> Vec<String> {
             out.push(candidate);
         }
     };
-    let upscaled = high_res_url(url, None);
+    let upscaled = high_res_url(url, target);
     push(upscaled.clone());
     push(url.to_owned());
     for base in [upscaled, url.to_owned()] {
@@ -317,6 +330,14 @@ fn local_path(url: &str) -> Option<PathBuf> {
         return Some(PathBuf::from(url));
     }
     None
+}
+
+/// Drop a cached texture, for a file that has been written over.
+///
+/// The cache is keyed by address, and a mirrored cover keeps its path when its
+/// picture changes, so without this the old image stays on screen.
+pub fn forget_texture(url: &str) {
+    TEXTURES.with(|cache| cache.borrow_mut().remove(url));
 }
 
 fn remember(url: &str, texture: &gdk::Texture) {

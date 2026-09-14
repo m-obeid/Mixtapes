@@ -44,7 +44,8 @@ impl CoverPicture {
         let net = self.net.clone();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let texture = load_texture(&net, &url).await;
+            // None: this one is drawn as large as the window allows.
+            let texture = load_texture(&net, &url, None).await;
             let Some(this) = weak.upgrade() else { return };
             if this.current.borrow().as_deref() != Some(url.as_str()) {
                 return;

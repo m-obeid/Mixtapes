@@ -3,6 +3,8 @@
 //! status the rows show, so the page parses the response itself. Everything
 //! here is a port of the MusicClient method of the same name.
 
+use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
@@ -200,7 +202,7 @@ pub async fn get_upload_album(api: &dyn Browse, browse_id: &str) -> Result<Playl
     } else {
         details.duration = second.first().and_then(|r| owned_at(r, "/text"));
     }
-    let shelf = response.pointer(&format!("{SINGLE_SECTIONS}/0/musicShelfRenderer"));
+    let shelf = crate::net::items::library_sections(&response).iter().find_map(|s| s.get("musicShelfRenderer"));
     details.tracks = shelf.map(|s| parse_uploaded_items(array_at(s, "/contents"))).unwrap_or_default();
     details.sum_duration();
     Ok(details)
@@ -209,7 +211,7 @@ pub async fn get_upload_album(api: &dyn Browse, browse_id: &str) -> Result<Playl
 /// Port of get_library_upload_songs(limit=None): every uploaded track.
 pub async fn get_upload_songs(api: &dyn Browse) -> Result<Vec<Track>, NetError> {
     let response = api.post("browse", json!({ "browseId": "FEmusic_library_privately_owned_tracks" })).await?;
-    let sections = array_at(&response, SINGLE_SECTIONS);
+    let sections = crate::net::items::library_sections(&response);
     let shelf = sections.iter().find_map(|s| s.get("musicShelfRenderer").or_else(|| s.pointer("/itemSectionRenderer/contents/0/musicShelfRenderer")));
     let Some(shelf) = shelf else { return Ok(Vec::new()) };
     let mut songs = parse_uploaded_items(array_at(shelf, "/contents"));
@@ -410,6 +412,97 @@ pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: 
     Ok(())
 }
 
+/// Port of create_playlist: a new playlist, returning its id.
+///
+/// The privacy value is what the visibility row picked: PUBLIC, PRIVATE or
+/// UNLISTED. An empty description is left out rather than sent blank.
+pub async fn create_playlist(api: &dyn Browse, title: &str, description: &str, privacy: &str) -> Result<String, NetError> {
+    if title.trim().is_empty() {
+        return Err(message("A playlist needs a title."));
+    }
+    let mut body = json!({ "title": title, "privacyStatus": privacy });
+    if !description.trim().is_empty() {
+        body["description"] = json!(description);
+    }
+    let response = api.post("playlist/create", body).await?;
+    // The id comes back bare or wrapped, depending on the response shape.
+    owned_at(&response, "/playlistId")
+        .or_else(|| owned_at(&response, "/playlistEditResults/0/playlistEditVideoAddedResultData/playlistId"))
+        .ok_or_else(|| message("The server did not return a playlist id."))
+}
+
+/// Wait until a just-created playlist can be opened.
+///
+/// The id comes back before the browse endpoint will serve the playlist, so
+/// opening it straight away answers "header missing".
+pub async fn await_playlist(api: &dyn Browse, playlist_id: &str) -> bool {
+    for attempt in 0..5 {
+        if get_playlist(api, playlist_id, Some(1)).await.is_ok() {
+            return true;
+        }
+        tracing::debug!(playlist_id, attempt, "the new playlist is not readable yet");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    false
+}
+
+/// Port of set_playlist_thumbnail: put an image on a playlist as its cover.
+///
+/// Three steps, the way YouTube's resumable upload wants them: ask for an
+/// upload URL, send the bytes, then hand the blob id the upload returns to
+/// browse/edit_playlist. The first two are plain HTTP with the browser
+/// session, not InnerTube calls.
+pub async fn set_playlist_thumbnail(api: &dyn Browse, http: &reqwest::Client, headers: &BTreeMap<String, String>, playlist_id: &str, image: &Path) -> Result<(), NetError> {
+    let bytes = tokio::fs::read(image).await?;
+    let referer = format!("https://music.youtube.com/playlist?list={playlist_id}");
+    // The session headers minus the ones each step sets for itself.
+    let session = |mut request: reqwest::RequestBuilder| {
+        for (name, value) in headers.iter().filter(|(name, _)| !matches!(name.as_str(), "Content-Type" | "Accept-Encoding" | "Content-Encoding" | "Content-Length")) {
+            request = request.header(name, value);
+        }
+        request.header("Origin", "https://music.youtube.com").header("Referer", &referer)
+    };
+
+    let start = session(http.post("https://music.youtube.com/playlist_image_upload/playlist_custom_thumbnail"))
+        .header("Content-Type", "application/x-www-form-urlencoded;charset=utf-8")
+        .header("X-Goog-Upload-Command", "start")
+        .header("X-Goog-Upload-Protocol", "resumable")
+        .header("X-Goog-Upload-Header-Content-Length", bytes.len().to_string())
+        .body(Vec::new())
+        .send()
+        .await?;
+    let upload_url = start
+        .headers()
+        .get("X-Goog-Upload-URL")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .ok_or_else(|| message(format!("cover upload refused: HTTP {}", start.status())))?;
+
+    let upload = session(http.post(&upload_url))
+        .header("Content-Type", "application/x-www-form-urlencoded;charset=utf-8")
+        .header("X-Goog-Upload-Command", "upload, finalize")
+        .header("X-Goog-Upload-Offset", "0")
+        .body(bytes)
+        .send()
+        .await?
+        .error_for_status()?;
+    let blob: Value = upload.json().await?;
+    let blob_id = owned_at(&blob, "/encryptedBlobId").ok_or_else(|| message("the upload returned no blob id"))?;
+
+    let actions = json!([{
+        "action": "ACTION_SET_CUSTOM_THUMBNAIL",
+        "addedCustomThumbnail": {
+            "imageKey": { "type": "PLAYLIST_IMAGE_TYPE_CUSTOM_THUMBNAIL", "name": "studio_square_thumbnail" },
+            "playlistScottyEncryptedBlobId": blob_id,
+        },
+    }]);
+    let response = api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
+    match str_at(&response, "/status") {
+        Some("STATUS_SUCCEEDED") => Ok(()),
+        other => Err(message(format!("the cover was not accepted: {}", other.unwrap_or("no status")))),
+    }
+}
+
 pub async fn delete_playlist(api: &dyn Browse, playlist_id: &str) -> Result<(), NetError> {
     api.post("playlist/delete", json!({ "playlistId": playlist_id.trim_start_matches("VL") })).await?;
     Ok(())
@@ -452,17 +545,23 @@ pub fn editable_playlists(playlists: &[MediaItem], account_name: Option<&str>) -
 
 /// Port of is_own_playlist: only PL/VL ids the signed-in account authored.
 pub fn is_own_playlist(details: &PlaylistDetails, playlist_id: &str, account_name: Option<&str>) -> bool {
-    let Some(user_name) = account_name.filter(|n| !n.is_empty()) else { return false };
     let pid = if playlist_id.is_empty() { details.id.as_str() } else { playlist_id };
-    if ["LM", "SE", "VLLM"].contains(&pid) || !(pid.starts_with("PL") || pid.starts_with("VL")) {
+    owns_playlist(pid, details.author.first().map(|a| a.name.as_str()), details.collaborators.as_deref(), account_name)
+}
+
+/// The same rule from the parts a cached header keeps, so a page opened from
+/// the disk cache offers Edit and Delete before the live fetch lands.
+pub fn owns_playlist(playlist_id: &str, author: Option<&str>, collaborators: Option<&str>, account_name: Option<&str>) -> bool {
+    let Some(user_name) = account_name.filter(|n| !n.is_empty()) else { return false };
+    if ["LM", "SE", "VLLM"].contains(&playlist_id) || !(playlist_id.starts_with("PL") || playlist_id.starts_with("VL")) {
         return false;
     }
-    let author = match (&details.collaborators, details.author.first()) {
+    let author = match (collaborators, author) {
         (None, None) => return true,
-        (Some(text), _) => text.clone(),
-        (None, Some(a)) => a.name.clone(),
+        (Some(text), _) => text,
+        (None, Some(name)) => name,
     };
-    if details.collaborators.is_some() && author.contains(user_name) {
+    if collaborators.is_some() && author.contains(user_name) {
         return true;
     }
     author == user_name
@@ -707,6 +806,180 @@ mod tests {
         crate::net::browse::Fixtures::dir().join("index.json")
     }
 
+    /// How the library card address and image behave after a cover change.
+    /// `MIXTAPES_SCRATCH=<id> cargo test -- --ignored live_cover_propagation --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_cover_propagation() {
+        let paths = crate::paths::Paths::discover();
+        let client = crate::net::ytmusic::YtMusic::new(&paths).unwrap();
+        let api: Arc<dyn Browse> = client.api();
+        let headers = client.browser_headers().expect("session");
+        let id = std::env::var("MIXTAPES_SCRATCH").expect("MIXTAPES_SCRATCH=<playlist id>");
+
+        let card_url = |api: Arc<dyn Browse>, id: String| async move {
+            let items = crate::net::library::library_playlists(api).await.unwrap_or_default();
+            items.iter().find(|p| p.id == id).and_then(|p| p.thumb.clone()).unwrap_or_default()
+        };
+        let digest = |bytes: &[u8]| bytes.iter().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(*b as u64));
+
+        let before = card_url(api.clone(), id.clone()).await;
+        let before_bytes = client.http().get(&before).send().await.unwrap().bytes().await.unwrap();
+        println!("before: {} bytes={:016x}\n  {before}", before_bytes.len(), digest(&before_bytes));
+
+        let image = std::env::temp_dir().join("mixtapes-propagation.png");
+        let pixels: Vec<u8> = (0..256 * 256).flat_map(|_| [20u8, 20u8, 240u8]).collect();
+        let mut child = std::process::Command::new("ffmpeg")
+            .args(["-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "256x256", "-i", "-"])
+            .arg(&image)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        {
+            use std::io::Write;
+            child.stdin.take().unwrap().write_all(&pixels).unwrap();
+        }
+        child.wait().unwrap();
+        set_playlist_thumbnail(&api, client.http(), &headers, &id, &image).await.expect("upload");
+
+        for wait in [2, 5, 10, 20] {
+            tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+            let url = card_url(api.clone(), id.clone()).await;
+            let bytes = client.http().get(&url).send().await.unwrap().bytes().await.unwrap();
+            println!("+{wait}s: same address={} bytes={:016x} len={}", url == before, digest(&bytes), bytes.len());
+        }
+        let _ = std::fs::remove_file(&image);
+    }
+
+    /// Make or remove a playlist to try things on by hand.
+    /// `cargo test -- --ignored live_scratch_playlist --nocapture` creates one,
+    /// `MIXTAPES_SCRATCH=<id> cargo test -- --ignored live_scratch_playlist` removes it.
+    #[tokio::test]
+    #[ignore]
+    async fn live_scratch_playlist() {
+        let api: Arc<dyn Browse> = live_client();
+        match std::env::var("MIXTAPES_SCRATCH") {
+            Ok(id) if !id.is_empty() => {
+                delete_playlist(&api, &id).await.expect("delete");
+                println!("deleted {id}");
+            }
+            _ => {
+                let id = create_playlist(&api, "Mixtapes scratch", "for a by-hand check", "PRIVATE").await.expect("create");
+                await_playlist(&api, &id).await;
+                println!("scratch playlist {id}");
+            }
+        }
+    }
+
+    /// Sets a cover on a throwaway playlist, checks it took, then deletes it.
+    /// `cargo test -- --ignored live_playlist_cover --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_playlist_cover() {
+        let client = crate::net::ytmusic::YtMusic::new(&crate::paths::Paths::discover()).unwrap();
+        let api: Arc<dyn Browse> = client.api();
+        let headers = client.browser_headers().expect("a signed in session");
+
+        let title = format!("Mixtapes cover test {}", std::process::id());
+        let id = create_playlist(&api, &title, "created by a test", "PRIVATE").await.expect("create");
+        await_playlist(&api, &id).await;
+        let before = get_playlist(&api, &id, Some(1)).await.map(|d| d.thumbnails.last().cloned().unwrap_or_default());
+
+        // A plain square, written the way the crop dialog writes its result.
+        let image = std::env::temp_dir().join(format!("mixtapes-cover-test-{}.png", std::process::id()));
+        let pixels: Vec<u8> = (0..256 * 256).flat_map(|i| [(i % 256) as u8, 40u8, 160u8]).collect();
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "256x256", "-i", "-"])
+            .arg(&image)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write;
+                child.stdin.take().unwrap().write_all(&pixels)?;
+                child.wait()
+            });
+        if !made.map(|s| s.success()).unwrap_or(false) {
+            delete_playlist(&api, &id).await.expect("delete");
+            println!("ffmpeg missing, skipping");
+            return;
+        }
+
+        let uploaded = set_playlist_thumbnail(&api, client.http(), &headers, &id, &image).await;
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let after = get_playlist(&api, &id, Some(1)).await.map(|d| d.thumbnails.last().cloned().unwrap_or_default());
+
+        delete_playlist(&api, &id).await.expect("delete");
+        let _ = std::fs::remove_file(&image);
+
+        uploaded.expect("the cover upload");
+        let (before, after) = (before.expect("before"), after.expect("after"));
+        println!("cover before: {before}\ncover after:  {after}");
+        assert_ne!(before, after, "the playlist shows a different cover once one is set");
+        assert!(!after.is_empty());
+    }
+
+    /// What the uploads tab has to work with.
+    /// `cargo test -- --ignored live_uploads --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_uploads() {
+        let api: Arc<dyn Browse> = live_client();
+        let songs = get_upload_songs(&api).await.expect("upload songs");
+        let albums = crate::net::library::upload_albums(api.clone()).await.expect("upload albums");
+        let artists = crate::net::library::upload_artists(api.clone()).await.expect("upload artists");
+        println!("uploads: {} songs, {} albums, {} artists", songs.len(), albums.len(), artists.len());
+        for track in songs.iter().take(3) {
+            println!("  {} - {} ({:?})", track.artist, track.title, track.entity_id);
+        }
+    }
+
+    /// Creates a playlist, checks it is in the library, then deletes it.
+    /// `cargo test -- --ignored live_create_and_delete_playlist --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_create_and_delete_playlist() {
+        let api: Arc<dyn Browse> = live_client();
+        let title = format!("Mixtapes round trip {}", std::process::id());
+        let id = create_playlist(&api, &title, "created by a test", "PRIVATE").await.expect("create");
+        println!("created {id}");
+
+        // The library index takes a moment to show a new playlist.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        // Nothing here may panic: the playlist has to be deleted either way.
+        let listed = crate::net::library::library_playlists(api.clone()).await.map(|mine| mine.iter().any(|p| p.title == title));
+        let opened = get_playlist(&api, &id, Some(1)).await.map(|details| details.title);
+
+        delete_playlist(&api, &id).await.expect("delete");
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let after = crate::net::library::library_playlists(api.clone()).await.expect("library again");
+
+        assert!(listed.expect("library"), "the new playlist shows in the library");
+        assert_eq!(opened.expect("open the new playlist"), title);
+        assert!(!after.iter().any(|p| p.title == title), "and it is gone once deleted");
+        println!("round trip complete, nothing left behind");
+    }
+
+    /// `cargo test -- --ignored live_audio_version --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_audio_version() {
+        let api = live_client();
+        for id in ["fJ9rUzIMcZQ", "kM0Fpbz0W8U", "BTivsHlVcGU", "CuklIb9d3fI"] {
+            let watch = get_watch_playlist(&api, Some(id), None, 1, false).await.unwrap_or_default();
+            let first = watch.tracks.first();
+            println!("{id}: type={:?} counterpart={:?}", first.and_then(|t| t.track.video_type.clone()), first.and_then(|t| t.counterpart.as_ref().map(|c| (c.video_id.0.clone(), c.video_type.clone()))));
+            match find_audio_version(&api, id).await {
+                Ok(Some(alt)) => println!("   -> swap to {} ({})", alt.video_id, alt.title),
+                Ok(None) => println!("   -> no audio twin"),
+                Err(err) => println!("   -> failed: {err}"),
+            }
+        }
+    }
+
     /// Records what the offline test replays. Run it once while signed in:
     /// `cargo test -- --ignored capture_fixtures`
     #[tokio::test]
@@ -721,7 +994,15 @@ mod tests {
         crate::net::search::search(&tape, "queen", None).await.expect("search");
         let artist_id = liked.tracks.iter().find_map(|t| t.artists.first().and_then(|a| a.id.clone())).expect("an artist on a liked track");
         crate::net::artist::get_artist(tape.clone(), &artist_id).await.expect("artist");
-        let index = json!({ "album": album_id, "artist": artist_id, "tracks": liked.tracks.len() });
+        crate::net::explore::get_explore(&tape).await.expect("explore feed");
+        crate::net::explore::get_charts(&tape, "ZZ").await.expect("charts");
+        let categories = crate::net::explore::get_mood_categories(&tape).await.expect("mood categories");
+        let genres = crate::net::explore::section(&categories, "Genres");
+        let params = genres.first().map(|c| c.params.clone()).expect("a genre pill");
+        crate::net::explore::get_category_page(&tape, &params).await.expect("category page");
+        crate::net::home::get_home(tape.clone(), 25).await.expect("home feed");
+        crate::net::history::get_history(tape.clone()).await.expect("history");
+        let index = json!({ "album": album_id, "artist": artist_id, "tracks": liked.tracks.len(), "category": params });
         std::fs::write(index_path(), index.to_string()).expect("index written");
         println!("captured into {}", crate::net::browse::Fixtures::dir().display());
     }
@@ -754,6 +1035,37 @@ mod tests {
 
         let artist = crate::net::artist::get_artist(tape.clone(), index["artist"].as_str().unwrap()).await.expect("artist replay");
         assert!(!artist.name.is_empty());
+
+        let feed = crate::net::explore::get_explore(&tape).await.expect("explore replay");
+        assert!(!feed.new_releases.is_empty(), "the feed has new releases");
+        assert!(feed.new_releases.iter().all(|a| !a.id.is_empty() && !a.title.is_empty()));
+        assert!(feed.trending.iter().all(|t| t.kind.is_playable()));
+
+        let charts = crate::net::explore::get_charts(&tape, "ZZ").await.expect("charts replay");
+        assert!(charts.countries.contains(&"ZZ".to_owned()), "the country menu offers Global");
+        assert!(!charts.artists.is_empty());
+        assert!(charts.artists.iter().all(|a| !a.item.id.is_empty()));
+        assert!(charts.videos.iter().chain(charts.daily.iter()).all(|p| !p.id.starts_with("VL")));
+
+        let categories = crate::net::explore::get_mood_categories(&tape).await.expect("categories replay");
+        assert!(!crate::net::explore::section(&categories, "Genres").is_empty());
+
+        let sections = crate::net::explore::get_category_page(&tape, index["category"].as_str().unwrap()).await.expect("category replay");
+        assert!(!sections.is_empty());
+        assert!(sections.iter().all(|s| !s.title.is_empty() && !s.items.is_empty()));
+
+        let home = crate::net::home::get_home(tape.clone(), 25).await.expect("home replay");
+        assert!(home.len() > 3, "the feed pages past its first three shelves");
+        assert!(home.iter().all(|s| !s.title.is_empty()));
+        assert!(home.iter().flat_map(|s| &s.items).all(|i| !i.id.is_empty() && !i.title.is_empty()));
+        let (dial, ordered) = crate::net::home::arrange(home);
+        assert!(!dial.is_empty(), "something feeds the quick-picks dial");
+        assert!(!ordered.is_empty());
+
+        let history = crate::net::history::get_history(tape.clone()).await.expect("history replay");
+        assert!(!history.is_empty());
+        assert!(history.iter().all(|e| !e.track.video_id.0.is_empty() && !e.played.is_empty()));
+        assert!(history.iter().any(|e| e.feedback_token.is_some()), "rows carry the token that forgets them");
     }
 
     fn live_client() -> Arc<YTMusicClient> {

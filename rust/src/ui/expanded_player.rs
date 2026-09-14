@@ -6,7 +6,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gtk::{gdk, glib, prelude::*};
+use adw::prelude::*;
+use gtk::{gdk, glib};
 
 use crate::model::{LikeStatus, PlaybackStatus, VideoId};
 use crate::ui::context::{NavRequest, UiContext};
@@ -21,6 +22,9 @@ use crate::ui::widgets::visualizer::Visualizer;
 const MAX_CAROUSEL_COVERS: usize = 31;
 const CAROUSEL_PRELOAD_RADIUS: usize = 5;
 const USER_INPUT_WINDOW: Duration = Duration::from_millis(800);
+/// Scroll events arrive as a stream with no beginning of their own. A pause
+/// longer than this starts a new gesture, and with it a new baseline.
+const GESTURE_GAP: Duration = Duration::from_millis(600);
 
 pub struct ExpandedPlayer {
     root: gtk::Box,
@@ -30,7 +34,13 @@ pub struct ExpandedPlayer {
     covers: RefCell<Vec<Rc<CoverPicture>>>,
     cover_offset: Cell<usize>,
     ignore_page_change: Cell<bool>,
+    more_btn: gtk::MenuButton,
     user_input_at: Cell<Option<Instant>>,
+    /// Where the carousel sat when the current gesture began. A settle that
+    /// did not move from here is a tap, not a swipe.
+    gesture_start: Cell<Option<f64>>,
+    /// Set while a centre is waiting for the carousel to be laid out.
+    center_pending: Cell<bool>,
     title: Rc<MarqueeLabel>,
     artists_box: gtk::Box,
     like: Rc<LikeButton>,
@@ -236,7 +246,10 @@ impl ExpandedPlayer {
             covers: RefCell::new(Vec::new()),
             cover_offset: Cell::new(0),
             ignore_page_change: Cell::new(false),
+            more_btn: more_btn.clone(),
             user_input_at: Cell::new(None),
+            gesture_start: Cell::new(None),
+            center_pending: Cell::new(false),
             title,
             artists_box,
             like,
@@ -248,20 +261,10 @@ impl ExpandedPlayer {
             on_dismiss: RefCell::new(None),
         });
 
-        // Current-track menu on the more button.
-        {
-            let weak = Rc::downgrade(&this);
-            more_btn.connect_activate(move |_| {});
-            let weak2 = weak.clone();
-            more_btn.connect_notify_local(Some("active"), move |btn, _| {
-                if !btn.is_active() {
-                    return;
-                }
-                if let Some(ep) = weak2.upgrade() {
-                    ep.refresh_more_menu(btn);
-                }
-            });
-        }
+        // The menu is rebuilt whenever the track changes, like the Python
+        // view. A menu button with no model is insensitive, so building it
+        // only on activate would leave the button dead.
+        this.refresh_more_menu();
 
         this.connect_toggles();
         this.connect_carousel(&cover_frame);
@@ -312,33 +315,42 @@ impl ExpandedPlayer {
     }
 
     fn connect_carousel(self: &Rc<Self>, cover_frame: &gtk::AspectFrame) {
-        let mark_input = {
+        // Every part of a gesture counts, not only its start: a slow swipe can
+        // take seconds, and the carousel settles after the finger lifts.
+        let drag = gtk::GestureDrag::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
+        for signal in ["drag-begin", "drag-update", "drag-end"] {
             let weak = Rc::downgrade(self);
-            Rc::new(move || {
+            let begins = signal == "drag-begin";
+            drag.connect_local(signal, false, move |_| {
                 if let Some(ep) = weak.upgrade() {
-                    ep.user_input_at.set(Some(Instant::now()));
+                    ep.note_input(begins);
                 }
-            })
-        };
-        let drag = gtk::GestureDrag::builder()
-            .propagation_phase(gtk::PropagationPhase::Capture)
-            .build();
-        let m = mark_input.clone();
-        drag.connect_drag_begin(move |_, _, _| m());
+                None
+            });
+        }
         self.carousel.add_controller(drag);
-        let click = gtk::GestureClick::builder()
-            .propagation_phase(gtk::PropagationPhase::Capture)
-            .build();
-        let m = mark_input.clone();
-        click.connect_pressed(move |_, _, _, _| m());
+
+        let click = gtk::GestureClick::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
+        let weak = Rc::downgrade(self);
+        click.connect_pressed(move |_, _, _, _| {
+            if let Some(ep) = weak.upgrade() {
+                ep.note_input(true);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        click.connect_released(move |_, _, _, _| {
+            if let Some(ep) = weak.upgrade() {
+                ep.note_input(false);
+            }
+        });
         self.carousel.add_controller(click);
-        let scroll = gtk::EventControllerScroll::builder()
-            .flags(gtk::EventControllerScrollFlags::BOTH_AXES)
-            .propagation_phase(gtk::PropagationPhase::Capture)
-            .build();
-        let m = mark_input.clone();
+
+        let scroll = gtk::EventControllerScroll::builder().flags(gtk::EventControllerScrollFlags::BOTH_AXES).propagation_phase(gtk::PropagationPhase::Capture).build();
+        let weak = Rc::downgrade(self);
         scroll.connect_scroll(move |_, _, _| {
-            m();
+            if let Some(ep) = weak.upgrade() {
+                ep.note_input(false);
+            }
             glib::Propagation::Proceed
         });
         self.carousel.add_controller(scroll);
@@ -349,20 +361,35 @@ impl ExpandedPlayer {
             if ep.ignore_page_change.get() {
                 return;
             }
-            let recent = ep
-                .user_input_at
-                .get()
-                .is_some_and(|t| t.elapsed() < USER_INPUT_WINDOW);
-            if !recent {
-                return;
-            }
+            let since_input = ep.user_input_at.get().map(|t| t.elapsed());
             let position = carousel.position();
-            if (position - position.round()).abs() > 0.001 {
+            if !touched_recently(since_input) || !settled_on_a_page(position) {
                 return;
             }
-            let queue_index = ep.cover_offset.get() + position.round() as usize;
-            if queue_index as i32 != ep.ctx.player.state().current_index() {
+            // The carousel counts pages, not covers. Resolve the page that is
+            // showing and ask the list where it sits, so a hidden cover can
+            // never send the player somewhere else.
+            let index = position.round() as u32;
+            if index >= carousel.n_pages() {
+                return;
+            }
+            let page = carousel.nth_page(index);
+            let Some(cover_index) = ep.covers.borrow().iter().position(|c| c.widget().upcast_ref::<gtk::Widget>() == &page) else { return };
+            let queue_index = ep.cover_offset.get() + cover_index;
+            let current = ep.ctx.player.state().current_index();
+            if queue_index as i32 == current {
+                return;
+            }
+            // A flick can carry several covers, so any distance counts as long
+            // as the carousel actually moved under the finger. A settle that
+            // did not move is the carousel sitting out of step with the queue,
+            // and following it is what used to jump to another track.
+            if swiped(position, ep.gesture_start.get()) {
+                tracing::debug!(queue_index, current, since_input = ?since_input, "carousel swipe");
                 ep.ctx.player.play_queue_index(queue_index);
+            } else {
+                tracing::debug!(queue_index, current, "carousel out of step, putting it back");
+                ep.center_carousel();
             }
         });
 
@@ -375,7 +402,7 @@ impl ExpandedPlayer {
         let weak = Rc::downgrade(self);
         self.root.connect_map(move |_| {
             if let Some(ep) = weak.upgrade() {
-                ep.center_carousel();
+                ep.center_when_ready();
                 ep.visualizer
                     .set_active(ep.ctx.player.state().status() == PlaybackStatus::Playing);
             }
@@ -395,6 +422,7 @@ impl ExpandedPlayer {
             state.connect_notify_local(Some(prop), move |_, _| {
                 if let Some(ep) = weak.upgrade() {
                     ep.refresh_metadata();
+                    ep.refresh_more_menu();
                 }
             });
         }
@@ -482,29 +510,39 @@ impl ExpandedPlayer {
         }
         let video_id = state.video_id();
         if video_id.is_empty() {
-            self.like.set_data(None, LikeStatus::Indifferent);
+            self.like.set_data(None, None);
         } else {
             self.like.set_data(
                 Some(VideoId(video_id)),
-                LikeStatus::parse(&state.like_status()),
+                Some(LikeStatus::parse(&state.like_status())),
             );
         }
     }
 
-    fn refresh_more_menu(&self, btn: &gtk::MenuButton) {
+    fn refresh_more_menu(self: &Rc<Self>) {
         let Some(track) = self.ctx.player.current_track() else {
-            btn.set_menu_model(gtk::gio::MenuModel::NONE);
+            self.more_btn.set_menu_model(gtk::gio::MenuModel::NONE);
             return;
         };
+        let this = self.clone();
+        let extras = vec![crate::ui::context_menu::MenuAction::new("Stream Info (Debug)", crate::ui::context_menu::Section::Debug, move || this.show_stream_info())];
         let opts = crate::ui::context_menu::SongMenuOptions {
             prefix: "ep",
-            hide: &["play_next", "add_to_queue"],
+            // The view already shows the artist as a link and the cover for
+            // the album, so those entries would only repeat it.
+            hide: &["play_next", "add_to_queue", "goto_artist", "goto_album"],
             nav: Some(self.ctx.nav.clone()),
             ctx: Some(self.ctx.clone()),
+            extras,
             ..Default::default()
         };
-        let model = crate::ui::context_menu::build_song_menu(btn, &track, &self.ctx.player, opts);
-        btn.set_menu_model(model.as_ref());
+        let model = crate::ui::context_menu::build_song_menu(&self.more_btn, &track, &self.ctx.player, opts);
+        self.more_btn.set_menu_model(model.as_ref());
+    }
+
+    /// Port of _show_stream_info: what is playing and how the pipeline sees it.
+    pub fn show_stream_info(self: &Rc<Self>) {
+        present_stream_info(&self.ctx, self.root.upcast_ref::<gtk::Widget>());
     }
 
     // -- carousel over the queue ------------------------------------------
@@ -516,10 +554,72 @@ impl ExpandedPlayer {
         }
         let page = (idx as usize).saturating_sub(self.cover_offset.get());
         if let Some(cover) = self.covers.borrow().get(page) {
-            self.ignore_page_change.set(true);
+            // A sync in flight keeps its own guard: restore what was there.
+            let guarded = self.ignore_page_change.replace(true);
             self.carousel.scroll_to(cover.widget(), false);
-            self.ignore_page_change.set(false);
+            self.ignore_page_change.set(guarded);
         }
+    }
+
+    /// Demo hook: a gesture that takes two seconds, then settles `covers`
+    /// along. Stands in for a swipe, which no test harness can send.
+    pub fn slow_swipe_for_demo(self: &Rc<Self>, covers: i32) {
+        let this = self.clone();
+        let ticks = std::cell::Cell::new(0u32);
+        glib::timeout_add_local(Duration::from_millis(100), move || {
+            let tick = ticks.replace(ticks.get() + 1);
+            this.note_input(tick == 0);
+            if tick == 20 {
+                let page = (this.carousel.position().round() as i32 + covers).max(0) as usize;
+                tracing::info!(page, "demo: the finger lifts after two seconds");
+                if let Some(cover) = this.covers.borrow().get(page) {
+                    this.carousel.scroll_to(cover.widget(), true);
+                }
+            }
+            match tick > 22 {
+                true => glib::ControlFlow::Break,
+                false => glib::ControlFlow::Continue,
+            }
+        });
+    }
+
+    /// Remember that the listener is working the carousel.
+    ///
+    /// The clock runs from the last movement, so a swipe that takes its time
+    /// still counts. `begins` marks the start of a gesture, where the baseline
+    /// for judging a swipe is taken.
+    fn note_input(&self, begins: bool) {
+        let now = Instant::now();
+        let fresh = begins || self.user_input_at.get().is_none_or(|last| now.duration_since(last) > GESTURE_GAP);
+        if fresh {
+            self.gesture_start.set(Some(self.carousel.position()));
+        }
+        self.user_input_at.set(Some(now));
+    }
+
+    /// Put the playing track's cover in view once the carousel has a size.
+    ///
+    /// A carousel that has never been laid out cannot scroll, and the sheet is
+    /// laid out only when it opens. Centring at that moment alone leaves the
+    /// view on the first cover, which is why opening the sheet used to show
+    /// the wrong song and a swipe played the second one. The frame callback
+    /// runs only while the widget is mapped, so this settles on the first
+    /// frame the sheet is actually on screen.
+    fn center_when_ready(self: &Rc<Self>) {
+        if self.center_pending.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        self.carousel.add_tick_callback(move |carousel, _| {
+            let Some(ep) = weak.upgrade() else { return glib::ControlFlow::Break };
+            if !carousel.is_mapped() || carousel.width() == 0 {
+                return glib::ControlFlow::Continue;
+            }
+            tracing::debug!(width = carousel.width(), position = carousel.position(), "centering the carousel");
+            ep.center_carousel();
+            ep.center_pending.set(false);
+            glib::ControlFlow::Break
+        });
     }
 
     fn sync_carousel(self: &Rc<Self>) {
@@ -559,27 +659,120 @@ impl ExpandedPlayer {
         let lo = page.saturating_sub(CAROUSEL_PRELOAD_RADIUS);
         let hi = (page + CAROUSEL_PRELOAD_RADIUS).min(covers.len() - 1);
         for (i, cover) in covers.iter().enumerate() {
-            let thumb = tracks
-                .get(offset + i)
-                .and_then(|t| t.thumb.clone())
-                .unwrap_or_default();
-            if i >= lo && i <= hi && !thumb.is_empty() {
-                cover.widget().set_visible(true);
-                cover.load(&thumb);
-            } else {
-                cover.load("");
-                cover.widget().set_visible(!thumb.is_empty());
-            }
+            // The playing track falls back to the artwork the bar is showing:
+            // a radio row often carries no thumbnail of its own.
+            let thumb = match tracks.get(offset + i).and_then(|t| t.thumb.clone()) {
+                Some(thumb) => thumb,
+                None if i == page => self.ctx.player.state().thumbnail_url(),
+                None => String::new(),
+            };
+            // Every cover stays a page, with a placeholder when there is no
+            // art. Hiding one would shift every page index after it.
+            cover.widget().set_visible(true);
+            cover.load(if i >= lo && i <= hi { thumb.as_str() } else { "" });
         }
         if let Some(cover) = covers.get(page) {
             self.carousel.scroll_to(cover.widget(), false);
         }
         drop(covers);
+        // The scroll above is lost while the sheet is closed, so ask again for
+        // the first frame after it opens.
+        self.center_when_ready();
         let weak = Rc::downgrade(self);
         glib::timeout_add_local_once(Duration::from_millis(200), move || {
             if let Some(ep) = weak.upgrade() {
                 ep.ignore_page_change.set(false);
             }
         });
+    }
+}
+
+/// The Stream Info panel, shared by the phone sheet and the desktop view.
+///
+/// The pipeline half is queried on the audio thread, so the text arrives after
+/// a round trip. Copy takes the whole signed URI rather than the shortened one.
+pub fn present_stream_info(ctx: &Rc<UiContext>, anchor: &gtk::Widget) {
+    let ctx = ctx.clone();
+    let anchor = anchor.clone();
+    glib::spawn_future_local(async move {
+        let text = ctx.player.stream_debug(false).await;
+        let label = gtk::Label::builder().label(&text).selectable(true).wrap(true).xalign(0.0).margin_top(4).css_classes(["monospace"]).build();
+        let dialog = adw::AlertDialog::builder().heading("Stream Info").extra_child(&label).build();
+        dialog.add_response("close", "Close");
+        dialog.add_response("copy", "Copy");
+        dialog.set_default_response(Some("close"));
+        dialog.set_close_response("close");
+        let copy_ctx = ctx.clone();
+        let copy_anchor = anchor.clone();
+        dialog.connect_response(None, move |_, response| {
+            if response != "copy" {
+                return;
+            }
+            let ctx = copy_ctx.clone();
+            let anchor = copy_anchor.clone();
+            glib::spawn_future_local(async move {
+                let full = ctx.player.stream_debug(true).await;
+                if let Some(display) = gtk::gdk::Display::default() {
+                    display.clipboard().set_text(&full);
+                }
+                crate::ui::toast(&anchor, "Stream info copied");
+            });
+        });
+        dialog.present(Some(&anchor));
+    });
+}
+
+/// Whether the listener has touched the carousel recently enough for a move
+/// to be theirs rather than one the app made.
+fn touched_recently(since_input: Option<Duration>) -> bool {
+    since_input.is_some_and(|elapsed| elapsed < USER_INPUT_WINDOW)
+}
+
+/// Whether the carousel has come to rest on a page rather than between two.
+fn settled_on_a_page(position: f64) -> bool {
+    (position - position.round()).abs() <= 0.001
+}
+
+/// Whether the carousel moved under the gesture rather than settling where it
+/// already was.
+///
+/// A flick can carry several covers at once, so distance is not capped. What
+/// matters is that the position left the page the gesture started on: a tap
+/// settles where it began, and following that would play whatever cover the
+/// carousel happened to be showing.
+fn swiped(position: f64, gesture_start: Option<f64>) -> bool {
+    gesture_start.is_some_and(|start| (position - start).abs() >= 0.5)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_carousel_still_moving_is_left_alone() {
+        assert!(!settled_on_a_page(3.4));
+        assert!(settled_on_a_page(3.0));
+        assert!(settled_on_a_page(2.9999));
+    }
+
+    #[test]
+    fn a_slow_swipe_still_counts_because_the_clock_runs_from_the_last_movement() {
+        assert!(touched_recently(Some(Duration::from_millis(400))));
+        assert!(!touched_recently(Some(Duration::from_secs(5))));
+        assert!(!touched_recently(None), "a move nobody asked for is the app's own");
+    }
+
+    #[test]
+    fn a_flick_across_several_covers_counts() {
+        assert!(swiped(4.0, Some(3.0)));
+        assert!(swiped(18.0, Some(15.0)), "a hard flick travels further than one cover");
+        assert!(swiped(12.0, Some(15.0)));
+    }
+
+    #[test]
+    fn a_tap_settles_where_it_began_and_moves_nothing() {
+        assert!(!swiped(3.0, Some(3.0)));
+        assert!(!swiped(3.0, Some(2.7)), "a nudge that snapped back is not a swipe");
+        assert!(!swiped(3.0, None), "no gesture, no swipe");
     }
 }

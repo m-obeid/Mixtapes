@@ -8,9 +8,9 @@ use std::time::Duration;
 
 use gtk::{gdk, glib, prelude::*};
 
-use crate::model::{LikeStatus, MediaItem, VideoId};
+use crate::model::{ItemKind, MediaItem, VideoId};
 use crate::ui::context::UiContext;
-use crate::ui::context_menu::{SongMenuOptions, show_song_menu};
+use crate::ui::context_menu::{MenuAction, SongMenuOptions, show_song_menu};
 use crate::ui::cover::CoverImage;
 use crate::ui::like_button::LikeButton;
 use crate::ui::widgets::song_list::{kind_subtitle, kind_subtitle_text, search_subtitle};
@@ -20,6 +20,8 @@ const CLICK_SLOP: f64 = 10.0;
 const ANIMATION_STEP: Duration = Duration::from_millis(350);
 
 type ActivateHandler = Rc<dyn Fn(&MediaItem)>;
+/// What a page adds to this row's menu, built fresh each time it opens.
+type MenuExtras = Rc<dyn Fn() -> Vec<MenuAction>>;
 
 pub struct SongRow {
     row: gtk::ListBoxRow,
@@ -44,6 +46,10 @@ pub struct SongRow {
     press_at: Cell<(f64, f64)>,
     /// Search rows tint the ListBoxRow and show no indicator, like attach_playing_highlight.
     row_highlight: Cell<bool>,
+    /// A subtitle the page named itself, drawn plain with no kind icon.
+    plain_subtitle: RefCell<Option<String>>,
+    /// Extra menu entries the page contributes, built when the menu opens.
+    menu_extras: RefCell<Option<MenuExtras>>,
 }
 
 impl SongRow {
@@ -113,6 +119,8 @@ impl SongRow {
             on_activate: RefCell::new(None),
             press_at: Cell::new((0.0, 0.0)),
             row_highlight: Cell::new(false),
+            plain_subtitle: RefCell::new(None),
+            menu_extras: RefCell::new(None),
         });
         this.connect_gestures();
         this
@@ -129,6 +137,18 @@ impl SongRow {
         self.duration.set_visible(!enabled);
     }
 
+    /// Entries this row's menu carries on top of the standard ones, the way
+    /// the history page adds Play and Remove from History.
+    pub fn set_menu_extras(&self, f: impl Fn() -> Vec<MenuAction> + 'static) {
+        self.menu_extras.replace(Some(Rc::new(f)));
+    }
+
+    /// Draw this text under the title instead of the kind line, the way the
+    /// category page and the history page write their own.
+    pub fn set_plain_subtitle(&self, text: Option<String>) {
+        self.plain_subtitle.replace(text);
+    }
+
     /// Without this the row relies on its ListBox's row-activated signal.
     #[allow(dead_code)]
     pub fn set_on_activate(&self, f: impl Fn(&MediaItem) + 'static) {
@@ -143,14 +163,18 @@ impl SongRow {
         while let Some(child) = self.subtitle_box.first_child() {
             self.subtitle_box.remove(&child);
         }
-        if self.row_highlight.get() {
+        if let Some(text) = self.plain_subtitle.borrow().clone() {
+            if !text.is_empty() {
+                self.subtitle_box.append(&gtk::Label::builder().label(&text).halign(gtk::Align::Start).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).lines(1).width_chars(1).tooltip_text(&text).css_classes(["dim-label", "caption"]).build());
+            }
+        } else if self.row_highlight.get() {
             self.subtitle_box.append(&kind_subtitle_text(item, &search_subtitle(item), false));
         } else {
             self.subtitle_box.append(&kind_subtitle(item, true, false));
         }
         self.duration.set_label(&item.duration_text().unwrap_or_default());
         self.explicit.set_visible(item.explicit);
-        self.dl_icon.set_visible(false);
+        self.dl_icon.set_visible(item.kind == ItemKind::Song && self.ctx.downloads.is_downloaded(&item.id));
 
         match track_number {
             Some(n) => {
@@ -171,9 +195,9 @@ impl SongRow {
         let playable = item.kind.is_playable() && !item.id.is_empty();
         self.inner.set_sensitive(playable);
         if playable {
-            self.like.set_data(Some(VideoId(item.id.clone())), LikeStatus::Indifferent);
+            self.like.set_data(Some(VideoId(item.id.clone())), item.like_status);
         } else {
-            self.like.set_data(None, LikeStatus::Indifferent);
+            self.like.set_data(None, None);
         }
 
         // Follow the current track. One handler per row, dropped with the row.
@@ -248,7 +272,8 @@ impl SongRow {
             Rc::new(move |x: f64, y: f64| {
                 let Some(row) = weak.upgrade() else { return };
                 let Some(track) = row.item.borrow().as_ref().and_then(MediaItem::to_track) else { return };
-                let opts = SongMenuOptions { prefix: "row", nav: Some(row.ctx.nav.clone()), ctx: Some(row.ctx.clone()), ..SongMenuOptions::default() };
+                let extras = row.menu_extras.borrow().clone().map(|build| build()).unwrap_or_default();
+                let opts = SongMenuOptions { prefix: "row", nav: Some(row.ctx.nav.clone()), ctx: Some(row.ctx.clone()), extras, ..SongMenuOptions::default() };
                 show_song_menu(&row.inner, x, y, &track, &row.ctx.player, opts);
             })
         };

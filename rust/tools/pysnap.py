@@ -10,7 +10,7 @@ os.chdir(os.path.join(ROOT, "src"))
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, GLib, Graphene
+from gi.repository import Gtk, Adw, GLib, Graphene
 
 import main as muse_main
 
@@ -20,6 +20,9 @@ TAB = os.environ.get("PY_TAB", "")
 PLAYLIST = os.environ.get("PY_PLAYLIST", "")
 QUEUE = os.environ.get("PY_QUEUE", "")
 ARTIST = os.environ.get("PY_ARTIST", "")
+SCROLL = float(os.environ.get("PY_SCROLL", "0"))
+CATEGORY = os.environ.get("PY_CATEGORY", "")
+HISTORY = os.environ.get("PY_HISTORY", "")
 OUT = os.environ["PY_OUT"]
 
 def log(msg):
@@ -70,13 +73,48 @@ class SnapApp(muse_main.MusicApp):
             if PLAYLIST:
                 win.open_playlist(PLAYLIST)
                 log(f"playlist opened: {PLAYLIST}")
+            if CATEGORY:
+                params, _, name = CATEGORY.partition(",")
+                win.open_category(params, name or "Category")
+                log(f"category opened: {params}")
+            if HISTORY:
+                win._open_history_from_menu()
+                log("history opened")
             if QUERY:
                 win.search_bar.set_search_mode(True)
                 win.search_entry.set_text(QUERY)
                 log(f"search typed: {QUERY}")
             return False
 
+        def scroll_page():
+            """Scroll the first scroller under the visible page that can move."""
+            def find(widget):
+                if isinstance(widget, Gtk.ScrolledWindow):
+                    adj = widget.get_vadjustment()
+                    if adj.get_upper() > adj.get_page_size():
+                        return widget
+                child = widget.get_first_child()
+                while child:
+                    found = find(child)
+                    if found:
+                        return found
+                    child = child.get_next_sibling()
+                return None
+
+            nav = win.view_stack.get_visible_child()
+            page = nav.get_visible_page() if isinstance(nav, Adw.NavigationView) else nav
+            scroller = find(page) if page else None
+            if scroller:
+                adj = scroller.get_vadjustment()
+                adj.set_value(min(SCROLL, adj.get_upper() - adj.get_page_size()))
+                log(f"scrolled to {adj.get_value()}")
+            else:
+                log("nothing to scroll")
+            return False
+
         GLib.timeout_add(3000, start_search)
+        if SCROLL:
+            GLib.timeout_add(9000, scroll_page)
         GLib.timeout_add(10000, lambda: snapshot(win, OUT + "-1.png"))
         GLib.timeout_add(11500, lambda: (win.player.stop(), self.quit(), False)[-1])
 

@@ -1,5 +1,6 @@
-//! Port of ui/pages/home.py on mock data: quick-picks dial, boxed song
-//! lists for song-heavy sections, card strips for everything else.
+//! Port of ui/pages/home.py: the quick-picks dial, boxed song lists for
+//! song-heavy shelves, card strips for everything else, and the shelf
+//! ordering that puts the named rows first.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -7,15 +8,20 @@ use std::time::Duration;
 
 use gtk::{glib, prelude::*};
 
-use crate::mock;
 use crate::model::{ItemKind, MediaItem};
+use crate::net::home;
 use crate::ui::context::UiContext;
 use crate::ui::cover::CoverImage;
-use crate::ui::pages::{activate_item, attach_item_menu, clear_children, loading_box};
+use crate::ui::pages::{activate_item_with_radio, attach_item_menu, clear_children, loading_box};
 use crate::ui::widgets::media_card::{CardOptions, MediaCard, STRIP_SPACING, STRIP_SPACING_COMPACT};
 use crate::ui::widgets::playing::PlayingTracker;
 use crate::ui::widgets::scroll_box::HorizontalScrollBox;
 use crate::ui::widgets::song_list::{kind_subtitle, song_row};
+
+/// How many shelves of the feed to page in, what get_home_full asked for.
+const FEED_SECTIONS: usize = 25;
+/// The seed picture beside a "Based on ..." heading.
+const STRAPLINE_COVER: i32 = 30;
 
 const SPEED_TILE_COVER: i32 = 56;
 const SPEED_TILE_COVER_COMPACT: i32 = 44;
@@ -52,6 +58,8 @@ pub struct HomePage {
     speed_tiles: RefCell<Vec<SpeedTile>>,
     speed_wrap: RefCell<Option<adw::WrapBox>>,
     speed_scroll: RefCell<Option<Rc<HorizontalScrollBox>>>,
+    /// The items of each rendered shelf, in the order they are drawn.
+    shelves: RefCell<Vec<Vec<MediaItem>>>,
 }
 
 impl HomePage {
@@ -83,6 +91,7 @@ impl HomePage {
             speed_tiles: RefCell::new(Vec::new()),
             speed_wrap: RefCell::new(None),
             speed_scroll: RefCell::new(None),
+            shelves: RefCell::new(Vec::new()),
         });
         let weak = Rc::downgrade(&page);
         glib::idle_add_local_once(move || {
@@ -107,16 +116,25 @@ impl HomePage {
             self.loaded.set(false);
         }
         self.stack.set_visible_child_name("loading");
-        let online = self.ctx.online.is_online();
+        if !self.ctx.online.is_online() {
+            self.apply_home(Err("offline"));
+            return;
+        }
+        let api = self.ctx.net.client().api();
+        let handle = self.ctx.net.spawn(home::get_home(api, FEED_SECTIONS));
         let weak = Rc::downgrade(self);
-        glib::idle_add_local_once(move || {
+        glib::spawn_future_local(async move {
+            let outcome = handle.await;
             let Some(page) = weak.upgrade() else { return };
-            if !online {
-                page.apply_home(Err("offline"));
-                return;
+            match outcome {
+                Ok(Ok(sections)) if !sections.is_empty() => page.apply_home(Ok(sections)),
+                Ok(Ok(_)) => page.apply_home(Err("empty")),
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, "home fetch failed");
+                    page.apply_home(Err("error"));
+                }
+                Err(_) => page.loading.set(false),
             }
-            // The home feed endpoint is not ported yet: mock sections stand in for get_home_full.
-            page.apply_home(Ok(()));
         });
     }
 
@@ -124,13 +142,13 @@ impl HomePage {
         self.load_home_data(true);
     }
 
-    fn apply_home(self: &Rc<Self>, outcome: Result<(), &str>) {
+    fn apply_home(self: &Rc<Self>, outcome: Result<Vec<home::HomeSection>, &str>) {
         self.loading.set(false);
         match outcome {
-            Ok(()) => {
+            Ok(sections) => {
                 self.retry_count.set(0);
                 self.loaded.set(true);
-                self.populate();
+                self.populate(sections);
                 self.stack.set_visible_child_name("feed");
             }
             Err("offline") => self.show_status("network-offline-symbolic", "You're offline", "Home requires an internet connection.\nYour downloaded songs are still available.", false),
@@ -196,7 +214,24 @@ impl HomePage {
         self.sync_speed_dial_height(compact);
     }
 
-    fn populate(self: &Rc<Self>) {
+    /// Demo hook: play the first song of the first shelf that has one, the
+    /// same path a click on that row takes.
+    pub fn activate_first_playable(&self) -> bool {
+        let shelves = self.shelves.borrow();
+        let Some((item, pool)) = shelves.iter().find_map(|items| {
+            let pool: Vec<MediaItem> = items.iter().filter(|i| i.kind.is_playable()).cloned().collect();
+            pool.first().cloned().map(|first| (first, pool))
+        }) else {
+            return false;
+        };
+        tracing::info!(title = %item.title, id = %item.id, pool = pool.len(), "activating the first home row");
+        activate_item_with_radio(&self.ctx, &item, &pool);
+        true
+    }
+
+    /// Port of _populate_feed: the quick-picks dial first, then the four
+    /// named rows, then the rest in the order they arrived.
+    fn populate(self: &Rc<Self>, sections: Vec<home::HomeSection>) {
         clear_children(&self.feed_box);
         self.playing.clear();
         self.cards.borrow_mut().clear();
@@ -205,16 +240,19 @@ impl HomePage {
         self.speed_tiles.borrow_mut().clear();
         self.speed_wrap.replace(None);
         self.speed_scroll.replace(None);
+        self.shelves.borrow_mut().clear();
 
-        let sections = mock::home_sections();
-        for section in sections {
-            if section.title.to_lowercase().contains("quick pick") {
-                self.add_speed_dial(&section.items);
-                continue;
-            }
+        let (dial, ordered) = home::arrange(sections);
+        if !dial.is_empty() {
+            self.shelves.borrow_mut().push(dial.clone());
+            self.add_speed_dial(&dial);
+        }
+        for section in ordered {
+            self.shelves.borrow_mut().push(section.items.clone());
             let songs = section.items.iter().filter(|i| i.kind == ItemKind::Song).count();
             let section_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).build();
-            section_box.append(&self.section_header(&section.title));
+            section_box.append(&self.section_header(&section.title, section.strapline_thumb.as_deref()));
+            // A shelf that is mostly songs reads better as a list than as cards.
             if songs >= 3.max((section.items.len() as f64 * 0.66) as usize) {
                 self.add_song_list(&section_box, &section.items);
             } else {
@@ -225,10 +263,25 @@ impl HomePage {
         self.set_compact(self.ctx.compact.get());
     }
 
-    fn section_header(&self, title: &str) -> gtk::Box {
+    /// The seed's picture on a "Based on ..." row, the matching icon on the
+    /// rows that have one, and nothing in front of the rest.
+    fn section_header(&self, title: &str, strapline_thumb: Option<&str>) -> gtk::Box {
         let header = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(10).halign(gtk::Align::Start).css_classes(["home-section-header"]).build();
-        let icon_name = section_icon(title);
-        header.append(&gtk::Image::builder().icon_name(icon_name).pixel_size(22).valign(gtk::Align::Center).css_classes(["home-section-icon"]).build());
+        match strapline_thumb {
+            Some(url) => {
+                let cover = CoverImage::in_context(&self.ctx, STRAPLINE_COVER);
+                cover.load(url);
+                let wrapper = gtk::Box::builder().overflow(gtk::Overflow::Hidden).css_classes(["home-section-cover"]).valign(gtk::Align::Center).build();
+                wrapper.append(cover.widget());
+                header.append(&wrapper);
+                unsafe { header.set_data("cover", cover) };
+            }
+            None => {
+                if let Some(icon_name) = home::section_icon(title) {
+                    header.append(&gtk::Image::builder().icon_name(icon_name).pixel_size(22).valign(gtk::Align::Center).css_classes(["home-section-icon"]).build());
+                }
+            }
+        }
         header.append(&gtk::Label::builder().label(title).css_classes(["title-2", "home-section-title"]).halign(gtk::Align::Start).valign(gtk::Align::Center).ellipsize(gtk::pango::EllipsizeMode::End).build());
         header
     }
@@ -237,7 +290,7 @@ impl HomePage {
 
     fn add_speed_dial(self: &Rc<Self>, items: &[MediaItem]) {
         let section_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).css_classes(["home-speed-dial"]).build();
-        section_box.append(&self.section_header("Quick picks"));
+        section_box.append(&self.section_header("Quick picks", None));
 
         let scroll_box = HorizontalScrollBox::new();
         let wrap = adw::WrapBox::builder().orientation(gtk::Orientation::Vertical).line_homogeneous(true).line_spacing(SPEED_DIAL_SPACING).child_spacing(SPEED_DIAL_SPACING).valign(gtk::Align::Start).build();
@@ -299,7 +352,7 @@ impl HomePage {
 
         let ctx = self.ctx.clone();
         let (item_c, pool_c) = (item.clone(), pool.to_vec());
-        tile.connect_clicked(move |_| activate_item(&ctx, &item_c, &pool_c));
+        tile.connect_clicked(move |_| activate_item_with_radio(&ctx, &item_c, &pool_c));
         attach_item_menu(&self.ctx, &tile, item.clone());
         if item.kind.is_playable() {
             self.playing.track(&tile, &item.id);
@@ -357,7 +410,7 @@ impl HomePage {
         let (items_c, pool_c) = (items.to_vec(), pool);
         list.connect_row_activated(move |_, row| {
             if let Some(item) = items_c.get(row.index().max(0) as usize) {
-                activate_item(&ctx, item, &pool_c);
+                activate_item_with_radio(&ctx, item, &pool_c);
             }
         });
         section_box.append(&list);
@@ -373,7 +426,7 @@ impl HomePage {
             let card = MediaCard::new(&self.ctx, item.clone(), CardOptions { title_lines: 2, ..CardOptions::default() });
             let ctx = self.ctx.clone();
             let pool_c = pool.clone();
-            card.connect_clicked(move |item| activate_item(&ctx, item, &pool_c));
+            card.connect_clicked(move |item| activate_item_with_radio(&ctx, item, &pool_c));
             attach_item_menu(&self.ctx, card.widget(), item.clone());
             if item.kind.is_playable() {
                 self.playing.track(card.widget(), &item.id);
@@ -385,24 +438,5 @@ impl HomePage {
         section_box.append(scroll_box.widget());
         self.strips.borrow_mut().push(strip);
         self.scrollers.borrow_mut().push(scroll_box);
-    }
-}
-
-fn section_icon(title: &str) -> &'static str {
-    let low = title.to_lowercase();
-    if low.contains("listen again") || low.contains("recap") {
-        "document-open-recent-symbolic"
-    } else if low.contains("mix") {
-        "media-playlist-shuffle-symbolic"
-    } else if low.contains("album") {
-        "media-optical-symbolic"
-    } else if low.contains("video") {
-        "video-x-generic-symbolic"
-    } else if low.contains("artist") {
-        "avatar-default-symbolic"
-    } else if low.contains("quick") {
-        "starred-symbolic"
-    } else {
-        "emblem-music-symbolic"
     }
 }

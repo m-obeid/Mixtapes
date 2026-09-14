@@ -745,7 +745,7 @@ impl ArtistPage {
         if !vid.is_empty() {
             let like = LikeButton::new(self.ctx.player.clone());
             like.widget().set_valign(gtk::Align::Center);
-            like.set_data(Some(VideoId(vid.clone())), track.like_status);
+            like.set_data(Some(VideoId(vid.clone())), Some(track.like_status));
             inner.append(like.widget());
             self.likes.borrow_mut().push(like);
         }
