@@ -1,0 +1,5 @@
+target/
+fixtures/
+
+# The root ignore file has a Python "downloads/" rule; this module is source.
+!src/downloads/
