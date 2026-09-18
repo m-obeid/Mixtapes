@@ -396,6 +396,11 @@ impl AppleMusic {
         }
         match get_json(&self.http, PAXSENIX_LYRICS, &[("id", song_id)], &[("User-Agent", APP_USER_AGENT)], LYRICS_TIMEOUT).await {
             Ok(data) => Some(data),
+            // Paxsenix answers 404 for a song Apple has no lyrics for. That is a miss, not an outage.
+            Err(err) if err.to_string().contains("404") => {
+                tracing::debug!(song_id, "Apple Music has no lyrics for this song");
+                None
+            }
             Err(err) => {
                 tracing::debug!(%err, "Paxsenix lyric fetch failed");
                 None

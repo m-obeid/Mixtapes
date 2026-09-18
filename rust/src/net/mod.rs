@@ -15,6 +15,7 @@ pub mod home;
 pub mod items;
 pub mod library;
 pub mod online;
+pub mod player_endpoint;
 pub mod playlists;
 pub mod potoken;
 pub mod search;
@@ -46,7 +47,15 @@ impl NetHandle {
     pub fn new(rt: tokio::runtime::Handle, paths: &Paths) -> anyhow::Result<Self> {
         let client = YtMusic::new(paths)?;
         let tokens = Arc::new(potoken::PoTokens::new());
-        let resolver: Arc<dyn StreamResolver> = Arc::new(YtDlpResolver::new(paths, tokens.clone()));
+        // The player endpoint answers in a fraction of a second. yt-dlp stays behind it for what it declines.
+        let ytdlp: Arc<dyn StreamResolver> = Arc::new(YtDlpResolver::new(paths, tokens.clone()));
+        let native = Arc::new(player_endpoint::PlayerEndpointResolver::new(paths, ytdlp));
+        // The visitor id and the TLS session cost most of a second, so the first play does not pay for them.
+        rt.spawn({
+            let native = native.clone();
+            async move { native.warm().await }
+        });
+        let resolver: Arc<dyn StreamResolver> = native;
         Ok(Self { rt, client, resolver, caches: Arc::new(Caches::new(paths)), tokens })
     }
 
