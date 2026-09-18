@@ -1044,7 +1044,9 @@ impl PlaylistPage {
         } else if is_album {
             self.audio_playlist_id.replace(details.audio_playlist_id.clone());
             let track_count = details.track_count.unwrap_or(track_len as u32);
-            let album_type = if track_count == 1 { "Single" } else if (2..=6).contains(&track_count) { "EP" } else { "Album" };
+            let album_type = crate::net::cache::Caches::release_kind(track_count);
+            // Cards elsewhere only have YouTube's label, which calls some EPs singles.
+            self.ctx.net.caches().set_album_track_count(playlist_id, track_count);
             let author = artist_markup(&details.author);
             let owned = playlists::is_own_playlist(&details, playlist_id, self.account_name().as_deref());
             (format!("{track_len} {song_text}"), owned, author, Some(album_type.to_owned()))

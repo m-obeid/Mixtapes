@@ -29,6 +29,12 @@ impl LibraryIds {
 /// `{videoId: number}` behind a metric sort.
 pub type SortMetric = HashMap<String, i64>;
 
+const ALBUM_TRACKS_FILE: &str = "album_track_counts.json";
+
+fn read_album_tracks(path: &std::path::Path) -> HashMap<String, u32> {
+    std::fs::read(path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+}
+
 pub struct Caches {
     disk: PlaylistDiskCache,
     playlist_tracks: Mutex<HashMap<String, Vec<Track>>>,
@@ -36,11 +42,47 @@ pub struct Caches {
     library_ids: Mutex<Option<LibraryIds>>,
     library_playlists: Mutex<Vec<MediaItem>>,
     subscribed_artists: Mutex<HashSet<String>>,
+    /// Track counts of albums that were opened, by browse id. Saved to disk.
+    album_tracks: Mutex<HashMap<String, u32>>,
+    album_tracks_file: std::path::PathBuf,
 }
 
 impl Caches {
     pub fn new(paths: &Paths) -> Self {
-        Self { disk: PlaylistDiskCache::new(paths), playlist_tracks: Mutex::default(), sort_metrics: Mutex::default(), library_ids: Mutex::default(), library_playlists: Mutex::default(), subscribed_artists: Mutex::default() }
+        Self { disk: PlaylistDiskCache::new(paths), playlist_tracks: Mutex::default(), sort_metrics: Mutex::default(), library_ids: Mutex::default(), library_playlists: Mutex::default(), subscribed_artists: Mutex::default(), album_tracks: Mutex::new(read_album_tracks(&paths.data_dir.join(ALBUM_TRACKS_FILE))), album_tracks_file: paths.data_dir.join(ALBUM_TRACKS_FILE) }
+    }
+
+    /// "Single", "EP" or "Album" by track count, the rule the album page uses.
+    pub fn release_kind(track_count: u32) -> &'static str {
+        match track_count {
+            1 => "Single",
+            2..=6 => "EP",
+            _ => "Album",
+        }
+    }
+
+    /// The label for an album card. YouTube files a six-track EP under
+    /// "Single" on artist pages, so a count learned from the album itself wins.
+    pub fn release_kind_for(&self, album_id: &str) -> Option<&'static str> {
+        self.album_tracks.lock().unwrap().get(album_id).copied().map(Self::release_kind)
+    }
+
+    pub fn set_album_track_count(&self, album_id: &str, track_count: u32) {
+        let snapshot = {
+            let mut counts = self.album_tracks.lock().unwrap();
+            if track_count == 0 || counts.insert(album_id.to_owned(), track_count) == Some(track_count) {
+                return;
+            }
+            counts.clone()
+        };
+        match serde_json::to_vec(&snapshot) {
+            Ok(bytes) => {
+                if let Err(err) = std::fs::write(&self.album_tracks_file, bytes) {
+                    tracing::debug!(%err, "album track counts not saved");
+                }
+            }
+            Err(err) => tracing::debug!(%err, "album track counts not encoded"),
+        }
     }
 
     /// The on-disk playlist store, what DownloadDB's library_cache table was.

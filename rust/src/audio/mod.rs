@@ -205,6 +205,22 @@ fn run_loop(
     tracing::info!("audio thread exited");
 }
 
+/// Fragmented m4a, the only format upload-locker tracks come in, cannot seek
+/// while qtdemux is fed in push mode ("ignoring seek in push mode"). With the
+/// download flag queue2 keeps the stream in a temp file and the demuxer pulls
+/// from it, which makes every position reachable. Opus in WebM seeks fine
+/// without it, so those streams stay off the disk.
+fn set_download_buffering(playbin: &gst::Element, uri: &str) {
+    let wanted = uri.starts_with("http") && uri.contains("mime=audio%2Fmp4");
+    let flags = playbin.property_value("flags");
+    let Some(class) = glib::FlagsClass::with_type(flags.type_()) else { return };
+    let Some(builder) = class.builder_with_value(flags) else { return };
+    let builder = if wanted { builder.set_by_nick("download") } else { builder.unset_by_nick("download") };
+    if let Some(value) = builder.build() {
+        playbin.set_property_from_value("flags", &value);
+    }
+}
+
 impl Engine {
     fn build(control: Sender<AudioEvent>, telemetry: Sender<AudioTelemetry>, main_loop: glib::MainLoop) -> anyhow::Result<Self> {
         let playbin = gst::ElementFactory::make("playbin").name("player").build()?;
@@ -276,6 +292,7 @@ impl Engine {
                     // slider and stopped the visualizer for that whole stretch,
                     // with audio still running. The switch reports itself through
                     // StreamStart instead.
+                    set_download_buffering(&playbin, &uri);
                     playbin.set_property("uri", &uri);
                     *shared.pending_gapless.lock().unwrap() = Some(generation);
                     tracing::debug!(generation, "gapless uri handed to playbin");
@@ -379,6 +396,7 @@ impl Engine {
                 // Null flushes the bus, so no message from the old stream survives this point.
                 let _ = self.playbin.set_state(gst::State::Null);
                 self.clear_remembered_device();
+                set_download_buffering(&self.playbin, &uri);
                 self.playbin.set_property("uri", &uri);
                 if let Err(err) = self.playbin.set_state(gst::State::Playing) {
                     self.loading.set(false);

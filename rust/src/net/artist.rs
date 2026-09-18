@@ -19,6 +19,8 @@ const SINGLE_SECTIONS: &str = "/contents/singleColumnBrowseResultsRenderer/tabs/
 const TWO_COLUMN_SECTIONS: &str = "/contents/twoColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents";
 /// The page waited this long for the deep fetches before rendering.
 const DEEP_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+/// Albums and singles the artist page asks for. The discography page fetches the rest.
+const ARTIST_PAGE_ALBUMS: usize = 10;
 
 /// A carousel of cards with the "View All" pointer, what `{"results", "browseId", "params"}` was.
 #[derive(Debug, Clone, Default)]
@@ -256,19 +258,19 @@ pub async fn get_artist(api: Arc<dyn Browse>, channel_id: &str) -> Result<Artist
     let (songs, albums, singles) = tokio::join!(
         async {
             match songs_browse {
-                Some(id) => tokio::time::timeout(DEEP_FETCH_TIMEOUT, playlists::get_playlist(&api, &id, None)).await.ok().and_then(Result::ok).map(|p| p.tracks).filter(|t| !t.is_empty()),
+                Some(id) => tokio::time::timeout(DEEP_FETCH_TIMEOUT, playlists::get_playlist(&api, &id, Some(100))).await.ok().and_then(Result::ok).map(|p| p.tracks).filter(|t| !t.is_empty()),
                 None => None,
             }
         },
         async {
             match albums_ptr {
-                Some((id, params)) => tokio::time::timeout(DEEP_FETCH_TIMEOUT, playlists::artist_albums(&api, &id, params.as_deref())).await.ok().and_then(Result::ok).filter(|a| !a.is_empty()),
+                Some((id, params)) => tokio::time::timeout(DEEP_FETCH_TIMEOUT, playlists::artist_albums(&api, &id, params.as_deref(), Some(ARTIST_PAGE_ALBUMS))).await.ok().and_then(Result::ok).filter(|a| !a.is_empty()),
                 None => None,
             }
         },
         async {
             match singles_ptr {
-                Some((id, params)) => tokio::time::timeout(DEEP_FETCH_TIMEOUT, playlists::artist_albums(&api, &id, params.as_deref())).await.ok().and_then(Result::ok).filter(|a| !a.is_empty()),
+                Some((id, params)) => tokio::time::timeout(DEEP_FETCH_TIMEOUT, playlists::artist_albums(&api, &id, params.as_deref(), Some(ARTIST_PAGE_ALBUMS))).await.ok().and_then(Result::ok).filter(|a| !a.is_empty()),
                 None => None,
             }
         }
@@ -321,6 +323,20 @@ pub async fn unsubscribe(api: &dyn Browse, channel_id: &str) -> Result<(), NetEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An artist with a long singles list. The page asks for ten and must not wait for the rest.
+    #[tokio::test]
+    #[ignore]
+    async fn live_prolific_artist_loads_quickly() {
+        let paths = crate::paths::Paths::discover();
+        let api = crate::net::ytmusic::YtMusic::new(&paths).unwrap().api();
+        let started = std::time::Instant::now();
+        let a = get_artist(api, "UCcMjgANx-HTMUCpPJuFlmag").await.unwrap();
+        let took = started.elapsed();
+        println!("{} in {took:?}: songs={} albums={} singles={}", a.name, a.songs.as_ref().map_or(0, |s| s.results.len()), a.albums.as_ref().map_or(0, |s| s.results.len()), a.singles.as_ref().map_or(0, |s| s.results.len()));
+        assert!(took < Duration::from_secs(5), "took {took:?}");
+        assert!(a.singles.as_ref().is_some_and(|s| !s.results.is_empty() && s.results.len() <= ARTIST_PAGE_ALBUMS));
+    }
 
     #[tokio::test]
     #[ignore]

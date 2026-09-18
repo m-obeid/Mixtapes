@@ -166,7 +166,7 @@ impl DiscographyPage {
                 (Some(_), _) if title.contains("Top Songs") => Vec::new(),
                 (Some(b), Some(p)) => {
                     has_more = false;
-                    playlists::artist_albums(&api, &b, Some(&p)).await.unwrap_or_default()
+                    playlists::artist_albums(&api, &b, Some(&p), None).await.unwrap_or_default()
                 }
                 (Some(b), None) => {
                     has_more = false;

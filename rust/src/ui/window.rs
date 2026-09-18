@@ -104,7 +104,10 @@ impl MainWindow {
         let window = adw::ApplicationWindow::builder()
             .application(app)
             .title(APP_NAME)
-            .default_width(1000)
+            // Wide enough that the cover view keeps its cover pane with the queue
+            // open too. That pane collapses at 735 px, and the queue sidebar takes
+            // its header's natural width: about 275 px once it reads "57 tracks".
+            .default_width(1040)
             .default_height(700)
             .build();
         let toast_overlay = adw::ToastOverlay::new();

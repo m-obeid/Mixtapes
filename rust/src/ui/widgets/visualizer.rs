@@ -110,8 +110,12 @@ impl Visualizer {
     }
 
     fn sync_tick(self: &Rc<Self>) {
-        if !self.active.get() || !self.area.is_mapped() {
+        // A paused or loading track lets the bars fall to rest before the tick
+        // stops. Stopping at once froze the last frame until the next song played.
+        let settling = self.levels.borrow().iter().any(|level| *level > 0.0);
+        if !(self.active.get() || settling) || !self.area.is_mapped() {
             self.stop_tick();
+            self.area.queue_draw();
             return;
         }
         if self.tick.borrow().is_some() {
@@ -236,8 +240,18 @@ impl Visualizer {
         }
     }
 
-    fn on_tick(&self) {
-        if let Some(bands) = self.player.pull_visualizer_bands() {
+    fn on_tick(self: &Rc<Self>) {
+        if !self.active.get() {
+            // Nothing new comes in. Once every bar has landed the tick retires itself.
+            if self.levels.borrow().iter().all(|level| *level <= 0.0) {
+                let weak = Rc::downgrade(self);
+                glib::idle_add_local_once(move || {
+                    if let Some(v) = weak.upgrade() {
+                        v.sync_tick();
+                    }
+                });
+            }
+        } else if let Some(bands) = self.player.pull_visualizer_bands() {
             self.ingest(&bands);
         }
         {

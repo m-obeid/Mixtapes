@@ -36,13 +36,15 @@ pub async fn load_texture(net: &NetHandle, url: &str, target: Option<u32>) -> Op
     if url.is_empty() {
         return None;
     }
-    if let Some(texture) = TEXTURES.with(|c| c.borrow().get(url).cloned()) {
+    let key = cache_key(url, target);
+    if let Some(texture) = TEXTURES.with(|c| c.borrow().get(&key).cloned()) {
         return Some(texture);
     }
     if let Some(path) = local_path(url) {
-        return match gdk::Texture::from_filename(&path) {
+        let decoded = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| decode_bounded(bytes, target));
+        return match decoded {
             Ok(texture) => {
-                remember(url, &texture);
+                remember(&key, &texture);
                 Some(texture)
             }
             Err(err) => {
@@ -62,7 +64,7 @@ pub async fn load_texture(net: &NetHandle, url: &str, target: Option<u32>) -> Op
             match http.get(&candidate).send().await.and_then(|r| r.error_for_status()) {
                 Ok(response) => match response.bytes().await {
                     Ok(bytes) => {
-                        let decoded = tokio::task::spawn_blocking(move || gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes.to_vec()))).await;
+                        let decoded = tokio::task::spawn_blocking(move || decode_bounded(bytes.to_vec(), target)).await;
                         return match decoded {
                             Ok(Ok(texture)) => Ok(texture),
                             Ok(Err(err)) => Err(anyhow::anyhow!("decode failed: {err}")),
@@ -78,7 +80,7 @@ pub async fn load_texture(net: &NetHandle, url: &str, target: Option<u32>) -> Op
     });
     match handle.await {
         Ok(Ok(texture)) => {
-            remember(url, &texture);
+            remember(&key, &texture);
             Some(texture)
         }
         Ok(Err(err)) => {
@@ -337,7 +339,37 @@ fn local_path(url: &str) -> Option<PathBuf> {
 /// The cache is keyed by address, and a mirrored cover keeps its path when its
 /// picture changes, so without this the old image stays on screen.
 pub fn forget_texture(url: &str) {
-    TEXTURES.with(|cache| cache.borrow_mut().remove(url));
+    // Every size of it: the key carries the target after the address.
+    TEXTURES.with(|cache| cache.borrow_mut().retain(|key, _| key.split_once('\n').map_or(key.as_str(), |(u, _)| u) != url));
+}
+
+fn cache_key(url: &str, target: Option<u32>) -> String {
+    format!("{url}\n{}", target.unwrap_or(0))
+}
+
+/// Decode, then shrink to what the widget can show. Port of the scale and
+/// centre crop AsyncImage did: cover-fit into twice the target, for HiDPI.
+/// Without it a 56 px row pins a 1280x720 video thumbnail at 3.7 MB, and a
+/// home feed of 450 covers held about 500 MB of pixels.
+fn decode_bounded(bytes: Vec<u8>, target: Option<u32>) -> Result<gdk::Texture, String> {
+    use gtk::gdk_pixbuf::{InterpType, Pixbuf};
+    let bytes = glib::Bytes::from_owned(bytes);
+    let Some(target) = target else {
+        return gdk::Texture::from_bytes(&bytes).map_err(|e| e.to_string());
+    };
+    let stream = gtk::gio::MemoryInputStream::from_bytes(&bytes);
+    let pixbuf = Pixbuf::from_stream(&stream, gtk::gio::Cancellable::NONE).map_err(|e| e.to_string())?;
+    let side = (target * 2) as i32;
+    let (w, h) = (pixbuf.width(), pixbuf.height());
+    if w <= side && h <= side {
+        return Ok(gdk::Texture::for_pixbuf(&pixbuf));
+    }
+    let scale = (f64::from(side) / f64::from(w)).max(f64::from(side) / f64::from(h));
+    let (new_w, new_h) = (((f64::from(w) * scale) as i32).max(1), ((f64::from(h) * scale) as i32).max(1));
+    let scaled = pixbuf.scale_simple(new_w, new_h, InterpType::Bilinear).ok_or("scale failed")?;
+    let (crop_w, crop_h) = (side.min(new_w), side.min(new_h));
+    let cropped = scaled.new_subpixbuf((new_w - crop_w) / 2, (new_h - crop_h) / 2, crop_w, crop_h);
+    Ok(gdk::Texture::for_pixbuf(&cropped))
 }
 
 fn remember(url: &str, texture: &gdk::Texture) {

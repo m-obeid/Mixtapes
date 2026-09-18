@@ -660,9 +660,17 @@ fn album_subtitle(item: &MediaItem) -> String {
     parts.join(" • ")
 }
 
+/// "12M" or "1,204": a number with at most a magnitude letter, no unit of its own.
+fn is_bare_count(text: &str) -> bool {
+    let text = text.trim();
+    let digits = text.trim_end_matches(['K', 'M', 'B', 'k', 'm', 'b']).trim_end();
+    !digits.is_empty() && text.len() - digits.len() <= 2 && digits.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | ','))
+}
+
 fn artist_subtitle(item: &MediaItem) -> String {
     match &item.subscribers {
-        Some(s) if !s.to_lowercase().contains("subscribers") => format!("{s} subscribers"),
+        // A bare count is subscribers. An uploaded artist says "5 songs", which already names its unit.
+        Some(s) if is_bare_count(s) => format!("{s} subscribers"),
         Some(s) => s.clone(),
         None => String::new(),
     }

@@ -189,7 +189,7 @@ pub fn suppress_hover_while_scrolling(scrolled: &gtk::ScrolledWindow) {
     const SETTLE: std::time::Duration = std::time::Duration::from_millis(110);
     let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
     let weak = scrolled.downgrade();
-    scrolled.vadjustment().connect_value_changed(move |_| {
+    let on_scroll = move |_: &gtk::Adjustment| {
         let Some(scrolled) = weak.upgrade() else { return };
         let previous = pending.borrow_mut().take();
         match previous {
@@ -213,7 +213,10 @@ pub fn suppress_hover_while_scrolling(scrolled: &gtk::ScrolledWindow) {
             }
         });
         pending.replace(Some(id));
-    });
+    };
+    // Both axes: card strips and pill rows scroll sideways under the pointer too.
+    scrolled.hadjustment().connect_value_changed(on_scroll.clone());
+    scrolled.vadjustment().connect_value_changed(on_scroll);
 }
 
 pub fn copy_to_clipboard(text: &str) {

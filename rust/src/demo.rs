@@ -32,6 +32,7 @@
 //! MIXTAPES_DEMO_NEW_PLAYLIST=ms  open the new playlist dialog
 //! MIXTAPES_DEMO_CARD_MENUS=ms  log what the library card menus offer
 //! MIXTAPES_DEMO_BACK=ms      press the back button
+//! MIXTAPES_DEMO_FRAMES=1     log frame pacing once a second: frames, worst gap, gaps over 25 ms
 //! MIXTAPES_DEMO_PRESENCE=1   let a demo run scrobble and publish Discord presence
 //! MIXTAPES_DEMO_PREFS=ms[,px[,page]]  open Preferences, scroll px, show page "lyrics"
 //! MIXTAPES_DEMO_STREAM_INFO=ms  open the expanded player's Stream Info dialog
@@ -249,6 +250,32 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
                 tracing::info!(covers, "demo: swipe");
                 mw.slow_swipe(covers);
             }
+        });
+    }
+
+    if std::env::var("MIXTAPES_DEMO_FRAMES").is_ok() {
+        // (last frame time, window start, frames, worst gap, slow frames), all in microseconds.
+        let stats = std::cell::Cell::new((0i64, 0i64, 0u32, 0i64, 0u32));
+        window.add_tick_callback(move |_, clock| {
+            let now = clock.frame_time();
+            let (last, start, mut frames, mut worst, mut slow) = stats.get();
+            if last > 0 {
+                let gap = now - last;
+                frames += 1;
+                worst = worst.max(gap);
+                if gap > 25_000 {
+                    slow += 1;
+                }
+            }
+            if now - start >= 1_000_000 {
+                if frames > 0 {
+                    tracing::info!(frames, worst_ms = worst as f64 / 1000.0, slow, "demo: frame pacing");
+                }
+                stats.set((now, now, 0, 0, 0));
+            } else {
+                stats.set((now, start, frames, worst, slow));
+            }
+            glib::ControlFlow::Continue
         });
     }
 

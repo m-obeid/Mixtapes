@@ -89,7 +89,7 @@ impl MediaCard {
             .build();
         main_box.append(&title);
 
-        let subtitle = opts.subtitle.clone().unwrap_or_else(|| resolve_subtitle(&item));
+        let subtitle = opts.subtitle.clone().unwrap_or_else(|| resolve_subtitle(&item, ctx.net.caches().release_kind_for(&item.id)));
         if !subtitle.is_empty() || item.explicit {
             let subtitle_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).halign(gtk::Align::Fill).hexpand(true).build();
             if item.explicit {
@@ -165,12 +165,17 @@ impl MediaCard {
     }
 }
 
-fn resolve_subtitle(item: &MediaItem) -> String {
+/// `known_kind` is the release kind counted from the album's own tracks, when it was opened before.
+fn resolve_subtitle(item: &MediaItem, known_kind: Option<&str>) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(year) = &item.year {
         parts.push(year.clone());
     }
-    if let Some(kind) = &item.item_type {
+    let kind = match (&item.item_type, known_kind) {
+        (Some(_), Some(known)) => Some(known.to_owned()),
+        (label, _) => label.clone(),
+    };
+    if let Some(kind) = &kind {
         if !parts.iter().any(|p| p.eq_ignore_ascii_case(kind)) {
             parts.push(kind.clone());
         }

@@ -34,6 +34,8 @@ const BLUR_START_DISTANCE: i32 = 0;
 const BLUR_PER_LINE: f64 = 0.65;
 const BLUR_MAX: f64 = 3.5;
 const EFFECT_LERP: f64 = 0.16;
+/// How often a resting row looks at its colors, in frames.
+const REST_CHECK_FRAMES: u32 = 30;
 
 /// A span longer than this is followed by an instrumental, not sung throughout.
 const SWEEP_MAX_MS: i64 = 12_000;
@@ -368,16 +370,21 @@ struct RowState {
     dirty: bool,
     last_tick: Option<f64>,
     last_colors: Option<[i32; 6]>,
+    /// Nothing is animating. A resting row only checks its colors now and then.
+    resting: bool,
+    rest_ticks: u32,
 }
 
 impl RowState {
     fn recompute_effect_targets(&mut self) {
+        self.resting = false;
         let active = self.cursor_ms >= 0;
         self.scale_target = if active && self.can_scale { self.active_scale } else { 1.0 };
         self.blur_target = if !self.can_blur || active || self.distance < BLUR_START_DISTANCE { 0.0 } else { (f64::from(self.distance - BLUR_START_DISTANCE + 1) * BLUR_PER_LINE).min(BLUR_MAX) };
     }
 
     fn recompute_targets(&mut self) {
+        self.resting = false;
         let active = self.cursor_ms >= 0;
         let (cursor, effects, swept) = (self.cursor_ms, self.effects, self.swept);
         let fill = |parts: &[Part], targets: &mut [f64]| {
@@ -780,6 +787,8 @@ impl LyricRow {
             dirty: true,
             last_tick: None,
             last_colors: None,
+            resting: false,
+            rest_ticks: 0,
         };
         state.recompute_targets();
         imp.state.replace(Some(state));
@@ -866,6 +875,15 @@ impl LyricRow {
         let start_ms = self.start_ms() as f64;
         let mut guard = self.imp().state.borrow_mut();
         let Some(s) = guard.as_mut() else { return };
+        // Sixty rows tick every frame and one of them is being sung. The rest
+        // skip the style lookups, which dominated the frame, but still notice
+        // a theme or accent change within half a second.
+        if s.resting {
+            s.rest_ticks += 1;
+            if s.rest_ticks % REST_CHECK_FRAMES != 0 {
+                return;
+            }
+        }
         let now = now_ms();
         let delta = now - s.last_tick.unwrap_or(now);
         s.last_tick = Some(now);
@@ -921,6 +939,7 @@ impl LyricRow {
             changed = true;
         }
         let active = s.cursor_ms >= 0;
+        s.resting = !changed && !active && !s.wants_turn_off;
         drop(guard);
         if changed || active {
             self.queue_draw();

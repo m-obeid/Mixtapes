@@ -763,7 +763,8 @@ pub async fn raw_parse_playlist(api: &dyn Browse, browse_id: &str) -> Result<(Op
 
 /// Port of MusicClient.get_artist_albums: the artist's albums grid with
 /// its continuations, falling back to user playlists and raw parsing.
-pub async fn artist_albums(api: &dyn Browse, channel_id: &str, params: Option<&str>) -> Result<Vec<MediaItem>, NetError> {
+/// `limit` caps the rows, like get_artist_albums(limit=10) did for the artist page. A prolific artist has thousands of singles, and the page only shows ten.
+pub async fn artist_albums(api: &dyn Browse, channel_id: &str, params: Option<&str>, limit: Option<usize>) -> Result<Vec<MediaItem>, NetError> {
     let mut body = json!({ "browseId": channel_id });
     if let Some(p) = params {
         body["params"] = json!(p);
@@ -774,8 +775,12 @@ pub async fn artist_albums(api: &dyn Browse, channel_id: &str, params: Option<&s
             let grid = results.get("gridRenderer");
             let contents = grid.map(|g| array_at(g, "/items")).filter(|c| !c.is_empty()).unwrap_or_else(|| array_at(results, "/musicCarouselShelfRenderer/contents"));
             let mut albums: Vec<MediaItem> = contents.iter().filter_map(|c| parse_two_row(c, ItemKind::Album)).collect();
-            let rest = Continuation::browse(api, grid.and_then(next_continuation)).pages(MAX_CONTINUATION_PAGES).collect(|entries| entries.iter().filter_map(|c| parse_two_row(c, ItemKind::Album)).collect()).await;
-            albums.extend(rest.items);
+            let wanted = limit.unwrap_or(usize::MAX);
+            if albums.len() < wanted {
+                let rest = Continuation::browse(api, grid.and_then(next_continuation)).pages(MAX_CONTINUATION_PAGES).limit(wanted - albums.len()).collect(|entries| entries.iter().filter_map(|c| parse_two_row(c, ItemKind::Album)).collect()).await;
+                albums.extend(rest.items);
+            }
+            albums.truncate(wanted);
             if !albums.is_empty() {
                 return Ok(albums);
             }

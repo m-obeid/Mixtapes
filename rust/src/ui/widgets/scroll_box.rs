@@ -20,6 +20,8 @@ pub struct HorizontalScrollBox {
 impl HorizontalScrollBox {
     pub fn new() -> Rc<Self> {
         let scrolled = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Automatic).vscrollbar_policy(gtk::PolicyType::Never).hexpand(true).build();
+        // Cards sliding under a resting pointer would each run a hover transition.
+        crate::ui::suppress_hover_while_scrolling(&scrolled);
         let overlay = gtk::Overlay::builder().child(&scrolled).build();
         let left_btn = gtk::Button::builder().icon_name("go-previous-symbolic").css_classes(["circular", "osd"]).valign(gtk::Align::Center).halign(gtk::Align::Start).margin_start(8).visible(false).build();
         let right_btn = gtk::Button::builder().icon_name("go-next-symbolic").css_classes(["circular", "osd"]).valign(gtk::Align::Center).halign(gtk::Align::End).margin_end(8).visible(false).build();
