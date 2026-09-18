@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<gresources>
-  <gresource prefix="/com/pocoguy/muse/icons">
-    <file alias="hicolor/scalable/actions/compass2-symbolic.svg" preprocess="xml-stripblanks">assets/icons/hicolor/scalable/actions/compass2-symbolic.svg</file>
-    <file alias="hicolor/scalable/actions/music-queue-symbolic.svg" preprocess="xml-stripblanks">assets/icons/hicolor/scalable/actions/music-queue-symbolic.svg</file>
-  </gresource>
-</gresources>

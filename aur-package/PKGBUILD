@@ -9,8 +9,8 @@ url="https://github.com/m-obeid/Mixtapes"
 license=('GPL3')
 # Note: webkitgtk-6.0 must come from the 'extra' repository. The CachyOS build
 # is known to malfunction with Mixtapes - see the install hook below.
-depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'webkitgtk-6.0' 'nodejs' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'gst-plugins-ugly' 'yt-dlp' 'yt-dlp-ejs' 'python-requests' 'python-ytmusicapi' 'python-mprisify' 'python-mutagen')
-makedepends=('git' 'clang' 'python-pip')
+depends=('gtk4' 'libadwaita' 'webkitgtk-6.0' 'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'sqlite' 'yt-dlp' 'yt-dlp-ejs' 'nodejs')
+makedepends=('git' 'cargo')
 optdepends=('ffmpeg: for downloading music')
 provides=("mixtapes")
 conflicts=("mixtapes")
@@ -28,76 +28,34 @@ pkgver() {
   grep -oP '(?<=<release version=")[^"]+' com.pocoguy.Muse.metainfo.xml | head -1 | tr '-' '.'
 }
 
+prepare() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
 build() {
   cd "$pkgname"
-  glib-compile-resources --sourcedir=. src/muse.gresource.xml --target=src/muse.gresource
-
-  # setup venv to use pip nuitka (instead of aur)
-  python -m venv .venv
-  source .venv/bin/activate
-  pip install nuitka
-  VENV_SITE_PACKAGES=$(python -c "import sysconfig; print(sysconfig.get_path('purelib'))")
-  deactivate
-
-  export PYTHONPATH="$VENV_SITE_PACKAGES:$PYTHONPATH"
-  cd src
-  
-  # build with nuitka
-  python -m nuitka --clang \
-  --file-reference-choice=runtime \
-  --include-package=ui \
-  --include-package=api \
-  --include-package=player \
-  --include-module=logger \
-  --output-filename=mixtapes \
-  main.py
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  # The stylesheet and icons are compiled into the binary by build.rs.
+  cargo build --frozen --release
 }
 
 package() {
   cd "$pkgname"
 
-  # install data files in the correct runtime directories
-  install -d "$pkgdir/usr/lib/mixtapes"
-  cp -r assets "$pkgdir/usr/lib/mixtapes/"
+  install -Dm755 target/release/mixtapes "$pkgdir/usr/bin/mixtapes"
+  # 'muse' stays as an alias, which is what the desktop file runs.
+  ln -sf mixtapes "$pkgdir/usr/bin/muse"
 
-  install -d "$pkgdir/usr/lib/mixtapes/src"
-  cp src/muse.gresource "$pkgdir/usr/lib/mixtapes/src/"
-  cp src/mixtapes "$pkgdir/usr/lib/mixtapes/src/"
-
-  install -d "$pkgdir/usr/lib/mixtapes/src/ui"
-  cp src/ui/style.css "$pkgdir/usr/lib/mixtapes/src/ui/"
-
-  # PO-Token provider binary _find_botguard_bin() in player.py probes this
-  # exact path (/usr/lib/mixtapes/bin) so we don't collide with a standalone
-  # rustypipe-botguard package on /usr/bin. The tarball is a single bare file.
+  # PO-token minter. The app probes /usr/lib/mixtapes/bin, so this never
+  # collides with a standalone rustypipe-botguard on /usr/bin. It is only
+  # needed for what the player endpoint declines, such as uploaded songs.
   install -Dm755 "$srcdir/rustypipe-botguard" "$pkgdir/usr/lib/mixtapes/bin/rustypipe-botguard"
 
-  # PO-Token provider plugins. Without these yt-dlp mints no PO token and
-  # YouTube 403s the gated (seekable Opus / itag 251) formats. Neither is
-  # cleanly installable from the AUR: the AUR `yt-dlp-get-pot` (the GetPOT
-  # framework) hard-depends on an unsatisfiable virtual `YT-DLP-GET-POT-PROVIDER`
-  # that nothing provides, and `yt-dlp-get-pot-rustypipe` (the glue that drives
-  # our bundled rustypipe-botguard binary) isn't packaged at all. Both are
-  # single pure-Python files whose only runtime dep is yt-dlp (already a
-  # dependency), so install them straight from PyPI, without deps, into the
-  # system site-packages the app's interpreter loads yt-dlp plugins from.
-  # --ignore-installed is essential: `pip install --root` otherwise SKIPS a
-  # package it considers "already satisfied" in whatever interpreter pip runs
-  # under (e.g. a builder with an active venv), leaving $pkgdir without the
-  # plugin files and shipping a package that silently 403s. Force the copy.
-  pip install --root="$pkgdir" --prefix=/usr --no-deps --ignore-installed --break-system-packages \
-    "yt-dlp-get-pot>=0.3.0" "yt-dlp-get-pot-rustypipe>=0.2.0"
-
-  # Install desktop file, metainfo and icons
   install -Dm644 com.pocoguy.Muse.desktop "$pkgdir/usr/share/applications/com.pocoguy.Muse.desktop"
   install -Dm644 com.pocoguy.Muse.metainfo.xml "$pkgdir/usr/share/metainfo/com.pocoguy.Muse.metainfo.xml"
   install -Dm644 assets/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg"
   install -Dm644 assets/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg"
-
-  # symlink binary to exported path bin
-  install -d "$pkgdir/usr/bin"
-  ln -sf /usr/lib/mixtapes/src/mixtapes "$pkgdir/usr/bin/mixtapes"
-  
-  # Also provide 'muse' as an alias
-  ln -sf /usr/bin/mixtapes "$pkgdir/usr/bin/muse"
 }
