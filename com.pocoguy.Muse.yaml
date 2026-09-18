@@ -4,12 +4,14 @@ runtime-version: "50"
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.node24
+  - org.freedesktop.Sdk.Extension.rust-stable
 command: muse
 build-options:
-  append-path: /usr/lib/sdk/node24/bin
+  append-path: /usr/lib/sdk/node24/bin:/usr/lib/sdk/rust-stable/bin
   env:
     NODEJS_DIR: /usr/lib/sdk/node24
-    FLATPAK_ENABLE_SDK_EXT: node24
+    FLATPAK_ENABLE_SDK_EXT: node24,rust-stable
+    CARGO_HOME: /run/build/muse/cargo
   build-args:
     - --share=network
 finish-args:
@@ -82,96 +84,43 @@ modules:
         path: vendor/rustypipe-botguard/rustypipe-botguard-v0.1.2-aarch64-unknown-linux-gnu.tar.xz
         sha256: 4d038857374a69aea9be8ded981d93a776dc88d4e254f5c6d292746099abf69a
 
-  - name: python-dependencies
+  # yt-dlp is the fallback resolver and the downloader. The app itself is
+  # native, so these are the only Python packages left.
+  - name: yt-dlp
     buildsystem: simple
     build-options:
       no-debuginfo: true
     build-commands:
-      - pip3 install --prefix=${FLATPAK_DEST} --no-cache-dir -r requirements.txt
       - pip3 install --prefix=${FLATPAK_DEST} --no-cache-dir --upgrade "yt-dlp[default]"
       - pip3 install --prefix=${FLATPAK_DEST} --no-cache-dir "yt-dlp-ejs"
-    sources:
-      - type: file
-        path: requirements.txt
+    sources: []
 
   - name: muse
     buildsystem: simple
     build-commands:
-      # Nuitka is not in the GNOME SDK. Install it with pip's flat --target
-      # layout rather than --prefix so nothing has to hardcode the runtime's
-      # python3.X version, and drive it with `python3 -m nuitka` (no console
-      # script on PATH needed). It lands outside ${FLATPAK_DEST}, so the
-      # compiler never ships in the finished app.
-      - pip3 install --no-cache-dir --target=nuitka-tools nuitka
-      - glib-compile-resources --sourcedir=. src/muse.gresource.xml --target=src/muse.gresource
-      # Same flags as the AUR PKGBUILD, minus --clang: the GNOME SDK ships
-      # gcc, and clang only exists behind the org.freedesktop.Sdk.Extension.llvm
-      # SDK extension we do not pull in. This is Nuitka's "accelerated" mode,
-      # not --standalone: the binary still loads gi, yt-dlp and the rest from
-      # /app/lib/python3.X/site-packages that the python-dependencies module
-      # populated, so only our own four modules get compiled.
-      - |
-        set -eu
-        root="$PWD"
-        cd src
-        PYTHONPATH="$root/nuitka-tools:${PYTHONPATH:-}" \
-        python3 -m nuitka \
-          --file-reference-choice=runtime \
-          --include-package=ui \
-          --include-package=api \
-          --include-package=player \
-          --include-module=logger \
-          --output-filename=muse \
-          --jobs="$(nproc)" \
-          --assume-yes-for-downloads \
-          main.py
-      # This layout is load-bearing, not cosmetic. --file-reference-choice=runtime
-      # makes every compiled module report __file__ as
-      # <directory of the binary>/<its original path relative to main.py>. With the
-      # binary at /app/lib/muse/src/muse that gives main.py a __file__ of
-      # /app/lib/muse/src/main.py, which is what makes all three runtime lookups
-      # resolve: dirname(__file__)/muse.gresource, dirname(__file__)/ui/style.css,
-      # and ../assets/icons. Move the binary and every one of them breaks.
-      - install -Dm755 src/muse ${FLATPAK_DEST}/lib/muse/src/muse
-      - install -Dm644 src/muse.gresource ${FLATPAK_DEST}/lib/muse/src/muse.gresource
-      - install -Dm644 src/ui/style.css ${FLATPAK_DEST}/lib/muse/src/ui/style.css
-      - cp -r assets ${FLATPAK_DEST}/lib/muse/
+      # The stylesheet and the icons are compiled into the binary by build.rs,
+      # so the binary is the whole app. Crates come over the network, which
+      # build-args already allows for this manifest.
+      - cargo build --release --locked
+      - install -Dm755 target/release/mixtapes ${FLATPAK_DEST}/bin/mixtapes
+      - ln -s mixtapes ${FLATPAK_DEST}/bin/muse
       - install -Dm644 com.pocoguy.Muse.desktop ${FLATPAK_DEST}/share/applications/com.pocoguy.Muse.desktop
       - install -Dm644 com.pocoguy.Muse.metainfo.xml ${FLATPAK_DEST}/share/metainfo/com.pocoguy.Muse.metainfo.xml
       - install -Dm644 assets/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg
       - install -Dm644 assets/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg
-      - install -d ${FLATPAK_DEST}/bin
-      - |
-        cat > ${FLATPAK_DEST}/bin/muse << 'EOF'
-        #!/bin/sh
-        mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/muse"
-        cd "${XDG_DATA_HOME:-$HOME/.local/share}/muse"
-        exec /app/lib/muse/src/muse "$@"
-        EOF
-      - chmod +x ${FLATPAK_DEST}/bin/muse
     sources:
-      # Build from the checked-out working tree rather than re-cloning
-      # over HTTPS. Avoids a second download per CI run, dodges
-      # transient GitHub 500s on the Git frontend, and — importantly —
-      # builds the actual SHA that CI was invoked on (PR branches,
-      # workflow_dispatch, etc.) instead of always pulling `main`.
+      # The checked-out tree, so CI builds the commit it was invoked on.
       - type: dir
         path: .
-        # Build detritus that has no business inside the sandbox. Without this
-        # a developer checkout copies ~900 MB per build, and src/main.build in
-        # particular is stale Nuitka output from a previous host compile that
-        # must not seed the in-sandbox one. .ccache matters in CI too: the
-        # restored ccache lives in the workspace, so without skipping it we
-        # would copy up to 1 GB of it into the sandbox and let it perturb the
-        # source hash flatpak-builder uses to decide whether to rebuild.
+        # Build output has no business inside the sandbox: a developer's
+        # target directory alone is several gigabytes.
         skip:
           - .venv
           - .git
           - .ccache
           - build-dir
           - .flatpak-builder
-          - src/main.build
-      - type: file
-        path: com.pocoguy.Muse.desktop
-      - type: file
-        path: com.pocoguy.Muse.metainfo.xml
+          - target
+          - target-prof
+          - fixtures
+          - data
