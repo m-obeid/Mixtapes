@@ -41,6 +41,14 @@ const NETWORK_SETTLE: Duration = Duration::from_millis(1500);
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(600);
 const SEARCH_MIN_CHARS: usize = 3;
 
+/// Which appearance switch moved, so the window repaints only what it governs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppearancePref {
+    BlurredBackground,
+    DynamicAccent,
+    TintedBackground,
+}
+
 pub struct MainWindow {
     window: adw::ApplicationWindow,
     toast_overlay: adw::ToastOverlay,
@@ -80,13 +88,15 @@ pub struct MainWindow {
     /// Rows in the upload popover, one per file on its way out.
     upload_queue: Rc<UploadQueue>,
     lib_refresh: LibraryRefresh,
+    /// Blurred cover background, dynamic accent and the colors derived from them.
+    appearance: Rc<crate::ui::appearance::Appearance>,
 }
 
 impl MainWindow {
     pub fn new(app: &adw::Application, ctx: &Rc<App>) -> Rc<Self> {
         let player = ctx.player.clone();
         let state = player.state().clone();
-        let ui = UiContext::new(player.clone(), ctx.net.clone(), ctx.paths.clone(), ctx.downloads.clone());
+        let ui = UiContext::new(player.clone(), ctx.net.clone(), ctx.paths.clone(), ctx.downloads.clone(), ctx.lyrics.clone());
         if let Some(events) = ctx.download_events.borrow_mut().take() {
             ui.pump_downloads(events);
         }
@@ -98,7 +108,7 @@ impl MainWindow {
             .default_height(700)
             .build();
         let toast_overlay = adw::ToastOverlay::new();
-        install_actions(&window, app, ctx, &toast_overlay);
+        install_actions(&window, app, ctx);
 
         // -- header bar --------------------------------------------------
         let view_stack = adw::ViewStack::new();
@@ -274,6 +284,7 @@ impl MainWindow {
         toast_overlay.set_child(Some(&bottom_sheet));
         window.set_content(Some(&toast_overlay));
 
+        let appearance = crate::ui::appearance::Appearance::new(&window, &ui);
         let ui_for_queue = ui.clone();
         let upload_items = upload_progress.items_box().clone();
         let this = Rc::new(Self {
@@ -311,6 +322,7 @@ impl MainWindow {
             upload_queue: UploadQueue::new(ui_for_queue, upload_items),
             download_progress,
             lib_refresh,
+            appearance,
         });
 
         {
@@ -362,6 +374,36 @@ impl MainWindow {
 
     pub fn add_toast(&self, message: &str) {
         self.toast_overlay.add_toast(adw::Toast::new(message));
+    }
+
+    /// Both live visualizers: the desktop cover view's and the expanded player's.
+    pub fn visualizers(&self) -> [Rc<crate::ui::widgets::visualizer::Visualizer>; 2] {
+        [self.cover_view.visualizer().clone(), self.expanded_player.visualizer().clone()]
+    }
+
+    /// Both live lyrics views, the expanded player's and the desktop cover view's.
+    pub fn lyrics_views(&self) -> Vec<Rc<crate::ui::widgets::lyrics_view::LyricsView>> {
+        crate::ui::widgets::lyrics_view::live_views()
+    }
+
+    /// The settings switch moved the queue sidebar. The controls follow through the position notify.
+    pub fn set_sidebar_on_right(&self, on_right: bool) {
+        self.split_view.set_sidebar_position(if on_right { gtk::PackType::End } else { gtk::PackType::Start });
+    }
+
+    /// An appearance switch moved in Preferences.
+    pub fn appearance_pref_changed(self: &Rc<Self>, pref: AppearancePref) {
+        self.appearance.pref_changed(pref);
+    }
+
+    /// Port of on_offline_toggled: drop the cached pref and redraw every page for the new state.
+    pub fn force_offline_changed(self: &Rc<Self>) {
+        self.ui.online.invalidate();
+        self.ui.online.probe_now(None);
+        self.library.apply_offline_state();
+        self.library.load_library(false);
+        self.explore.load_explore_data(true);
+        self.home.refresh();
     }
 
     pub fn player_bar(&self) -> &Rc<PlayerBar> {
@@ -1435,6 +1477,8 @@ impl MainWindow {
             };
             sync(&self.split_view);
             let sync2 = sync.clone();
+            let sync3 = sync.clone();
+            self.split_view.connect_sidebar_position_notify(move |sv| sync3(sv));
             self.split_view
                 .connect_show_sidebar_notify(move |sv| sync(sv));
             let weak = Rc::downgrade(self);
@@ -2295,21 +2339,12 @@ fn install_actions(
     window: &adw::ApplicationWindow,
     app: &adw::Application,
     ctx: &Rc<App>,
-    overlay: &adw::ToastOverlay,
 ) {
     let add = |name: &str, enabled: bool, f: Box<dyn Fn()>| {
         let action = gio::SimpleAction::new(name, None);
         action.set_enabled(enabled);
         action.connect_activate(move |_, _| f());
         window.add_action(&action);
-    };
-    let toast = |overlay: &adw::ToastOverlay, text: &'static str| -> Box<dyn Fn()> {
-        let overlay = overlay.downgrade();
-        Box::new(move || {
-            if let Some(o) = overlay.upgrade() {
-                o.add_toast(adw::Toast::new(text));
-            }
-        })
     };
     {
         let app = app.downgrade();
@@ -2357,11 +2392,18 @@ fn install_actions(
             }),
         );
     }
-    add(
-        "preferences",
-        true,
-        toast(overlay, "Preferences not ported yet"),
-    );
+    {
+        let ctx = ctx.clone();
+        add(
+            "preferences",
+            true,
+            Box::new(move || {
+                if let Some(win) = ctx.window.borrow().as_ref() {
+                    let _ = crate::ui::preferences::present(win, &ctx);
+                }
+            }),
+        );
+    }
     {
         let ctx = ctx.clone();
         add(

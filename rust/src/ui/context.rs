@@ -108,6 +108,8 @@ pub struct UiContext {
     pub online: Rc<Online>,
     /// Offline downloads, shared with the tokio side.
     pub downloads: Arc<Downloads>,
+    /// Lyrics providers and their cache, shared by both lyrics views.
+    pub lyrics: crate::lyrics::Lyrics,
     pub compact: Cell<bool>,
     compact_listeners: RefCell<Vec<CompactListener>>,
     download_listeners: RefCell<Vec<DownloadListener>>,
@@ -115,7 +117,7 @@ pub struct UiContext {
 }
 
 impl UiContext {
-    pub fn new(player: Rc<Player>, net: NetHandle, paths: Paths, downloads: Arc<Downloads>) -> Rc<Self> {
+    pub fn new(player: Rc<Player>, net: NetHandle, paths: Paths, downloads: Arc<Downloads>, lyrics: crate::lyrics::Lyrics) -> Rc<Self> {
         let online = Online::new(net.clone(), paths.clone());
         Rc::new(Self {
             player,
@@ -124,6 +126,7 @@ impl UiContext {
             nav: Rc::new(Navigator::default()),
             online,
             downloads,
+            lyrics,
             compact: Cell::new(false),
             compact_listeners: RefCell::new(Vec::new()),
             download_listeners: RefCell::new(Vec::new()),

@@ -4,6 +4,8 @@ pub mod add_to_playlist;
 pub mod card_grid;
 pub mod cover_picture;
 pub mod fade_bottom_bin;
+pub mod fade_edges_bin;
+pub mod lyric_rows;
 pub mod lyrics_view;
 pub mod media_card;
 pub mod playing;

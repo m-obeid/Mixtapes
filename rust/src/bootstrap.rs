@@ -2,6 +2,8 @@
 //! Mirrors the top of src/main.py.
 
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::paths::Paths;
 
@@ -67,16 +69,40 @@ pub fn apply_gsk_renderer_pref(paths: &Paths) {
 /// config.json's debug_logs flag replaces the Python print() override.
 /// RUST_LOG still overrides everything.
 pub fn init_logging(paths: &Paths) {
-    let debug = paths
-        .read_config()
-        .get("debug_logs")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let default = if debug { "mixtapes=debug,info" } else { "mixtapes=info,warn" };
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        .compact()
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter_for(debug_logs(paths))));
+    let (filter, handle) = tracing_subscriber::reload::Layer::new(filter);
+    let _ = FILTER.set(handle);
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_target(false).compact())
         .init();
+}
+
+type FilterHandle = tracing_subscriber::reload::Handle<EnvFilter, tracing_subscriber::Registry>;
+
+/// Lets the settings switch change verbosity without a restart.
+static FILTER: std::sync::OnceLock<FilterHandle> = std::sync::OnceLock::new();
+
+fn filter_for(debug: bool) -> &'static str {
+    if debug { "mixtapes=debug,info" } else { "mixtapes=info,warn" }
+}
+
+pub fn debug_logs(paths: &Paths) -> bool {
+    paths.read_config().get("debug_logs").and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
+/// Port of logger.set_debug_logs: save the flag and apply it now. RUST_LOG still wins.
+pub fn set_debug_logs(paths: &Paths, enabled: bool) {
+    let mut config = paths.read_config();
+    config.insert("debug_logs".into(), enabled.into());
+    let write = serde_json::to_vec(&serde_json::Value::Object(config)).map_err(std::io::Error::other).and_then(|bytes| std::fs::write(&paths.config_file, bytes));
+    if let Err(err) = write {
+        tracing::warn!(%err, "could not save config.json");
+    }
+    if std::env::var_os("RUST_LOG").is_some() {
+        return;
+    }
+    if let Some(handle) = FILTER.get() {
+        let _ = handle.reload(EnvFilter::new(filter_for(enabled)));
+    }
 }

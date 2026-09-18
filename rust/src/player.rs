@@ -41,6 +41,15 @@ struct Armed {
     video_id: VideoId,
 }
 
+/// A play as the scrobbler sees it: a fresh one, or the same one under better metadata.
+#[derive(Clone, Debug)]
+pub enum PlayEvent {
+    Started(Track),
+    Refined(Track),
+}
+
+type PlayListener = Box<dyn Fn(&PlayEvent)>;
+
 pub struct Player {
     me: Weak<Player>,
     state: PlayerState,
@@ -80,6 +89,8 @@ pub struct Player {
     history_recorded: RefCell<Option<String>>,
     /// Videos already looked up for an audio twin, so the lookup is paid once.
     swap_checked: RefCell<std::collections::HashSet<String>>,
+    /// Told when a play starts or its metadata is corrected. See `on_play`.
+    play_listeners: RefCell<Vec<PlayListener>>,
 }
 
 impl Player {
@@ -106,7 +117,25 @@ impl Player {
             history_mode: RefCell::new(paths.read_prefs().get("history_mode").and_then(|v| v.as_str()).unwrap_or(HISTORY_IMMEDIATE).to_owned()),
             history_recorded: RefCell::new(None),
             swap_checked: RefCell::new(std::collections::HashSet::new()),
+            play_listeners: RefCell::new(Vec::new()),
         })
+    }
+
+    /// Follow plays for the app's lifetime. A metadata re-emit mid-load never
+    /// arrives as Started, so a listening clock is not restarted by one.
+    pub fn on_play(&self, listener: impl Fn(&PlayEvent) + 'static) {
+        self.play_listeners.borrow_mut().push(Box::new(listener));
+    }
+
+    fn emit_play(&self, event: PlayEvent) {
+        for listener in self.play_listeners.borrow().iter() {
+            listener(&event);
+        }
+    }
+
+    /// Change when plays are written to the account's history, live.
+    pub fn set_history_mode(&self, mode: &str) {
+        self.history_mode.replace(mode.to_owned());
     }
 
     pub fn state(&self) -> &PlayerState {
@@ -511,6 +540,7 @@ impl Player {
         self.state
             .set_duration(track.duration_seconds.map(f64::from).unwrap_or(0.0));
         self.apply_track_metadata(Some(&track));
+        self.emit_play(PlayEvent::Started(track.clone()));
         tracing::debug!(generation, index, video_id = %track.video_id, "loading");
 
         self.spawn_resolve(track, generation, false);
@@ -702,6 +732,9 @@ impl Player {
                                 .unwrap_or(0.0),
                         );
                         self.apply_track_metadata(track.as_ref());
+                        if let Some(track) = track {
+                            self.emit_play(PlayEvent::Started(track));
+                        }
                     }
                 }
             }
@@ -903,6 +936,7 @@ impl Player {
         self.history_recorded.replace(Some(swapped.video_id.0.clone()));
         self.sync_queue_model();
         self.apply_track_metadata(Some(&swapped));
+        self.emit_play(PlayEvent::Refined(swapped.clone()));
         swapped
     }
 
@@ -933,6 +967,7 @@ impl Player {
         }
         self.queue.borrow_mut().refine_current(&changed);
         self.apply_track_metadata(Some(&changed));
+        self.emit_play(PlayEvent::Refined(changed));
     }
 
     /// Mirror the current index into the store and flip the `playing` flag on the affected rows.

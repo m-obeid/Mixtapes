@@ -99,3 +99,30 @@ playlist. Only songs on disk are listed, and paths are relative.
 **Layout**: how downloads are arranged on disk, from the folder structure
 preference: Artist/Album/Song, Artist/Song, or no folders, optionally under a
 `Songs` subfolder. Changing it moves existing files (`migrate_layout`).
+
+## Lyrics
+
+**Provider** (`src/lyrics/providers/`): one of the six lyrics sources. Known by
+its display name, which is what prefs.json and the cache store.
+
+**Chain** (`src/lyrics/chain.rs`): the walk down the listener's provider queue
+that settles on one result. It stops at the accept rank: line-synced in
+quality mode, anything at all in strict mode.
+
+**Rank**: how rich a result is. 3 word-level, 2 line-synced, 1 plain text.
+
+**Second line**: what sits under a lyric line: a romanization, a translation
+or the background vocal.
+
+**Gate**: the check a search hit passes before its lyrics are fetched:
+duration within 5 s, not a different take, and the artist or a corroborated
+title.
+
+**Match**: one candidate in the match browser or the manual search, looser
+than the gate on purpose.
+
+**Pin**: the provider a listener chose for one track, `preferred_source` in
+the cache file. A hand-picked match is also marked `user_choice`, which
+survives a pipeline bump.
+
+**Cooldown**: the back-off window a provider enters after a 429 or a timeout.

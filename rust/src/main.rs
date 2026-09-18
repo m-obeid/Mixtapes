@@ -5,20 +5,21 @@
 //! 2. logging and the GSK renderer preference before GTK loads,
 //! 3. GStreamer init, the tokio runtime and the audio thread,
 //! 4. the libadwaita application, which owns the GTK main loop.
-//!
-//! Widgets are not ported yet. `activate` opens a placeholder window whose
-//! only job is to prove the store binds and the pumps run.
 
 mod audio;
 mod bootstrap;
 mod demo;
+mod discord;
 mod downloads;
+mod lyrics;
 mod model;
 mod mpris;
 mod net;
 mod paths;
 mod player;
+mod presence;
 mod queue;
+mod scrobbler;
 mod state;
 mod ui;
 
@@ -51,6 +52,12 @@ pub struct App {
     pub window: RefCell<Option<Rc<MainWindow>>>,
     /// System media controls. None when the bus name could not be taken.
     pub mpris: RefCell<Option<Rc<Mpris>>>,
+    /// Last.fm and ListenBrainz. Idle until a service is connected in Preferences.
+    pub scrobbler: Arc<scrobbler::Scrobbler>,
+    /// Lyrics providers, their cache and the display prefs.
+    pub lyrics: lyrics::Lyrics,
+    /// Discord Rich Presence. A no-op while Discord is not running.
+    pub discord: discord::Discord,
 }
 
 fn main() -> glib::ExitCode {
@@ -103,11 +110,19 @@ fn main() -> glib::ExitCode {
     };
 
     let (downloads, download_events) = downloads::Downloads::new(paths.clone(), net.clone());
+    // A demo run plays scratch tracks. MIXTAPES_DEMO_PRESENCE=1 lets them through on purpose.
+    let publish = demo.is_none() || std::env::var_os("MIXTAPES_DEMO_PRESENCE").is_some();
+    let scrobbler = scrobbler::Scrobbler::start(&paths, runtime.handle());
+    let lyrics = lyrics::Lyrics::new(&paths, net.client().http().clone(), net.client().clone());
+    scrobbler.set_muted(!publish);
     let app_ctx = Rc::new(App {
         player: Player::new(net.clone(), downloads.clone(), audio, audio_events, &paths),
         net,
         downloads,
         download_events: RefCell::new(Some(download_events)),
+        scrobbler,
+        lyrics,
+        discord: discord::Discord::new(publish && discord::enabled_pref(&paths.read_prefs())),
         paths,
         demo,
         window: RefCell::new(None),
@@ -137,6 +152,8 @@ fn main() -> glib::ExitCode {
             if let Some(mpris) = app_ctx.mpris.borrow_mut().take() {
                 mpris.shutdown();
             }
+            app_ctx.scrobbler.stop();
+            app_ctx.discord.stop();
             app_ctx.player.shutdown();
         }
     ));
@@ -161,6 +178,7 @@ fn on_startup(ctx: &Rc<App>) {
     // Event pumps must attach to the running GTK main context.
     ctx.player.start();
     ctx.mpris.replace(Some(Mpris::start(ctx)));
+    presence::wire(ctx);
     tracing::info!(auth = ?ctx.net.client().auth_state(), "core started");
 }
 

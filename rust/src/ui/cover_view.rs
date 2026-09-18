@@ -13,7 +13,7 @@ use crate::ui::context::{NavRequest, UiContext};
 use crate::ui::like_button::LikeButton;
 use crate::ui::marquee::MarqueeLabel;
 use crate::ui::widgets::cover_picture::CoverPicture;
-use crate::ui::widgets::lyrics_view;
+use crate::ui::widgets::lyrics_view::LyricsView;
 use crate::ui::widgets::transport::Transport;
 use crate::ui::widgets::visualizer::Visualizer;
 
@@ -29,6 +29,9 @@ pub struct DesktopCoverView {
     #[allow(dead_code)]
     transport: Rc<Transport>,
     visualizer: Rc<Visualizer>,
+    /// Kept alive here. The widget tree only holds its root box.
+    #[allow(dead_code)]
+    lyrics_view: Rc<LyricsView>,
     more_btn: gtk::MenuButton,
     ctx: Rc<UiContext>,
     lyrics_intent: Cell<bool>,
@@ -211,7 +214,8 @@ impl DesktopCoverView {
             .margin_bottom(32)
             .margin_end(24)
             .build();
-        lyrics_outer.append(&lyrics_view::build());
+        let lyrics_view = LyricsView::new(ctx.clone());
+        lyrics_outer.append(lyrics_view.widget());
         let split = adw::OverlaySplitView::builder()
             .css_classes(["lyrics-split"])
             .content(&cover_outer)
@@ -275,6 +279,7 @@ impl DesktopCoverView {
             like,
             transport,
             visualizer,
+            lyrics_view,
             more_btn: more_btn.clone(),
             ctx,
             lyrics_intent: Cell::new(false),
@@ -547,6 +552,10 @@ impl DesktopCoverView {
     }
 
     /// Port of _show_stream_info: what is playing and how the pipeline sees it.
+    pub fn visualizer(&self) -> &Rc<Visualizer> {
+        &self.visualizer
+    }
+
     pub fn show_stream_info(self: &Rc<Self>) {
         crate::ui::expanded_player::present_stream_info(&self.ctx, self.root.upcast_ref::<gtk::Widget>());
     }

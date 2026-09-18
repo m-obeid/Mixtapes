@@ -32,6 +32,8 @@
 //! MIXTAPES_DEMO_NEW_PLAYLIST=ms  open the new playlist dialog
 //! MIXTAPES_DEMO_CARD_MENUS=ms  log what the library card menus offer
 //! MIXTAPES_DEMO_BACK=ms      press the back button
+//! MIXTAPES_DEMO_PRESENCE=1   let a demo run scrobble and publish Discord presence
+//! MIXTAPES_DEMO_PREFS=ms[,px[,page]]  open Preferences, scroll px, show page "lyrics"
 //! MIXTAPES_DEMO_STREAM_INFO=ms  open the expanded player's Stream Info dialog
 //! MIXTAPES_DEMO_SWIPE=ms[,covers]  swipe the carousel over two seconds
 //! MIXTAPES_DEMO_DELETE_DOWNLOAD=id  delete one download
@@ -247,6 +249,30 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
                 tracing::info!(covers, "demo: swipe");
                 mw.slow_swipe(covers);
             }
+        });
+    }
+
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_PREFS") {
+        let mut parts = spec.split(',');
+        let delay = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3000);
+        let pixels = parts.next().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+        let lyrics = parts.next() == Some("lyrics");
+        let ctx_w = ctx.clone();
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            let Some(mw) = ctx_w.window.borrow().clone() else { return };
+            mw.window().present();
+            let dialog = crate::ui::preferences::present(&mw, &ctx_w);
+            if lyrics {
+                adw::prelude::PreferencesDialogExt::set_visible_page_name(&dialog, "lyrics");
+            }
+            glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+                let mut scrollers = Vec::new();
+                collect_scrollers(dialog.upcast_ref(), &mut scrollers);
+                for scroller in scrollers.iter().filter(|s| s.is_mapped()) {
+                    let adj = scroller.vadjustment();
+                    adj.set_value(pixels.min(adj.upper() - adj.page_size()));
+                }
+            });
         });
     }
 
@@ -483,6 +509,17 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
                 snapshot(&w, &with_suffix(&prefix, "2"));
             }
         });
+    }
+}
+
+fn collect_scrollers(widget: &gtk::Widget, out: &mut Vec<gtk::ScrolledWindow>) {
+    if let Some(s) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+        out.push(s.clone());
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        collect_scrollers(&c, out);
+        child = c.next_sibling();
     }
 }
 

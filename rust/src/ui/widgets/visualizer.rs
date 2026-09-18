@@ -87,6 +87,22 @@ impl Visualizer {
         &self.area
     }
 
+    /// Port of set_bar_count. The bins are rebuilt on the next frame.
+    pub fn set_bar_count(&self, n: usize) {
+        let n = n.clamp(8, 100);
+        if n == self.bars.get() {
+            return;
+        }
+        self.bars.set(n);
+        self.levels.borrow_mut().clear();
+        self.velocities.borrow_mut().clear();
+        self.area.queue_draw();
+    }
+
+    pub fn set_smoothing(&self, intensity: f64) {
+        self.smoothing.set(intensity.max(1.05));
+    }
+
     /// Bars animate only while playing.
     pub fn set_active(self: &Rc<Self>, active: bool) {
         self.active.set(active);
@@ -247,8 +263,7 @@ impl Visualizer {
         }
         let n = self.bars.get();
         let levels = self.levels.borrow();
-        let accent = adw::StyleManager::default().accent_color_rgba();
-        let (r, g, b) = (accent.red() as f64, accent.green() as f64, accent.blue() as f64);
+        let (r, g, b) = bar_color(_area);
         let gap = 2.0;
         let bar_w = ((width as f64 - gap * (n as f64 - 1.0)) / n as f64).max(1.0);
         let min_h = 3.0;
@@ -278,4 +293,16 @@ fn rounded_rect(cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f64, radius
     cr.arc(x + radius, y + h - radius, radius, PI / 2.0, PI);
     cr.arc(x + radius, y + radius, radius, PI, 3.0 * PI / 2.0);
     cr.close_path();
+}
+
+/// @visualizer_bar when the window has derived one, else the plain accent.
+/// The derived value keeps the tallest bar clear of the labels drawn over it.
+#[allow(deprecated)]
+fn bar_color(area: &gtk::DrawingArea) -> (f64, f64, f64) {
+    let ctx = area.style_context();
+    ["visualizer_bar", "accent_color"]
+        .iter()
+        .find_map(|name| ctx.lookup_color(name))
+        .map(|c| (f64::from(c.red()), f64::from(c.green()), f64::from(c.blue())))
+        .unwrap_or((0.42, 0.34, 0.85))
 }

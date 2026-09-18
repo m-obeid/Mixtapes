@@ -23,6 +23,8 @@ ARTIST = os.environ.get("PY_ARTIST", "")
 SCROLL = float(os.environ.get("PY_SCROLL", "0"))
 CATEGORY = os.environ.get("PY_CATEGORY", "")
 HISTORY = os.environ.get("PY_HISTORY", "")
+# "px" or "px,lyrics": open Preferences, scroll that far, optionally on the Lyrics page.
+PREFS = os.environ.get("PY_PREFS", "")
 OUT = os.environ["PY_OUT"]
 
 def log(msg):
@@ -112,11 +114,61 @@ class SnapApp(muse_main.MusicApp):
                 log("nothing to scroll")
             return False
 
+        def open_prefs():
+            win.show_preferences(None, None)
+            parts = PREFS.split(",")
+            dialog = win.get_visible_dialog()
+            if len(parts) > 1 and parts[1] == "lyrics":
+                for page in _pages(dialog):
+                    if page.get_title() == "Lyrics":
+                        dialog.set_visible_page(page)
+
+            def scroll():
+                def walk(widget):
+                    if isinstance(widget, Gtk.ScrolledWindow) and widget.get_mapped():
+                        adj = widget.get_vadjustment()
+                        adj.set_value(min(float(parts[0] or 0), adj.get_upper() - adj.get_page_size()))
+                    child = widget.get_first_child()
+                    while child:
+                        walk(child)
+                        child = child.get_next_sibling()
+                walk(dialog)
+                return False
+
+            GLib.timeout_add(1200, scroll)
+            return False
+
+        def _pages(widget):
+            found = []
+            def walk(w):
+                if isinstance(w, Adw.PreferencesPage):
+                    found.append(w)
+                child = w.get_first_child()
+                while child:
+                    walk(child)
+                    child = child.get_next_sibling()
+            walk(widget)
+            return found
+
+        def press_play():
+            nav = win.view_stack.get_visible_child()
+            page = nav.get_visible_page()
+            target = page.get_child() if page else None
+            if hasattr(target, "on_play_clicked"):
+                target.on_play_clicked(None)
+                log("play pressed")
+            return False
+
+        if os.environ.get("PY_PLAYLIST_PLAY"):
+            GLib.timeout_add(7500, press_play)
+        if PREFS:
+            GLib.timeout_add(4000, open_prefs)
         GLib.timeout_add(3000, start_search)
         if SCROLL:
             GLib.timeout_add(9000, scroll_page)
-        GLib.timeout_add(10000, lambda: snapshot(win, OUT + "-1.png"))
-        GLib.timeout_add(11500, lambda: (win.player.stop(), self.quit(), False)[-1])
+        snap_at = int(os.environ.get("PY_SNAPSHOT_AT", "10000"))
+        GLib.timeout_add(snap_at, lambda: snapshot(win, OUT + "-1.png"))
+        GLib.timeout_add(snap_at + 1500, lambda: (win.player.stop(), self.quit(), False)[-1])
 
 if __name__ == "__main__":
     sys.exit(SnapApp().run([]))

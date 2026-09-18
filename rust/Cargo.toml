@@ -28,7 +28,7 @@ webkit6 = { version = "0.6", features = ["v2_44"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "io-util", "net"] }
 # InnerTube transport. rustls keeps the Flatpak build free of OpenSSL headers.
 # Do not add "brotli" or set Accept-Encoding by hand: reqwest negotiates gzip itself.
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json", "gzip", "charset", "system-proxy"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json", "form", "query", "gzip", "charset", "system-proxy"] }
 # Cross-thread event channels. force_send on a bounded channel gives newest-wins telemetry.
 async-channel = "2"
 # InnerTube auth and transport (browser cookies, SAPISIDHASH, send_request), playlists, ratings.
@@ -39,6 +39,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # SAPISIDHASH authorization header.
 sha1 = "0.10"
+# Last.fm request signatures (api_sig is an md5 by specification).
+md-5 = "0.10"
 # VISITOR_DATA extraction from the music.youtube.com landing page.
 regex = "1"
 
@@ -53,6 +55,15 @@ anyhow = "1"
 rusqlite = "0.40"
 # Tag and cover writing for downloaded files, what mutagen did in downloads.py.
 lofty = "0.24"
+# TTML lyrics (Apple Music, BetterLyrics, BiniLyrics): a read-only tree with text and tail, what ElementTree gave client.py.
+roxmltree = "0.21"
+# NFKC folding so full-width and half-width lyric lines compare equal across providers.
+unicode-normalization = "0.1"
+# Japanese and Chinese lyric romanization, what pykakasi and pypinyin did for client.py.
+kakasi = "0.1"
+pinyin = { version = "0.11", default-features = false, features = ["with_tone"] }
+# Cover decode and PNG encode for ui/cover_effects.rs, what PIL did. 0.25.9 is the newest release on rust-version 1.85.
+image = { version = "0.25.9", default-features = false, features = ["jpeg", "png", "webp"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # MPRIS D-Bus interface. Wired in when player/mpris.py is ported.

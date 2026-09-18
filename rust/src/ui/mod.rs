@@ -4,9 +4,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+pub mod appearance;
+pub mod color_utils;
 pub mod context;
 pub mod context_menu;
 pub mod cover;
+pub mod cover_effects;
 pub mod cover_view;
 pub mod crop_dialog;
 pub mod download_queue;
@@ -16,6 +19,8 @@ pub mod login;
 pub mod marquee;
 pub mod pages;
 pub mod player_bar;
+pub mod preferences;
+pub mod preferences_lyrics;
 pub mod queue_panel;
 pub mod upload_queue;
 pub mod widgets;

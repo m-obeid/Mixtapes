@@ -15,7 +15,7 @@ use crate::ui::like_button::LikeButton;
 use crate::ui::marquee::MarqueeLabel;
 use crate::ui::queue_panel::QueuePanel;
 use crate::ui::widgets::cover_picture::CoverPicture;
-use crate::ui::widgets::lyrics_view;
+use crate::ui::widgets::lyrics_view::LyricsView;
 use crate::ui::widgets::transport::Transport;
 use crate::ui::widgets::visualizer::Visualizer;
 
@@ -48,6 +48,9 @@ pub struct ExpandedPlayer {
     #[allow(dead_code)]
     transport: Rc<Transport>,
     visualizer: Rc<Visualizer>,
+    /// Kept alive here. The widget tree only holds its root box.
+    #[allow(dead_code)]
+    lyrics_view: Rc<LyricsView>,
     height_probe: gtk::ScrolledWindow,
     #[allow(dead_code)]
     queue_panel: Rc<QueuePanel>,
@@ -225,6 +228,7 @@ impl ExpandedPlayer {
         // -- queue and lyrics views --------------------------------------
         let queue_panel = QueuePanel::new(ctx.clone());
         queue_panel.widget().set_vexpand(true);
+        let lyrics_view = LyricsView::new(ctx.clone());
         view_stack.add_titled_with_icon(
             queue_panel.widget(),
             Some("queue"),
@@ -232,7 +236,7 @@ impl ExpandedPlayer {
             "music-queue-symbolic",
         );
         view_stack.add_titled_with_icon(
-            &lyrics_view::build(),
+            lyrics_view.widget(),
             Some("lyrics"),
             "Lyrics",
             "format-justify-fill-symbolic",
@@ -255,6 +259,7 @@ impl ExpandedPlayer {
             like,
             transport,
             visualizer,
+            lyrics_view,
             height_probe,
             queue_panel,
             ctx,
@@ -541,6 +546,10 @@ impl ExpandedPlayer {
     }
 
     /// Port of _show_stream_info: what is playing and how the pipeline sees it.
+    pub fn visualizer(&self) -> &Rc<Visualizer> {
+        &self.visualizer
+    }
+
     pub fn show_stream_info(self: &Rc<Self>) {
         present_stream_info(&self.ctx, self.root.upcast_ref::<gtk::Widget>());
     }

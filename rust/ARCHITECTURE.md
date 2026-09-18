@@ -60,6 +60,7 @@ src/net/explore.rs explore feed, mood and genre categories, charts, and the page
 src/net/home.rs    the home feed: shelves, their cards and the order they are shown in
 src/net/history.rs listening history: the plays, the token that forgets one, the ping that records one
 src/net/stream.rs  StreamResolver trait, yt-dlp subprocess impl, DemoResolver, StreamCache
+src/lyrics/        Lyrics service: six providers, the chain, TTML and LRC parsing, romanization, disk cache, prefs
 src/state/queue_entry.rs  QueueEntry GObject, one per queue row
 src/ui/mod.rs      CSS loading (style.css verbatim plus the player bar rules)
 src/ui/window.rs   MainWindow shell: header, switcher, search, split view, breakpoints, actions
@@ -360,26 +361,10 @@ asked for the default.
 ## Not ported yet, and where it attaches
 
 Audited against the Python tree on 2026-09-14. The two smallest entries,
-library search and the audio-version swap, were closed the same day.
+library search and the audio-version swap, were closed the same day. The
+settings dialog, scrobbling, Discord Rich Presence, cover theming and the
+lyrics view landed on 2026-09-18, see "Settings, presence and theming" below.
 
-- Lyrics, the largest gap: six providers and their ranking in `api/client.py`,
-  the per-track disk cache (`player/lyrics_cache.py`), the preferences
-  (`player/lyrics_prefs.py`) and the karaoke view itself
-  (`ui/widgets/lyrics_view.py`, 2700 lines: per-word sweep, interludes, second
-  lines, effects levels). `ui/widgets/lyrics_view.rs` is a placeholder the
-  expanded player and the cover view both show.
-- Settings dialog: `win.preferences` toasts. The prefs both apps share are
-  read and never written, so `history_mode`, the download format and the
-  folder layout still come from the Python app, and `history_mode` only takes
-  effect on the next launch.
-- Dynamic cover theming: `ui/cover_effects.py` and `ui/color_utils.py` behind
-  the blurred cover background, the cover-derived accent and the tinted
-  background. Nothing sets the `cover-bg-active` class the artist page checks,
-  and the visualizer uses the system accent instead of the cover's.
-- Scrobbling (`player/scrobbler.py`, Last.fm and ListenBrainz) and Discord
-  Rich Presence (`player/discord_rpc.py`): subscribers to `PlayerState`
-  property notifications, each an `Rc` on the GTK thread that spawns its own
-  network work.
 - Windows support: `player/smtc.py` (system media controls),
   `ui/tray_win.py`, `ui/login_webview_win.py`. MPRIS covers Linux.
 - Non-seekable streams staged in tmpfs: a second `StreamResolver` impl that
@@ -550,3 +535,69 @@ makes art appear with no connection.
 Settings for format and folder layout are not ported yet: the values come from
 the shared prefs.json, so changing them in the Python app changes both.
 `Downloads::migrate_layout` is ready for the settings page to call.
+
+## Lyrics
+
+`src/lyrics/` is the lyrics backend: the lyrics half of api/client.py plus
+player/lyrics_cache.py and player/lyrics_prefs.py. No widgets live there.
+`Lyrics` is the one handle the UI needs, built from `Paths`, a
+`reqwest::Client` and the `YtMusic` session. It is `Send + Sync`, cheap to
+clone, and every call is an async fn for `NetHandle::spawn`.
+
+`providers/` holds the six sources behind the `Source` trait: Apple Music
+through the Paxsenix proxy (iTunes Search first, the scraped amp-api token as
+the fallback), BetterLyrics, BiniLyrics, NetEase, LRCLIB and YouTube Music.
+Each file keeps its parsing in pure functions over `serde_json::Value`, so the
+tests run on hand-written responses, and `chain.rs` is tested against a
+scripted `Source`. `ttml.rs` reads the TTML three of them serve (word spans,
+background vocals, duet voices, Apple's translation and transliteration
+blocks), `lrc.rs` the LRC the other two serve, `matching.rs` the gate that
+keeps a different song out, and `romanize.rs` the second line: Hangul and
+Cyrillic by table, Japanese and Chinese from a provider when one has the
+reading and from the `kakasi` and `pinyin` dictionaries when none does.
+
+`chain.rs` walks the queue from `prefs.rs`, skips a provider that cannot beat
+the result in hand or that is in a back-off window, and gives the winner its
+second line. `cache.rs` is one JSON file per video id under
+`<cache>/lyrics`, the Python app's own files with its pipeline version, and
+`prefs.rs` reads and writes the `lyrics_*` keys of the shared prefs.json, so
+either app shows what the other fetched, pinned and configured.
+
+YouTube Music timed lyrics come from the Android client, as in ytmusicapi.
+That request is sent with no session: InnerTube answered 400 when the browser
+session's cookie and SAPISIDHASH went out with the Android client, and lyrics
+are the same for every account. The web client stays the plain-text fallback.
+
+## Settings, presence and theming
+
+Landed 2026-09-18. Each one writes or reads the files the Python app uses, so
+both apps stay interchangeable.
+
+- `ui/preferences.rs` and `ui/preferences_lyrics.rs` build the preferences
+  dialog. Every row saves to the shared `prefs.json` and applies live through
+  small `MainWindow` methods (`set_sidebar_on_right`, `force_offline_changed`,
+  `appearance_pref_changed`, `visualizers`, `lyrics_views`). Debug logs flip a
+  reloadable tracing filter in `bootstrap.rs`.
+- `scrobbler.rs` is `Send + Sync` behind a mutex. The GTK thread feeds the
+  listening clock from position ticks, and one tokio task owns the network and
+  the on-disk backlog (`scrobbler.json`, `scrobble_queue.json`).
+- `discord.rs` pins the IPC socket to a std thread. The GTK thread builds the
+  activity JSON and sends it over a channel. The worker coalesces updates and
+  resends the last one after a reconnect.
+- `presence.rs` wires both to the player. `Player::on_play` tells a fresh play
+  (`Started`) from a metadata correction (`Refined`), so the scrobble clock
+  never restarts on the audio-version swap.
+- A demo run mutes scrobbling and Discord. `MIXTAPES_DEMO_PRESENCE=1` lifts it.
+- `ui/appearance.rs` owns three display-wide CSS providers: the blurred cover
+  background, the cover accent with its optional tint, and the derived colors
+  (`playing_fg`, `blur_sidebar_bg`, `visualizer_bar`). `ui/cover_effects.rs`
+  ports the PIL pipeline by hand, because the `image` crate rounds differently.
+  `ui/color_utils.rs` is the OKLCH and WCAG math.
+- `ui/widgets/lyric_rows.rs` holds `LyricRow` and `InterludeRow`, GObject
+  subclasses that paint the sung line in `snapshot`. `ui/widgets/lyrics_view.rs`
+  is the container: fetch generations, activation, autoscroll and the source
+  picker. Both live views register in a thread-local list, so a display pref
+  change reaches both.
+- Pitfall hit again: `css_classes([...])` on a builder replaces the classes an
+  icon button brings (`image-button`), which shifts its size. Add classes after
+  `build()`.
