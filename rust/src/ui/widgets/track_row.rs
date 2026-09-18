@@ -429,7 +429,7 @@ impl TrackRow {
 
         // Follow the current track. One handler per bound row, dropped on unbind.
         self.disconnect_state();
-        self.sync_playing(has_id && self.ctx.player.state().video_id() == video_id);
+        self.sync_playing(has_id && self.ctx.player.state().is_playing_id(&video_id));
         if has_id {
             let weak = Rc::downgrade(self);
             let id =
@@ -438,7 +438,7 @@ impl TrackRow {
                     .state()
                     .connect_notify_local(Some("video-id"), move |state, _| {
                         if let Some(row) = weak.upgrade() {
-                            row.sync_playing(state.video_id() == video_id);
+                            row.sync_playing(state.is_playing_id(&video_id));
                         }
                     });
             self.state_handler.replace(Some(id));

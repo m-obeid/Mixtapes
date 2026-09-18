@@ -22,7 +22,60 @@ const CACHE_LIMIT: usize = 64;
 const COMPACT_SIZE: i32 = 44;
 const COMPACT_MAX_BASE: i32 = 80;
 
+/// Where cover bytes are kept between runs. Set once at startup.
+static DISK_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+/// Files kept in the disk cache. A cover at the size it is shown is about 10 KB.
+const DISK_LIMIT: usize = 4000;
+
+/// Point the disk cache at `<cache>/covers` and trim it in the background.
+pub fn init_disk_cache(cache_dir: &std::path::Path) {
+    let dir = cache_dir.join("covers");
+    if DISK_DIR.set(dir.clone()).is_err() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let _ = std::fs::create_dir_all(&dir);
+        let Ok(read) = std::fs::read_dir(&dir) else { return };
+        let mut files: Vec<(std::time::SystemTime, PathBuf)> = read.filter_map(|e| e.ok()).filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path()))).collect();
+        if files.len() > DISK_LIMIT {
+            files.sort();
+            for (_, path) in &files[..files.len() - DISK_LIMIT] {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    });
+}
+
+/// The file a cover is kept in: a hash of its address without the query and
+/// of the size asked for. YouTube signs the query per request, so the same
+/// picture comes back under a new one each time, and a key that kept it
+/// would never match the address saved with the offline library.
+fn disk_path(url: &str, target: Option<u32>) -> Option<PathBuf> {
+    let dir = DISK_DIR.get()?;
+    Some(dir.join(format!("{}-{}", address_hash(url), target.unwrap_or(0))))
+}
+
+fn address_hash(url: &str) -> String {
+    use sha1::{Digest, Sha1};
+    let address = url.split('?').next().unwrap_or(url);
+    Sha1::digest(address.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Through a sibling tmp file, so a partial write is never read back as a cover.
+async fn write_disk(path: &std::path::Path, bytes: &[u8]) {
+    let tmp = path.with_extension("tmp");
+    let write = async {
+        tokio::fs::write(&tmp, bytes).await?;
+        tokio::fs::rename(&tmp, path).await
+    };
+    if let Err(err) = write.await {
+        tracing::debug!(%err, ?path, "cover not cached on disk");
+    }
+}
+
 thread_local! {
+    /// Covers whose load failed, retried when the network returns.
+    static FAILED: RefCell<Vec<std::rc::Weak<CoverImage>>> = const { RefCell::new(Vec::new()) };
     static TEXTURES: RefCell<HashMap<String, gdk::Texture>> = RefCell::new(HashMap::new());
 }
 
@@ -58,15 +111,32 @@ pub async fn load_texture(net: &NetHandle, url: &str, target: Option<u32>) -> Op
     let http = net.client().http().clone();
     // Fetch and decode on the runtime: GdkTexture is thread-safe, and decoding
     // a cover on the GTK thread is what Python avoided with its worker pool.
+    let disk = disk_path(url, target);
     let handle = net.spawn(async move {
+        // The disk copy first. It is what shows offline, and it spares a request online.
+        if let Some(path) = &disk {
+            if let Ok(bytes) = tokio::fs::read(path).await {
+                if let Ok(Ok(texture)) = tokio::task::spawn_blocking(move || decode_bounded(bytes, target)).await {
+                    return Ok(texture);
+                }
+                // A file that no longer decodes is refetched.
+                let _ = tokio::fs::remove_file(path).await;
+            }
+        }
         let mut last_err = None;
         for candidate in candidates {
             match http.get(&candidate).send().await.and_then(|r| r.error_for_status()) {
                 Ok(response) => match response.bytes().await {
                     Ok(bytes) => {
-                        let decoded = tokio::task::spawn_blocking(move || decode_bounded(bytes.to_vec(), target)).await;
+                        let bytes = bytes.to_vec();
+                        let decoded = tokio::task::spawn_blocking(move || decode_for_disk(bytes, target)).await;
                         return match decoded {
-                            Ok(Ok(texture)) => Ok(texture),
+                            Ok(Ok((texture, for_disk))) => {
+                                if let Some(path) = &disk {
+                                    write_disk(path, &for_disk).await;
+                                }
+                                Ok(texture)
+                            }
                             Ok(Err(err)) => Err(anyhow::anyhow!("decode failed: {err}")),
                             Err(err) => Err(anyhow::anyhow!("decode task failed: {err}")),
                         };
@@ -273,8 +343,14 @@ impl CoverImage {
             if this.current.borrow().as_deref() != Some(url.as_str()) {
                 return;
             }
-            if let Some(texture) = texture {
-                this.image.set_paintable(Some(&SquarePaintable::new(&texture)));
+            match texture {
+                Some(texture) => this.image.set_paintable(Some(&SquarePaintable::new(&texture))),
+                // Kept on a list, so the cover fills in when the network is back.
+                None => FAILED.with(|f| {
+                    let mut failed = f.borrow_mut();
+                    failed.retain(|cover| cover.strong_count() > 0);
+                    failed.push(Rc::downgrade(&this));
+                }),
             }
         });
     }
@@ -338,8 +414,26 @@ fn local_path(url: &str) -> Option<PathBuf> {
 ///
 /// The cache is keyed by address, and a mirrored cover keeps its path when its
 /// picture changes, so without this the old image stays on screen.
+/// Load again every cover that failed, once the network is back.
+pub fn retry_failed() {
+    let failed = FAILED.with(|f| std::mem::take(&mut *f.borrow_mut()));
+    for cover in failed.iter().filter_map(std::rc::Weak::upgrade) {
+        if let Some(url) = cover.current.replace(None) {
+            cover.load(&url);
+        }
+    }
+}
+
 pub fn forget_texture(url: &str) {
-    // Every size of it: the key carries the target after the address.
+    // The disk copies go too, at every size: an edited cover keeps its address.
+    if let Some(dir) = DISK_DIR.get() {
+        let prefix = format!("{}-", address_hash(url));
+        if let Ok(read) = std::fs::read_dir(dir) {
+            for entry in read.filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().starts_with(&prefix)) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
     TEXTURES.with(|cache| cache.borrow_mut().retain(|key, _| key.split_once('\n').map_or(key.as_str(), |(u, _)| u) != url));
 }
 
@@ -352,24 +446,33 @@ fn cache_key(url: &str, target: Option<u32>) -> String {
 /// Without it a 56 px row pins a 1280x720 video thumbnail at 3.7 MB, and a
 /// home feed of 450 covers held about 500 MB of pixels.
 fn decode_bounded(bytes: Vec<u8>, target: Option<u32>) -> Result<gdk::Texture, String> {
+    decode_for_disk(bytes, target).map(|(texture, _)| texture)
+}
+
+/// `decode_bounded`, plus the bytes worth keeping on disk: the shrunk copy
+/// re-encoded when the source was bigger than needed, else the source as it
+/// came. A 1280x720 thumbnail shown at 56 px is 150 KB as fetched and 6 KB shrunk.
+fn decode_for_disk(bytes: Vec<u8>, target: Option<u32>) -> Result<(gdk::Texture, Vec<u8>), String> {
     use gtk::gdk_pixbuf::{InterpType, Pixbuf};
-    let bytes = glib::Bytes::from_owned(bytes);
     let Some(target) = target else {
-        return gdk::Texture::from_bytes(&bytes).map_err(|e| e.to_string());
+        let texture = gdk::Texture::from_bytes(&glib::Bytes::from(&bytes)).map_err(|e| e.to_string())?;
+        return Ok((texture, bytes));
     };
-    let stream = gtk::gio::MemoryInputStream::from_bytes(&bytes);
+    let stream = gtk::gio::MemoryInputStream::from_bytes(&glib::Bytes::from(&bytes));
     let pixbuf = Pixbuf::from_stream(&stream, gtk::gio::Cancellable::NONE).map_err(|e| e.to_string())?;
     let side = (target * 2) as i32;
     let (w, h) = (pixbuf.width(), pixbuf.height());
     if w <= side && h <= side {
-        return Ok(gdk::Texture::for_pixbuf(&pixbuf));
+        return Ok((gdk::Texture::for_pixbuf(&pixbuf), bytes));
     }
     let scale = (f64::from(side) / f64::from(w)).max(f64::from(side) / f64::from(h));
     let (new_w, new_h) = (((f64::from(w) * scale) as i32).max(1), ((f64::from(h) * scale) as i32).max(1));
     let scaled = pixbuf.scale_simple(new_w, new_h, InterpType::Bilinear).ok_or("scale failed")?;
     let (crop_w, crop_h) = (side.min(new_w), side.min(new_h));
     let cropped = scaled.new_subpixbuf((new_w - crop_w) / 2, (new_h - crop_h) / 2, crop_w, crop_h);
-    Ok(gdk::Texture::for_pixbuf(&cropped))
+    // JPEG has no alpha, so a picture that uses it stays PNG.
+    let encoded = if cropped.has_alpha() { cropped.save_to_bufferv("png", &[]) } else { cropped.save_to_bufferv("jpeg", &[("quality", "92")]) };
+    Ok((gdk::Texture::for_pixbuf(&cropped), encoded.unwrap_or(bytes)))
 }
 
 fn remember(url: &str, texture: &gdk::Texture) {

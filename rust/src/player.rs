@@ -41,6 +41,15 @@ struct Armed {
     video_id: VideoId,
 }
 
+/// Port of _summarize_yt_dlp_error: the part of a resolver or pipeline error
+/// a person would put in a toast. The first sentence after "ERROR:", capped.
+fn summarize_error(message: &str) -> String {
+    let message = message.split_once("ERROR:").map_or(message, |(_, rest)| rest).trim();
+    let sentence = [". ", "; "].iter().find_map(|sep| message.split_once(sep)).map_or(message, |(first, _)| first);
+    let trimmed = sentence.trim_matches([' ', '.']);
+    if trimmed.is_empty() { "Could not load this track".to_owned() } else { trimmed.chars().take(140).collect() }
+}
+
 /// A play as the scrobbler sees it: a fresh one, or the same one under better metadata.
 #[derive(Clone, Debug)]
 pub enum PlayEvent {
@@ -91,6 +100,8 @@ pub struct Player {
     swap_checked: RefCell<std::collections::HashSet<String>>,
     /// Told when a play starts or its metadata is corrected. See `on_play`.
     play_listeners: RefCell<Vec<PlayListener>>,
+    /// Set while the audio-version swap writes its metadata, so the source id survives it.
+    swapping: Cell<bool>,
 }
 
 impl Player {
@@ -118,6 +129,7 @@ impl Player {
             history_recorded: RefCell::new(None),
             swap_checked: RefCell::new(std::collections::HashSet::new()),
             play_listeners: RefCell::new(Vec::new()),
+            swapping: Cell::new(false),
         })
     }
 
@@ -130,6 +142,72 @@ impl Player {
     fn emit_play(&self, event: PlayEvent) {
         for listener in self.play_listeners.borrow().iter() {
             listener(&event);
+        }
+    }
+
+    /// Port of _precache_next: resolve the three tracks either side of the
+    /// playing one, so Next, Previous and a short jump start from the stream
+    /// cache. One after another on the runtime, and only what is not on disk.
+    fn precache_neighbours(&self) {
+        const REACH: usize = 3;
+        let (tracks, current) = {
+            let queue = self.queue.borrow();
+            (queue.tracks().to_vec(), queue.current())
+        };
+        let Some(current) = current else { return };
+        let wanted: Vec<VideoId> = (1..=REACH)
+            .flat_map(|step| [current.checked_add(step), current.checked_sub(step)])
+            .flatten()
+            .filter_map(|i| tracks.get(i))
+            .filter(|t| !t.video_id.0.is_empty() && !t.is_upload() && !self.downloads.is_downloaded(&t.video_id.0))
+            .map(|t| t.video_id.clone())
+            .collect();
+        if wanted.is_empty() {
+            return;
+        }
+        let resolver = self.net.resolver().clone();
+        let auth = self.net.client().media_auth();
+        self.net.spawn(async move {
+            for video_id in wanted {
+                if let Err(err) = resolver.resolve(video_id.clone(), auth.clone()).await {
+                    tracing::debug!(%video_id, %err, "neighbour not pre-resolved");
+                }
+            }
+        });
+    }
+
+    /// A track queued from a search or a shelf often has no album, which
+    /// leaves Discord's art caption and the scrobble's album blank. The watch
+    /// panel knows it, so it is asked once per play, off the hot path.
+    fn backfill_album(&self, track: &Track) {
+        if track.album.is_some() || track.video_id.0.is_empty() || track.is_upload() || track.video_id.0.starts_with("demo:") {
+            return;
+        }
+        let api = self.net.client().api();
+        let video_id = track.video_id.clone();
+        let wanted = video_id.0.clone();
+        let handle = self.net.spawn(async move { crate::net::playlists::get_watch_playlist(&*api, Some(&wanted), None, 1, false).await });
+        let weak = self.weak_self();
+        glib::spawn_future_local(async move {
+            let album = handle.await.ok().and_then(Result::ok).and_then(|w| w.tracks.into_iter().map(|t| t.track).find(|t| t.video_id == video_id)).and_then(|t| t.album);
+            if let (Some(player), Some(album)) = (weak.upgrade(), album) {
+                // Only the album: the row's own title and artists stay as the listener saw them.
+                player.refresh_track_metadata(&Track { video_id, album: Some(album), ..Track::default() });
+            }
+        });
+    }
+
+    /// Port of _apply_metadata: fresh title, artists, album and art for a
+    /// track, written over every copy in the queue and over what is playing.
+    pub fn refresh_track_metadata(&self, fresh: &Track) {
+        if !self.queue.borrow_mut().refresh_metadata(fresh) {
+            return;
+        }
+        self.sync_queue_model();
+        let current = self.queue.borrow().current_track().cloned();
+        if let Some(current) = current.filter(|t| t.video_id == fresh.video_id) {
+            self.apply_track_metadata(Some(&current));
+            self.emit_play(PlayEvent::Refined(current));
         }
     }
 
@@ -541,6 +619,7 @@ impl Player {
             .set_duration(track.duration_seconds.map(f64::from).unwrap_or(0.0));
         self.apply_track_metadata(Some(&track));
         self.emit_play(PlayEvent::Started(track.clone()));
+        self.backfill_album(&track);
         tracing::debug!(generation, index, video_id = %track.video_id, "loading");
 
         self.spawn_resolve(track, generation, false);
@@ -636,7 +715,7 @@ impl Player {
                     player.state.emit_track_error(
                         track.video_id.as_str(),
                         &track.title,
-                        &err.to_string(),
+                        &summarize_error(&err.to_string()),
                     );
                     player.advance_after_failure();
                 }
@@ -752,6 +831,7 @@ impl Player {
                     if self.armed_next.borrow().is_none() {
                         self.arm_gapless();
                     }
+                    self.precache_neighbours();
                 }
                 self.state.set_status(status);
                 self.sync_paused_flag();
@@ -787,7 +867,7 @@ impl Player {
                     self.retries.set(retries);
                 } else {
                     self.state
-                        .emit_track_error(track.video_id.as_str(), &track.title, &message);
+                        .emit_track_error(track.video_id.as_str(), &track.title, &summarize_error(&message));
                     self.advance_after_failure();
                 }
             }
@@ -865,6 +945,12 @@ impl Player {
     // -- state mirroring --------------------------------------------------
 
     fn apply_track_metadata(&self, track: Option<&Track>) {
+        // A different track ends whatever swap the last one went through. The
+        // swap itself sets the source id first and keeps the new id, so it survives this.
+        let incoming = track.map(|t| t.video_id.0.as_str()).unwrap_or_default();
+        if incoming != self.state.video_id() && !self.swapping.get() {
+            self.state.set_source_video_id(String::new());
+        }
         // A new track is a fresh gate, whichever way it started playing.
         if track.map(|t| t.video_id.0.as_str()) != self.history_recorded.borrow().as_deref() {
             self.history_recorded.replace(None);
@@ -935,7 +1021,11 @@ impl Player {
         // already recorded stands, so mark it before the metadata goes out.
         self.history_recorded.replace(Some(swapped.video_id.0.clone()));
         self.sync_queue_model();
+        // Rows on the page the listener came from still hold the video's id.
+        self.state.set_source_video_id(previous.video_id.0.clone());
+        self.swapping.set(true);
         self.apply_track_metadata(Some(&swapped));
+        self.swapping.set(false);
         self.emit_play(PlayEvent::Refined(swapped.clone()));
         swapped
     }

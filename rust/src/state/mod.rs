@@ -42,6 +42,9 @@ mod imp {
         pub thumbnail_url: RefCell<String>,
         #[property(get, set)]
         pub video_id: RefCell<String>,
+        /// The id the listener picked when the audio-version swap replaced it, else empty.
+        #[property(get, set)]
+        pub source_video_id: RefCell<String>,
         #[property(get, set)]
         pub like_status: RefCell<String>,
 
@@ -123,6 +126,12 @@ impl PlayerState {
     /// Queue as a list model of `QueueEntry`. Rows bind to its properties.
     pub fn queue_model(&self) -> gio::ListStore {
         self.imp().queue.get_or_init(gio::ListStore::new::<QueueEntry>).clone()
+    }
+
+    /// Whether `video_id` is what plays now. A row that holds a music video's
+    /// id still counts after the swap to its audio version.
+    pub fn is_playing_id(&self, video_id: &str) -> bool {
+        !video_id.is_empty() && (self.video_id() == video_id || self.source_video_id() == video_id)
     }
 
     pub fn emit_track_error(&self, video_id: &str, title: &str, message: &str) {

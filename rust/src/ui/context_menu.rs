@@ -1,7 +1,6 @@
-//! Port of ui/context_menu.py for songs. Sections keep the Python order:
-//! queue, nav, actions, remove, clipboard. Entries whose backing API is
-//! not ported yet (metadata refresh) are added when those land, so the
-//! builder never offers a dead item.
+//! Port of ui/context_menu.py: the song menu, the album and playlist menu and
+//! the artist menu. Sections keep the Python order: queue, nav, actions,
+//! remove, clipboard.
 
 use std::rc::Rc;
 
@@ -195,6 +194,14 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
         }
     }
 
+    if let Some(ctx) = opts.ctx.clone() {
+        if !vid.is_empty() && online && !multi && !hidden("refresh_metadata") {
+            let anchor = anchor.clone();
+            let vid_c = vid.clone();
+            builder.add(Section::Actions, "Refresh Metadata", "refresh-metadata", false, Rc::new(move || refresh_metadata(&ctx, &anchor, &vid_c)));
+        }
+    }
+
     for (i, extra) in opts.extras.into_iter().enumerate() {
         builder.add(extra.section, &extra.label, &format!("extra-{i}"), extra.first, extra.callback);
     }
@@ -271,6 +278,17 @@ pub fn show_item_menu_with(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, item:
     }
     let anchor_w = anchor.upcast_ref::<gtk::Widget>();
     let mut builder = Builder::new(anchor_w, "item");
+    let online = ctx.online.is_online();
+    let is_artist = !matches!(item.kind, ItemKind::Album | ItemKind::Playlist);
+
+    // Port of build_collection_menu's queue section: the tracks are fetched when asked for.
+    if !is_artist && online && !item.id.is_empty() {
+        for (label, name, mode) in [("Play", "play", CollectionMode::Play), ("Play Next", "play-next", CollectionMode::Next), ("Add to Queue", "add-to-queue", CollectionMode::Queue)] {
+            let (ctx, item, anchor) = (ctx.clone(), item.clone(), anchor_w.clone());
+            builder.add(Section::Queue, label, name, false, Rc::new(move || load_collection(&ctx, &anchor, &item, mode)));
+        }
+    }
+
     let request = match item.kind {
         ItemKind::Album => NavRequest::Album { id: item.id.clone(), title: item.title.clone(), thumb: item.thumb.clone() },
         ItemKind::Playlist => NavRequest::Playlist { id: item.id.clone(), title: item.title.clone(), thumb: item.thumb.clone() },
@@ -283,6 +301,20 @@ pub fn show_item_menu_with(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, item:
     };
     let nav = ctx.nav.clone();
     builder.add(Section::Nav, label, "open", false, Rc::new(move || nav.go(request.clone())));
+    if let Some(artist) = item.artists.iter().find(|a| a.id.is_some()).filter(|_| !is_artist) {
+        let nav = ctx.nav.clone();
+        let (id, name) = (artist.id.clone(), artist.name.clone());
+        builder.add(Section::Nav, "Go to Artist", "goto-artist", false, Rc::new(move || nav.go(NavRequest::Artist { id: id.clone(), name: name.clone() })));
+    }
+
+    if online && !item.id.is_empty() {
+        let (ctx, item, anchor) = (ctx.clone(), item.clone(), anchor_w.clone());
+        builder.add(Section::Actions, "Start Radio", "start-radio", false, Rc::new(move || match is_artist {
+            true => artist_radio(&ctx, &anchor, &item.id),
+            false => collection_radio(&ctx, &anchor, &item),
+        }));
+    }
+
     let url = match item.kind {
         ItemKind::Playlist => format!("https://music.youtube.com/playlist?list={}", item.id),
         ItemKind::Album => format!("https://music.youtube.com/browse/{}", item.id),
@@ -299,4 +331,123 @@ pub fn show_item_menu_with(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, item:
     if let Some(model) = builder.build() {
         popup_menu(anchor, &model, x, y);
     }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum CollectionMode {
+    Play,
+    Next,
+    Queue,
+}
+
+/// An album's or a playlist's tracks, and the playlist id its radio is seeded from.
+async fn collection_tracks(api: &dyn crate::net::browse::Browse, item: &MediaItem) -> (Vec<Track>, Option<String>) {
+    let fetched = if item.kind == ItemKind::Album && item.id.starts_with("MPRE") {
+        crate::net::playlists::get_album(api, &item.id).await
+    } else {
+        crate::net::playlists::get_playlist(api, item.playlist_id.as_deref().unwrap_or(&item.id), None).await
+    };
+    match fetched {
+        Ok(details) => (details.tracks, details.audio_playlist_id),
+        Err(err) => {
+            tracing::warn!(%err, id = %item.id, "loading the collection failed");
+            (Vec::new(), None)
+        }
+    }
+}
+
+/// Port of build_collection_menu's _load: fetch, then play or queue.
+fn load_collection(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem, mode: CollectionMode) {
+    toast(anchor, "Loading...");
+    let api = ctx.net.client().api();
+    let wanted = item.clone();
+    let handle = ctx.net.spawn(async move { collection_tracks(&*api, &wanted).await.0 });
+    let (ctx, anchor, source) = (ctx.clone(), anchor.clone(), item.id.clone());
+    glib::spawn_future_local(async move {
+        let tracks: Vec<Track> = handle.await.unwrap_or_default().into_iter().filter(|t| !t.video_id.0.is_empty() && t.is_available).collect();
+        if tracks.is_empty() {
+            toast(&anchor, "Nothing to play");
+            return;
+        }
+        let count = tracks.len();
+        match mode {
+            CollectionMode::Play => ctx.player.play_tracks(tracks, 0, false, Some(source), false),
+            CollectionMode::Next => {
+                ctx.player.add_to_queue(tracks, true);
+                toast(&anchor, &format!("Playing {count} tracks next"));
+            }
+            CollectionMode::Queue => {
+                ctx.player.add_to_queue(tracks, false);
+                toast(&anchor, &format!("Added {count} tracks to queue"));
+            }
+        }
+    });
+}
+
+/// A radio seeded from the collection: `RDAMPL` plus its playlist id. An album
+/// card only knows its browse id, so its audio playlist id is looked up first.
+fn collection_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) {
+    toast(anchor, "Starting radio...");
+    let known = item.playlist_id.clone().or_else(|| (!item.id.starts_with("MPRE")).then(|| item.id.trim_start_matches("VL").to_owned()));
+    let seed = |playlist_id: &str| if playlist_id.starts_with("RD") { playlist_id.to_owned() } else { format!("RDAMPL{playlist_id}") };
+    if let Some(playlist_id) = known {
+        ctx.player.start_radio(None, Some(seed(&playlist_id)));
+        return;
+    }
+    let api = ctx.net.client().api();
+    let wanted = item.clone();
+    let handle = ctx.net.spawn(async move { collection_tracks(&*api, &wanted).await.1 });
+    let (ctx, anchor) = (ctx.clone(), anchor.clone());
+    glib::spawn_future_local(async move {
+        match handle.await.ok().flatten() {
+            Some(playlist_id) => ctx.player.start_radio(None, Some(seed(&playlist_id))),
+            None => toast(&anchor, "Radio unavailable"),
+        }
+    });
+}
+
+/// Port of _artist_radio: the artist's own radio, else one seeded from their top song.
+fn artist_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, channel_id: &str) {
+    toast(anchor, "Starting radio...");
+    let api = ctx.net.client().api();
+    let channel_id = channel_id.to_owned();
+    let handle = ctx.net.spawn(async move { crate::net::artist::get_artist(api, &channel_id).await });
+    let (ctx, anchor) = (ctx.clone(), anchor.clone());
+    glib::spawn_future_local(async move {
+        let artist = match handle.await {
+            Ok(Ok(artist)) => artist,
+            _ => return toast(&anchor, "Radio unavailable"),
+        };
+        let top_song = artist.songs.as_ref().and_then(|s| s.results.first()).map(|t| t.video_id.0.clone()).filter(|id| !id.is_empty());
+        match (artist.radio_id, top_song) {
+            (Some(radio), _) => ctx.player.start_radio(None, Some(radio)),
+            (None, Some(seed)) => ctx.player.start_radio(Some(seed), None),
+            (None, None) => toast(&anchor, "Radio unavailable"),
+        }
+    });
+}
+
+/// Port of _refresh_metadata: what the watch panel says about the track, written back into the queue.
+fn refresh_metadata(ctx: &Rc<UiContext>, anchor: &gtk::Widget, video_id: &str) {
+    toast(anchor, "Refreshing metadata...");
+    let api = ctx.net.client().api();
+    let wanted = video_id.to_owned();
+    let handle = ctx.net.spawn(async move { crate::net::playlists::get_watch_playlist(&*api, Some(&wanted), None, 1, false).await });
+    let (ctx, anchor, video_id) = (ctx.clone(), anchor.clone(), video_id.to_owned());
+    glib::spawn_future_local(async move {
+        match handle.await {
+            Ok(Ok(watch)) => match watch.tracks.into_iter().map(|w| w.track).find(|t| t.video_id.0 == video_id) {
+                Some(fresh) => {
+                    ctx.player.refresh_track_metadata(&fresh);
+                    toast(&anchor, "Metadata refreshed");
+                }
+                None => toast(&anchor, "No metadata found"),
+            },
+            Ok(Err(err)) => {
+                tracing::warn!(%err, video_id, "metadata refresh failed");
+                toast(&anchor, "Failed to refresh metadata");
+            }
+            Err(_) => {}
+        }
+    });
 }

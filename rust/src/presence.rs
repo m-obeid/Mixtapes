@@ -26,7 +26,7 @@ fn wire_scrobbler(ctx: &Rc<App>) {
                 let duration = t.duration_seconds.map(f64::from).unwrap_or(0.0);
                 scrobbler.on_track_started(&t.video_id.0, &t.title, &t.artist, album, duration);
             }
-            PlayEvent::Refined(t) => scrobbler.refine_current_track(&t.video_id.0, &t.title, &t.artist),
+            PlayEvent::Refined(t) => scrobbler.refine_current_track(&t.video_id.0, &t.title, &t.artist, t.album.as_ref().map(|a| a.name.as_str()).unwrap_or_default()),
         });
     }
     {

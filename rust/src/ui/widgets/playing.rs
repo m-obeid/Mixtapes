@@ -35,16 +35,15 @@ impl PlayingTracker {
             return;
         }
         let widget = widget.upcast_ref::<gtk::Widget>();
-        apply(widget, self.state.video_id() == video_id);
+        apply(widget, self.state.is_playing_id(video_id));
         self.entries.borrow_mut().push((widget.downgrade(), video_id.to_owned()));
     }
 
     fn refresh(&self) {
-        let current = self.state.video_id();
         self.entries.borrow_mut().retain(|(w, _)| w.upgrade().is_some());
         for (weak, id) in self.entries.borrow().iter() {
             if let Some(widget) = weak.upgrade() {
-                apply(&widget, *id == current);
+                apply(&widget, self.state.is_playing_id(id));
             }
         }
     }

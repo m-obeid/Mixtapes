@@ -219,9 +219,13 @@ impl LibraryPage {
             let state = page.ctx.player.state();
             state.connect_notify_local(Some("authenticated"), move |state, _| {
                 if let Some(p) = weak.upgrade() {
+                    // Unverified is what a saved session reads as while the network is
+                    // down. Only a real sign-out empties the page, or offline it would
+                    // wipe the library that was just filled from disk.
+                    let signed_out = matches!(p.ctx.net.client().auth_state(), crate::net::ytmusic::AuthState::Anonymous | crate::net::ytmusic::AuthState::Invalid(_));
                     if state.authenticated() {
                         p.load_library(false);
-                    } else {
+                    } else if signed_out {
                         p.clear();
                     }
                 }
@@ -315,7 +319,16 @@ impl LibraryPage {
         if self.is_loading.replace(true) {
             return;
         }
-        if !self.ctx.player.state().authenticated() {
+        // Port of the _offline_db fallbacks in get_library_*: the last library
+        // that loaded is on disk, so the page is never blank at startup, offline
+        // or while the session is still being checked.
+        let signed_out = matches!(self.ctx.net.client().auth_state(), crate::net::ytmusic::AuthState::Anonymous);
+        if signed_out {
+            forget_library(&self.ctx.paths);
+        } else if self.sections[0].store.n_items() == 0 {
+            self.fill_from_disk();
+        }
+        if !self.ctx.player.state().authenticated() || !self.ctx.online.is_online() {
             self.is_loading.set(false);
             return;
         }
@@ -335,10 +348,11 @@ impl LibraryPage {
             let results = [playlists.await, albums.await, artists.await, up_albums.await, up_artists.await];
             let Some(page) = weak.upgrade() else { return };
             let targets = [&page.sections[0], &page.sections[1], &page.sections[2], &page.upload_sections[0], &page.upload_sections[1]];
-            let labels = ["playlists", "albums", "artists", "upload albums", "upload artists"];
-            for ((result, section), label) in results.into_iter().zip(targets).zip(labels) {
+            let mut saved = read_library(&page.ctx.paths);
+            for ((result, section), label) in results.into_iter().zip(targets).zip(LIBRARY_LABELS) {
                 match result {
                     Ok(Ok(mut items)) => {
+                        saved.insert(label.to_owned(), items.clone());
                         if label == "playlists" {
                             items.insert(items.len().min(1), downloads_entry());
                         }
@@ -351,6 +365,7 @@ impl LibraryPage {
                     Err(_) => {}
                 }
             }
+            write_library(&page.ctx.paths, saved);
             let has_uploads = page.upload_sections.iter().any(|s| s.store.n_items() > 0);
             page.empty_uploads.set_visible(!has_uploads);
             page.loading.set_visible(false);
@@ -362,6 +377,25 @@ impl LibraryPage {
                 done();
             }
         });
+    }
+
+    /// Show the library as it last loaded.
+    fn fill_from_disk(self: &Rc<Self>) {
+        let mut saved = read_library(&self.ctx.paths);
+        if saved.is_empty() {
+            return;
+        }
+        let targets = [&self.sections[0], &self.sections[1], &self.sections[2], &self.upload_sections[0], &self.upload_sections[1]];
+        for (section, label) in targets.into_iter().zip(LIBRARY_LABELS) {
+            let mut items = saved.remove(label).unwrap_or_default();
+            if label == "playlists" {
+                items.insert(items.len().min(1), downloads_entry());
+            }
+            sync_store(&section.store, items);
+        }
+        self.empty_uploads.set_visible(!self.upload_sections.iter().any(|s| s.store.n_items() > 0));
+        self.apply_layout();
+        self.apply_offline_state();
     }
 
     fn view_mode(&self) -> String {
@@ -630,6 +664,37 @@ fn matches_query(item: &MediaItem, query: &str) -> bool {
 }
 
 /// The synthetic Downloads playlist library.py inserts at index one.
+/// Section names, in the order load_library fetches them. Also the keys of library_cache.json.
+const LIBRARY_LABELS: [&str; 5] = ["playlists", "albums", "artists", "upload albums", "upload artists"];
+
+type SavedLibrary = std::collections::HashMap<String, Vec<MediaItem>>;
+
+fn library_file(paths: &crate::paths::Paths) -> std::path::PathBuf {
+    paths.data_dir.join("library_cache.json")
+}
+
+fn read_library(paths: &crate::paths::Paths) -> SavedLibrary {
+    std::fs::read(library_file(paths)).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+}
+
+fn write_library(paths: &crate::paths::Paths, library: SavedLibrary) {
+    let path = library_file(paths);
+    // Off the GTK thread: a big library is a few hundred kilobytes of JSON.
+    std::thread::spawn(move || match serde_json::to_vec(&library) {
+        Ok(bytes) => {
+            if let Err(err) = std::fs::write(&path, bytes) {
+                tracing::debug!(%err, "library cache not saved");
+            }
+        }
+        Err(err) => tracing::debug!(%err, "library cache not encoded"),
+    });
+}
+
+/// A signed-out app must not show the last account's library.
+fn forget_library(paths: &crate::paths::Paths) {
+    let _ = std::fs::remove_file(library_file(paths));
+}
+
 fn downloads_entry() -> MediaItem {
     MediaItem { kind: ItemKind::Playlist, id: DOWNLOADS_ID.to_owned(), title: "Downloads".to_owned(), description: Some("Downloaded songs".to_owned()), ..MediaItem::default() }
 }

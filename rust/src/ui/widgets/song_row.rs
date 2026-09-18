@@ -204,13 +204,13 @@ impl SongRow {
         if let Some(id) = self.state_handler.borrow_mut().take() {
             self.ctx.player.state().disconnect(id);
         }
-        self.apply_playing(playable && self.ctx.player.state().video_id() == item.id);
+        self.apply_playing(playable && self.ctx.player.state().is_playing_id(&item.id));
         if playable {
             let weak = Rc::downgrade(self);
             let video_id = item.id.clone();
             let id = self.ctx.player.state().connect_notify_local(Some("video-id"), move |state, _| {
                 if let Some(row) = weak.upgrade() {
-                    row.apply_playing(state.video_id() == video_id);
+                    row.apply_playing(state.is_playing_id(&video_id));
                 }
             });
             self.state_handler.replace(Some(id));

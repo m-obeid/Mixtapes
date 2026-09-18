@@ -50,6 +50,10 @@ impl CoverPicture {
             if this.current.borrow().as_deref() != Some(url.as_str()) {
                 return;
             }
+            if texture.is_none() {
+                // Forgotten, so the next metadata update asks again instead of seeing the same address.
+                this.current.replace(None);
+            }
             this.picture.set_paintable(texture.as_ref());
         });
     }

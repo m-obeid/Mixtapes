@@ -9,7 +9,7 @@
 use crate::model::{LikeStatus, RepeatMode, Track, VideoId};
 
 /// How far into a track Previous stops stepping back and restarts it instead.
-pub const PREVIOUS_RESTART_THRESHOLD: f64 = 3.0;
+pub const PREVIOUS_RESTART_THRESHOLD: f64 = 5.0;
 
 /// What the caller must do after asking the queue something. Every method that
 /// can change what plays answers with one of these.
@@ -414,6 +414,29 @@ impl Queue {
         true
     }
 
+    /// Overwrite the descriptive fields of every copy of a track, in both
+    /// orders. What the queue tracks about it (rating, playlist row id) stays.
+    pub fn refresh_metadata(&mut self, fresh: &Track) -> bool {
+        let mut found = false;
+        for track in self.tracks.iter_mut().chain(self.original.iter_mut()).filter(|t| t.video_id == fresh.video_id) {
+            found = true;
+            if !fresh.title.is_empty() {
+                track.title = fresh.title.clone();
+            }
+            if !fresh.artists.is_empty() {
+                track.artists = fresh.artists.clone();
+                track.artist = fresh.artist.clone();
+            }
+            if fresh.album.is_some() {
+                track.album = fresh.album.clone();
+            }
+            if fresh.thumb.is_some() {
+                track.thumb = fresh.thumb.clone();
+            }
+        }
+        found
+    }
+
     /// Apply a rating to every copy of a track, in both orders.
     pub fn set_like_status(&mut self, video_id: &VideoId, status: LikeStatus) {
         for track in self.tracks.iter_mut().chain(self.original.iter_mut()) {
@@ -521,7 +544,7 @@ mod tests {
     fn bounds_match_what_advance_and_back_will_do() {
         let mut q = queue(&["a", "b"], 0);
         assert_eq!(q.bounds(0.0), Bounds { can_next: true, can_previous: false });
-        assert!(q.bounds(4.0).can_previous, "restart counts as going back");
+        assert!(q.bounds(PREVIOUS_RESTART_THRESHOLD + 1.0).can_previous, "restart counts as going back");
         q.jump(1);
         assert_eq!(q.bounds(0.0), Bounds { can_next: false, can_previous: true });
         q.set_repeat(RepeatMode::All);

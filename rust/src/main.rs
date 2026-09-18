@@ -174,6 +174,7 @@ fn on_startup(ctx: &Rc<App>) {
     }
     gtk::Window::set_default_icon_name(APP_ID);
     ui::load_css();
+    ui::cover::init_disk_cache(&ctx.paths.cache_dir);
 
     // Event pumps must attach to the running GTK main context.
     ctx.player.start();

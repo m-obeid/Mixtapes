@@ -314,7 +314,7 @@ impl Scrobbler {
 
     /// Correct the in-flight track's metadata without touching the clock.
     /// The audio-version swap lands after playback starts.
-    pub fn refine_current_track(&self, video_id: &str, title: &str, artist: &str) {
+    pub fn refine_current_track(&self, video_id: &str, title: &str, artist: &str, album: &str) {
         let mut inner = self.lock();
         let Some(cur) = inner.cur.as_mut().filter(|c| !c.scrobbled) else { return };
         if !title.trim().is_empty() {
@@ -322,6 +322,9 @@ impl Scrobbler {
         }
         if !artist.trim().is_empty() {
             cur.artist = artist.trim().to_owned();
+        }
+        if !album.trim().is_empty() {
+            cur.album = album.trim().to_owned();
         }
         if !video_id.is_empty() {
             cur.video_id = video_id.to_owned();

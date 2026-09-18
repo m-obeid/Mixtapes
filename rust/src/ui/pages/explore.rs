@@ -505,6 +505,12 @@ impl ExplorePage {
         if let Some(handle) = self.inflight.borrow_mut().take() {
             handle.abort();
         }
+        // Port of _search_local: without a network, search what is on disk.
+        if !self.ctx.online.is_online() {
+            let items = local_results(&self.ctx.downloads.all(), &query);
+            self.render_results(&query, SearchResults { top_result: None, items });
+            return;
+        }
         self.stack.set_visible_child_name("loading");
 
         let client = self.ctx.net.client().api();
@@ -538,6 +544,7 @@ impl ExplorePage {
         self.song_rows.borrow_mut().clear();
 
         let mut all: Vec<MediaItem> = Vec::new();
+        let has_top = results.top_result.is_some();
         if let Some(top) = &results.top_result {
             all.push(top.clone());
         }
@@ -570,9 +577,15 @@ impl ExplorePage {
         let videos: Vec<MediaItem> = all.iter().filter(|r| r.kind == ItemKind::Video).cloned().collect();
 
         let main = make_tab("Main", "main", "Main");
-        self.add_result_section(&main, "Top Result", &all[..1]);
-        if all.len() > 1 {
-            self.add_result_section(&main, "Relevant Results", &all[1..]);
+        // Only a card YouTube sent as the top result earns the heading.
+        let rest = if has_top {
+            self.add_result_section(&main, "Top Result", &all[..1]);
+            &all[1..]
+        } else {
+            &all[..]
+        };
+        if !rest.is_empty() {
+            self.add_result_section(&main, "Relevant Results", rest);
         }
         if !songs.is_empty() {
             let tab = make_tab("Songs", "songs", "Songs");
@@ -681,4 +694,24 @@ fn status_box(icon: &str, title: &str, subtitle: Option<&str>) -> gtk::Box {
         status.append(&gtk::Label::builder().label(subtitle).css_classes(["dim-label"]).justify(gtk::Justification::Center).build());
     }
     status
+}
+
+/// Downloads whose title, artist or album contains the query, as song results.
+fn local_results(downloads: &[crate::downloads::store::Entry], query: &str) -> Vec<MediaItem> {
+    let needle = query.to_lowercase();
+    downloads
+        .iter()
+        .filter(|d| [&d.title, &d.artist, &d.album].iter().any(|field| field.to_lowercase().contains(&needle)))
+        .map(|d| MediaItem {
+            kind: ItemKind::Song,
+            id: d.video_id.clone(),
+            title: d.title.clone(),
+            artists: vec![crate::model::Person { name: d.artist.clone(), id: (!d.artist_id.is_empty()).then(|| d.artist_id.clone()) }],
+            album: (!d.album.is_empty()).then(|| crate::model::Named { name: d.album.clone(), id: (!d.album_id.is_empty()).then(|| d.album_id.clone()) }),
+            thumb: (!d.thumbnail_url.is_empty()).then(|| d.thumbnail_url.clone()),
+            duration_seconds: d.duration_seconds,
+            like_status: Some(d.like_status),
+            ..MediaItem::default()
+        })
+        .collect()
 }

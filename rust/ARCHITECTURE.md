@@ -367,11 +367,15 @@ library search and the audio-version swap, were closed the same day. The
 settings dialog, scrobbling, Discord Rich Presence, cover theming and the
 lyrics view landed on 2026-09-18, see "Settings, presence and theming" below.
 
+- Search drops podcast, episode and profile rows. Python lists them under
+  "More results" in the Other tab. `ItemKind` has no kind for them, and the
+  app has no page that opens one.
 - Windows support: `player/smtc.py` (system media controls),
   `ui/tray_win.py`, `ui/login_webview_win.py`. MPRIS covers Linux.
-- Non-seekable streams staged in tmpfs: a second `StreamResolver` impl that
-  downloads to `/dev/shm`. Uploads no longer need it now that PO tokens are
-  minted, so this is only for streams that refuse to seek.
+- Non-seekable streams: fragmented m4a, which is what uploads come as, seeks
+  through playbin's download flag (`set_download_buffering`). Python's tmpfs
+  staging and its `noseek_vids.json` memory are not ported and not needed for
+  that case. A stream that refuses to seek for another reason stays unseekable.
 - GResource and style.css: `build.rs` with `glib-build-tools`. The CSS lives
   in `ui/mod.rs` as string constants today.
 - Packaging: the Flatpak manifest and the AUR PKGBUILD still build the Python
@@ -603,3 +607,30 @@ both apps stay interchangeable.
 - Pitfall hit again: `css_classes([...])` on a builder replaces the classes an
   icon button brings (`image-button`), which shifts its size. Add classes after
   `build()`.
+
+## Parity audit, 2026-09-18
+
+Three passes over the Python tree by slice (playback and backend, window and
+widgets, pages and API client), each reported gap checked against both trees
+before it was fixed. Closed the same day:
+
+- Album and playlist card menus: Play, Play Next, Add to Queue, Go to Artist
+  and Start Radio, with the tracks fetched when asked for. Artist cards: Start
+  Radio, from the artist's own radio or their top song (`ui/context_menu.rs`).
+- Song menu: Refresh Metadata, through `Player::refresh_track_metadata` and
+  `Queue::refresh_metadata`.
+- Offline library: `library_cache.json` in the data dir holds the five library
+  sections as they last loaded. The page fills from it before any fetch, so it
+  is also what shows at startup. A signed-out app deletes it. Python kept the
+  same thing in library.db tables in ytmusicapi's dict shape, which the port
+  does not read or write.
+- Offline search: `local_results` in `ui/pages/explore.rs` searches downloads.
+- The player bar's album button asks the watch panel when the track has no album.
+- `PlayerState::source-video-id` and `is_playing_id`: a row holding a music
+  video's id keeps its highlight after the audio-version swap.
+- `Player::precache_neighbours`: three tracks either side resolve into the
+  stream cache once a track plays.
+- "Top Result" only heads a card YouTube sent as one.
+- Error toasts are trimmed (`summarize_error`), a missing album is backfilled
+  for Discord and scrobbles (`backfill_album`), Previous restarts after 5 s,
+  and Ctrl+slash opens the shortcuts dialog.

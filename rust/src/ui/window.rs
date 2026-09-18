@@ -263,10 +263,25 @@ impl MainWindow {
                         title: name,
                         thumb: None,
                     }),
+                    // Port of _resolve_album_from_player: a track queued without
+                    // its album still has one in the watch panel.
                     None => {
-                        if let Some(o) = overlay.upgrade() {
-                            o.add_toast(adw::Toast::new("No album for this track"));
-                        }
+                        let video_id = ui.player.state().video_id();
+                        let api = ui.net.client().api();
+                        let wanted = video_id.clone();
+                        let handle = ui.net.spawn(async move { crate::net::playlists::get_watch_playlist(&*api, Some(&wanted), None, 1, false).await });
+                        let (ui, overlay) = (ui.clone(), overlay.clone());
+                        glib::spawn_future_local(async move {
+                            let album = handle.await.ok().and_then(Result::ok).and_then(|w| w.tracks.into_iter().map(|t| t.track).find(|t| t.video_id.0 == video_id)).and_then(|t| t.album).filter(|a| a.id.is_some());
+                            match album {
+                                Some(album) => ui.nav.go(NavRequest::Album { id: album.id.unwrap_or_default(), title: album.name, thumb: None }),
+                                None => {
+                                    if let Some(o) = overlay.upgrade() {
+                                        o.add_toast(adw::Toast::new("No album for this track"));
+                                    }
+                                }
+                            }
+                        });
                     }
                 })
             },
@@ -551,6 +566,8 @@ impl MainWindow {
         if online {
             tracing::info!("back online, refreshing library");
             self.add_toast("Back online");
+            // Covers that failed while offline stay placeholders until asked again.
+            crate::ui::cover::retry_failed();
             self.library.load_library(false);
             self.explore.load_explore_data(true);
             self.home.refresh();
@@ -2539,7 +2556,7 @@ fn install_actions(
     window.add_action(&scheme);
 
     app.set_accels_for_action("win.preferences", &["<Primary>comma"]);
-    app.set_accels_for_action("win.shortcuts", &["<Primary>question"]);
+    app.set_accels_for_action("win.shortcuts", &["<Primary>question", "<Primary>slash"]);
     app.set_accels_for_action("win.quit", &["<Primary>q"]);
 }
 
