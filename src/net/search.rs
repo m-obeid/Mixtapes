@@ -340,7 +340,7 @@ fn parse_list_item(renderer: &Value, shelf_kind: Option<ItemKind>) -> Option<Med
         (None, None) => leading_kind.or(shelf_kind)?,
     };
 
-    let mut item = MediaItem { kind, title, thumb: thumbnails_last(renderer), explicit: is_explicit(renderer), item_type, ..MediaItem::default() };
+    let mut item = MediaItem { kind, title, thumb: thumbnails_last(renderer), explicit: is_explicit(renderer), is_live: crate::net::items::is_live(renderer), item_type, ..MediaItem::default() };
     match kind {
         ItemKind::Song | ItemKind::Video => {
             item.id = watch.as_ref().map(|(id, _)| id.clone()).unwrap_or_default();

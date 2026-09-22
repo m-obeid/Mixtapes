@@ -222,6 +222,10 @@ impl AddToPlaylistPopover {
             self.fill(cached);
             return;
         }
+        if !self.ctx.net.client().is_authenticated() {
+            self.fill(Vec::new());
+            return;
+        }
         let api = self.ctx.net.client().api();
         let handle = self.ctx.net.spawn(library::library_playlists(api));
         let weak = Rc::downgrade(self);
@@ -240,8 +244,11 @@ impl AddToPlaylistPopover {
         });
     }
 
+    /// Playlists on this device first, then the account's editable ones.
     fn fill(self: &Rc<Self>, playlists: Vec<MediaItem>) {
-        let mut playlists = editable_playlists(&playlists, self.account_name().as_deref());
+        let mut all = self.ctx.local.playlist_items();
+        all.extend(editable_playlists(&playlists, self.account_name().as_deref()));
+        let mut playlists = all;
         if playlists.is_empty() {
             self.empty_label.set_visible(true);
             return;

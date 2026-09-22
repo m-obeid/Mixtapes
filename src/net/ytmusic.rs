@@ -59,6 +59,18 @@ pub struct AccountInfo {
     pub photo_url: Option<String>,
 }
 
+/// One entry of the account switcher: the Google account itself or a brand
+/// account (channel) under it. `page_id` is None for the account itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Account {
+    pub name: String,
+    pub byline: Option<String>,
+    pub handle: Option<String>,
+    pub photo_url: Option<String>,
+    pub page_id: Option<String>,
+    pub selected: bool,
+}
+
 /// Authentication state machine.
 /// Anonymous: no saved headers. Unverified: headers loaded, no round trip yet.
 /// Authenticated: server confirmed the session. Invalid: server rejected it.
@@ -98,13 +110,19 @@ pub struct YtMusic {
     auth: watch::Sender<AuthState>,
     /// Ratings seen or set this session, keyed by video id. Mirrors MusicClient._known_likes.
     known_likes: RwLock<HashMap<String, LikeStatus>>,
+    /// The brand account acted for, as `onBehalfOfUser`. None is the Google account itself.
+    page_id: RwLock<Option<String>>,
 }
+
+/// Pref holding the chosen channel's page id.
+pub const CHANNEL_PREF: &str = "account_page_id";
 
 impl YtMusic {
     pub fn new(paths: &Paths) -> anyhow::Result<Arc<Self>> {
         let http = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).gzip(true).build()?;
         let (auth, _) = watch::channel(AuthState::Anonymous);
         let anonymous = YTMusicClient::builder().build()?;
+        let page_id = paths.read_prefs().get(CHANNEL_PREF).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned);
         let client = Arc::new(Self {
             http,
             auth_file: paths.auth_file.clone(),
@@ -112,6 +130,7 @@ impl YtMusic {
             session: RwLock::new(Session::default()),
             auth,
             known_likes: RwLock::new(HashMap::new()),
+            page_id: RwLock::new(page_id),
         });
         client.load_saved_session();
         Ok(client)
@@ -205,8 +224,11 @@ impl YtMusic {
     fn install_headers(&self, headers: BTreeMap<String, String>) -> Result<(), NetError> {
         let browser_auth = BrowserAuth::from_json(&serde_json::to_string(&headers)?).map_err(|e| NetError::InvalidAuth(e.to_string()))?;
         browser_auth.sapisid().map_err(|e| NetError::InvalidAuth(e.to_string()))?;
-        let client = YTMusicClient::builder().with_browser_auth(browser_auth.clone()).build()?;
-        *self.api.write().unwrap() = Arc::new(client);
+        let mut builder = YTMusicClient::builder().with_browser_auth(browser_auth.clone());
+        if let Some(page_id) = self.page_id.read().unwrap().clone() {
+            builder = builder.with_user(page_id);
+        }
+        *self.api.write().unwrap() = Arc::new(builder.build()?);
         let mut session = self.session.write().unwrap();
         session.headers = headers;
         session.browser_auth = Some(browser_auth);
@@ -278,6 +300,34 @@ impl YtMusic {
         self.publish(AuthState::Anonymous);
     }
 
+    // -- channels --------------------------------------------------------
+
+    pub fn channel(&self) -> Option<String> {
+        self.page_id.read().unwrap().clone()
+    }
+
+    /// Act as another channel of the signed-in account. The caller persists
+    /// the choice. The session is re-validated so the account info follows.
+    pub async fn set_channel(&self, page_id: Option<String>) -> Result<AuthState, NetError> {
+        *self.page_id.write().unwrap() = page_id;
+        let headers = self.session.read().unwrap().headers.clone();
+        if headers.is_empty() {
+            return Ok(self.auth_state());
+        }
+        self.install_headers(headers)?;
+        self.known_likes.write().unwrap().clear();
+        self.validate().await
+    }
+
+    /// The account and its brand accounts, from the switcher YouTube Music shows.
+    pub async fn accounts(&self) -> Result<Vec<Account>, NetError> {
+        if !self.auth.borrow().has_session() {
+            return Ok(Vec::new());
+        }
+        let resp = self.post("account/accounts_list", json!({})).await?;
+        Ok(parse_accounts(&resp))
+    }
+
     // -- ratings ---------------------------------------------------------
 
     pub fn known_like_status(&self, video_id: &str) -> Option<LikeStatus> {
@@ -331,6 +381,51 @@ impl YtMusic {
 }
 
 // -- helpers -------------------------------------------------------------
+
+/// Every `accountItem` in the response, wherever the renderers nest it.
+pub fn parse_accounts(resp: &Value) -> Vec<Account> {
+    let mut items = Vec::new();
+    collect_key(resp, "accountItem", &mut items);
+    items.into_iter().filter_map(parse_account).collect()
+}
+
+fn collect_key<'a>(value: &'a Value, key: &str, out: &mut Vec<&'a Value>) {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map {
+                if k == key {
+                    out.push(v);
+                } else {
+                    collect_key(v, key, out);
+                }
+            }
+        }
+        Value::Array(list) => list.iter().for_each(|v| collect_key(v, key, out)),
+        _ => {}
+    }
+}
+
+fn parse_account(item: &Value) -> Option<Account> {
+    let text = |node: Option<&Value>| -> Option<String> {
+        let node = node?;
+        node.get("simpleText").and_then(Value::as_str).map(str::to_owned).or_else(|| {
+            let runs = node.get("runs")?.as_array()?;
+            Some(runs.iter().filter_map(|r| r.get("text").and_then(Value::as_str)).collect::<String>())
+        })
+    };
+    let name = text(item.get("accountName")).filter(|n| !n.is_empty())?;
+    let mut tokens = Vec::new();
+    collect_key(item, "pageIdToken", &mut tokens);
+    let page_id = tokens.iter().find_map(|t| t.get("pageId").and_then(Value::as_str)).filter(|p| !p.is_empty()).map(str::to_owned);
+    Some(Account {
+        name,
+        byline: text(item.get("accountByline")).filter(|b| !b.is_empty()),
+        handle: text(item.get("channelHandle")).filter(|h| !h.is_empty()),
+        photo_url: item.pointer("/accountPhoto/thumbnails").and_then(Value::as_array).and_then(|t| t.last()).and_then(|t| t.get("url")).and_then(Value::as_str).map(str::to_owned),
+        page_id,
+        selected: item.get("isSelected").and_then(Value::as_bool).unwrap_or(false),
+    })
+}
 
 /// Port of MusicClient._normalize_headers: Title-Case the known keys and drop OAuth material.
 pub fn normalize_headers(raw: BTreeMap<String, String>) -> BTreeMap<String, String> {
@@ -424,5 +519,24 @@ mod tests {
         let auth = BrowserAuth::from_json(&serde_json::to_string(&headers).unwrap()).unwrap();
         assert_eq!(auth.sapisid().unwrap(), "xyz");
         assert_eq!(auth.x_goog_authuser, "1");
+    }
+
+    #[test]
+    fn brand_accounts_come_with_their_page_id() {
+        let resp = json!({"actions":[{"openPopupAction":{"popup":{"multiPageMenuRenderer":{"sections":[{"accountSectionListRenderer":{"contents":[{"accountItemSectionRenderer":{"contents":[
+            {"accountItem":{"accountName":{"simpleText":"Asnanon"},"accountByline":{"simpleText":"No channel"},"isSelected":false,
+                "serviceEndpoint":{"selectActiveIdentityEndpoint":{"supportedTokens":[{"accountSigninToken":{"signinUrl":"x"}}]}}}},
+            {"accountItem":{"accountName":{"runs":[{"text":"asnanon"}]},"channelHandle":{"simpleText":"@asnanon"},"isSelected":true,
+                "accountPhoto":{"thumbnails":[{"url":"a"},{"url":"b"}]},
+                "serviceEndpoint":{"selectActiveIdentityEndpoint":{"supportedTokens":[{"offlineCacheKeyToken":{"clientCacheKey":"k"}},{"pageIdToken":{"pageId":"1234"}}]}}}}
+        ]}}]}}]}}}}]});
+        let accounts = parse_accounts(&resp);
+        assert_eq!(accounts.len(), 2);
+        assert_eq!(accounts[0].name, "Asnanon");
+        assert_eq!(accounts[0].page_id, None);
+        assert_eq!(accounts[1].handle.as_deref(), Some("@asnanon"));
+        assert_eq!(accounts[1].page_id.as_deref(), Some("1234"));
+        assert_eq!(accounts[1].photo_url.as_deref(), Some("b"));
+        assert!(accounts[1].selected);
     }
 }

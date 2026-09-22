@@ -52,7 +52,7 @@ pub fn search_subtitle(item: &MediaItem) -> String {
 /// Kind icon plus a given subtitle text.
 pub fn kind_subtitle_text(item: &MediaItem, text: &str, constrain_width: bool) -> gtk::Box {
     let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).halign(if constrain_width { gtk::Align::Fill } else { gtk::Align::Start }).build();
-    let icon = gtk::Image::builder().icon_name(item.kind.icon()).pixel_size(12).valign(gtk::Align::Center).css_classes(["home-kind-icon", "dim-label"]).build();
+    let icon = gtk::Image::builder().icon_name(item.kind_icon()).pixel_size(12).valign(gtk::Align::Center).css_classes(["home-kind-icon", if item.is_live { "live-icon" } else { "dim-label" }]).build();
     row.append(&icon);
     if !text.is_empty() {
         let label = gtk::Label::builder().label(text).halign(gtk::Align::Start).ellipsize(gtk::pango::EllipsizeMode::End).lines(1).width_chars(1).css_classes(["caption", "dim-label"]).build();

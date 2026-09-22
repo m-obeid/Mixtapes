@@ -90,8 +90,12 @@ impl MediaCard {
         main_box.append(&title);
 
         let subtitle = opts.subtitle.clone().unwrap_or_else(|| resolve_subtitle(&item, ctx.net.caches().release_kind_for(&item.id)));
-        if !subtitle.is_empty() || item.explicit {
+        if !subtitle.is_empty() || item.explicit || item.is_live {
             let subtitle_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).halign(gtk::Align::Fill).hexpand(true).build();
+            // A live stream: the antenna, as a symbolic icon like the rest of the interface.
+            if item.is_live {
+                subtitle_box.append(&gtk::Image::builder().icon_name(item.kind_icon()).pixel_size(12).valign(gtk::Align::Center).css_classes(["live-icon"]).tooltip_text("Live").build());
+            }
             if item.explicit {
                 subtitle_box.append(&gtk::Label::builder().label("E").css_classes(["explicit-badge"]).valign(gtk::Align::Center).build());
             }

@@ -46,14 +46,14 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesDialog {
 
 // -- small builders ---------------------------------------------------------
 
-fn save(ctx: &App, key: &str, value: impl Into<Value>) {
+pub(crate) fn save(ctx: &App, key: &str, value: impl Into<Value>) {
     let value = value.into();
     ctx.paths.update_prefs(|p| {
         p.insert(key.to_owned(), value);
     });
 }
 
-fn pref_bool(ctx: &App, key: &str, default: bool) -> bool {
+pub(crate) fn pref_bool(ctx: &App, key: &str, default: bool) -> bool {
     ctx.paths.read_prefs().get(key).and_then(Value::as_bool).unwrap_or(default)
 }
 
@@ -61,7 +61,7 @@ fn pref_str(ctx: &App, key: &str, default: &str) -> String {
     ctx.paths.read_prefs().get(key).and_then(Value::as_str).unwrap_or(default).to_owned()
 }
 
-pub(super) fn switch_row(title: &str, subtitle: &str, active: bool) -> adw::SwitchRow {
+pub(crate) fn switch_row(title: &str, subtitle: &str, active: bool) -> adw::SwitchRow {
     adw::SwitchRow::builder().title(title).subtitle(subtitle).active(active).build()
 }
 
@@ -120,7 +120,7 @@ fn account_group(win: &Rc<MainWindow>, ctx: &Rc<App>, dialog: &adw::PreferencesD
 
     if !authed {
         row.set_title("Not signed in");
-        row.set_subtitle("Sign in to YouTube Music to access your library");
+        row.set_subtitle("Sign in to YouTube Music to access your library. Playlists and likes stay on this device until then.");
         group.add(&row);
         return group;
     }
@@ -144,7 +144,133 @@ fn account_group(win: &Rc<MainWindow>, ctx: &Rc<App>, dialog: &adw::PreferencesD
         });
     }
     group.add(&row);
+    group.add(&channel_row(win, ctx, AccountRow { row: row.clone(), avatar: avatar.clone() }));
     group
+}
+
+/// The signed-in account's row, so a channel switch can redraw it.
+#[derive(Clone)]
+struct AccountRow {
+    row: adw::ActionRow,
+    avatar: adw::Avatar,
+}
+
+impl AccountRow {
+    fn show(&self, ctx: &Rc<App>, info: &crate::net::ytmusic::AccountInfo) {
+        let name = if info.name.is_empty() { "Signed in".to_owned() } else { info.name.clone() };
+        self.row.set_title(&glib::markup_escape_text(&name));
+        self.row.set_subtitle(&glib::markup_escape_text(info.handle.as_deref().filter(|h| !h.is_empty()).unwrap_or("YouTube Music account")));
+        self.avatar.set_text(Some(&name));
+        self.avatar.set_show_initials(true);
+        self.avatar.set_custom_image(None::<&gdk::Paintable>);
+        if let Some(photo) = info.photo_url.clone() {
+            let (net, avatar) = (ctx.net.clone(), self.avatar.downgrade());
+            glib::spawn_future_local(async move {
+                if let (Some(avatar), Some(texture)) = (avatar.upgrade(), load_texture(&net, &photo, None).await) {
+                    avatar.set_custom_image(Some(texture.upcast_ref::<gdk::Paintable>()));
+                }
+            });
+        }
+    }
+}
+
+/// Page id and check mark per channel row.
+type ChannelChecks = Rc<std::cell::RefCell<Vec<(Option<String>, gtk::Image)>>>;
+
+/// The channels of the signed-in account, for listeners whose library sits on
+/// a brand account rather than the Google account itself.
+fn channel_row(win: &Rc<MainWindow>, ctx: &Rc<App>, account_row: AccountRow) -> adw::ExpanderRow {
+    let expander = adw::ExpanderRow::builder().title("Channel").subtitle("Loading channels…").build();
+    let client = ctx.net.client().clone();
+    let handle = ctx.net.spawn(async move { client.accounts().await });
+    let (expander_w, win, ctx) = (expander.downgrade(), Rc::downgrade(win), ctx.clone());
+    glib::spawn_future_local(async move {
+        let outcome = handle.await;
+        let Some(expander) = expander_w.upgrade() else { return };
+        let accounts = match outcome {
+            Ok(Ok(accounts)) if accounts.len() > 1 => accounts,
+            Ok(Ok(_)) => {
+                expander.set_subtitle("This account has no other channels");
+                expander.set_enable_expansion(false);
+                return;
+            }
+            other => {
+                tracing::warn!(?other, "account list failed");
+                expander.set_subtitle("Could not load the channels");
+                expander.set_enable_expansion(false);
+                return;
+            }
+        };
+        let current = ctx.net.client().channel();
+        let chosen = accounts.iter().find(|a| a.page_id == current).or_else(|| accounts.iter().find(|a| a.selected));
+        expander.set_subtitle(&glib::markup_escape_text(chosen.map(|a| a.name.as_str()).unwrap_or("Google account")));
+        // The check marks, so a switch can move them.
+        let checks: ChannelChecks = Rc::new(std::cell::RefCell::new(Vec::new()));
+        for account in accounts {
+            let subtitle = account.handle.clone().or(account.byline.clone()).unwrap_or_default();
+            let row = adw::ActionRow::builder().title(glib::markup_escape_text(&account.name)).subtitle(glib::markup_escape_text(&subtitle)).activatable(true).build();
+            let avatar = adw::Avatar::new(32, Some(&account.name), true);
+            row.add_prefix(&avatar);
+            if let Some(url) = account.photo_url.clone() {
+                let (net, avatar) = (ctx.net.clone(), avatar.downgrade());
+                glib::spawn_future_local(async move {
+                    if let (Some(avatar), Some(texture)) = (avatar.upgrade(), load_texture(&net, &url, None).await) {
+                        avatar.set_custom_image(Some(texture.upcast_ref::<gdk::Paintable>()));
+                    }
+                });
+            }
+            let check = gtk::Image::from_icon_name("object-select-symbolic");
+            check.set_opacity(if account.page_id == current { 1.0 } else { 0.0 });
+            row.add_suffix(&check);
+            checks.borrow_mut().push((account.page_id.clone(), check));
+            let (ctx, win, expander_w, page_id, name, checks, account_row) = (ctx.clone(), win.clone(), expander.downgrade(), account.page_id.clone(), account.name.clone(), checks.clone(), account_row.clone());
+            row.connect_activated(move |_| {
+                if ctx.net.client().channel() == page_id {
+                    return;
+                }
+                let (checks, account_row, ctx_c) = (checks.clone(), account_row.clone(), ctx.clone());
+                switch_channel(&ctx, win.clone(), expander_w.clone(), page_id.clone(), name.clone(), move |chosen, info| {
+                    for (id, check) in checks.borrow().iter() {
+                        check.set_opacity(if *id == chosen { 1.0 } else { 0.0 });
+                    }
+                    // The row above shows who the app acts as now.
+                    account_row.show(&ctx_c, info);
+                });
+            });
+            expander.add_row(&row);
+        }
+    });
+    expander
+}
+
+fn switch_channel(ctx: &Rc<App>, win: std::rc::Weak<MainWindow>, expander: glib::WeakRef<adw::ExpanderRow>, page_id: Option<String>, name: String, mark: impl Fn(Option<String>, &crate::net::ytmusic::AccountInfo) + 'static) {
+    save(ctx, crate::net::ytmusic::CHANNEL_PREF, page_id.clone().unwrap_or_default());
+    let client = ctx.net.client().clone();
+    let chosen = page_id.clone();
+    let handle = ctx.net.spawn(async move { client.set_channel(page_id).await });
+    let ctx = ctx.clone();
+    glib::spawn_future_local(async move {
+        let outcome = handle.await;
+        let Some(win) = win.upgrade() else { return };
+        match outcome {
+            Ok(Ok(crate::net::ytmusic::AuthState::Authenticated(info))) => {
+                tracing::info!(channel = %name, "switched channel");
+                if let Some(expander) = expander.upgrade() {
+                    expander.set_subtitle(&glib::markup_escape_text(&name));
+                    expander.set_expanded(false);
+                }
+                mark(chosen, &info);
+                ctx.net.caches().clear_library_ids();
+                win.add_toast(&format!("Now using {name}"));
+                win.library_page().clear();
+                win.library_page().load_library(false);
+            }
+            other => {
+                tracing::warn!(?other, "channel switch failed");
+                win.add_toast("Could not switch the channel");
+            }
+        }
+    });
 }
 
 // -- application ----------------------------------------------------------------
@@ -158,6 +284,33 @@ fn application_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGro
         debug_row.connect_active_notify(move |row| crate::bootstrap::set_debug_logs(&ctx.paths, row.is_active()));
     }
     group.add(&debug_row);
+
+    let notes_row = switch_row("Release Notes After Updates", "Open what's new once for each new version", pref_bool(ctx, crate::ui::release_notes::SHOW_PREF, true));
+    {
+        let ctx = ctx.clone();
+        notes_row.connect_active_notify(move |row| save(&ctx, crate::ui::release_notes::SHOW_PREF, row.is_active()));
+    }
+    group.add(&notes_row);
+
+    let donate_row = switch_row("Donation Prompts", "Show the Ko-fi banner under the release notes", pref_bool(ctx, crate::ui::release_notes::DONATION_PREF, true));
+    {
+        let ctx = ctx.clone();
+        donate_row.connect_active_notify(move |row| save(&ctx, crate::ui::release_notes::DONATION_PREF, row.is_active()));
+    }
+    group.add(&donate_row);
+
+    let reset_row = adw::ActionRow::builder().title("Reset Mixtapes").subtitle("Sign out, clear settings and caches, and run the setup again. Downloads and playlists kept on this device stay.").build();
+    let reset_btn = gtk::Button::builder().label("Reset…").valign(gtk::Align::Center).css_classes(["destructive-action"]).build();
+    {
+        let (win, ctx) = (Rc::downgrade(win), ctx.clone());
+        reset_btn.connect_clicked(move |button| {
+            if let Some(win) = win.upgrade() {
+                confirm_reset(button.upcast_ref(), &win, &ctx);
+            }
+        });
+    }
+    reset_row.add_suffix(&reset_btn);
+    group.add(&reset_row);
 
     let stream_row = adw::ActionRow::builder().title("Stream Info (Debug)").subtitle("Show format, protocol and seek range of the current stream").activatable(true).build();
     stream_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
@@ -235,6 +388,52 @@ fn application_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGro
     }
     group.add(&history_row);
     group
+}
+
+/// Ask, then wipe the profile and relaunch into the setup wizard.
+fn confirm_reset(anchor: &gtk::Widget, win: &Rc<MainWindow>, ctx: &Rc<App>) {
+    let dialog = adw::AlertDialog::builder()
+        .heading("Reset Mixtapes?")
+        .body("This signs you out, clears your settings and every cache, and restarts into the setup. Downloaded songs and the playlists and likes kept on this device stay.")
+        .build();
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("reset", "Reset and Restart");
+    dialog.set_response_appearance("reset", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    let (win, ctx) = (win.clone(), ctx.clone());
+    dialog.connect_response(Some("reset"), move |_, _| reset_and_restart(&win, &ctx));
+    dialog.present(Some(anchor));
+}
+
+fn reset_and_restart(win: &Rc<MainWindow>, ctx: &Rc<App>) {
+    let client = ctx.net.client().clone();
+    let handle = ctx.net.spawn(async move { client.logout().await });
+    let (win, ctx) = (win.clone(), ctx.clone());
+    glib::spawn_future_local(async move {
+        let _ = handle.await;
+        ctx.player.stop();
+        let paths = &ctx.paths;
+        let _ = std::fs::remove_file(&paths.prefs_file);
+        for name in ["library_cache.json", "cache.db", "scrobbler.json", "scrobble_queue.json", "album_track_counts.json", "noseek_vids.json"] {
+            let _ = std::fs::remove_file(paths.data_dir.join(name));
+        }
+        let _ = std::fs::remove_dir_all(paths.data_dir.join("playlist_cache"));
+        let _ = std::fs::remove_dir_all(&paths.cache_dir);
+        tracing::info!("profile reset, relaunching");
+        // The new process starts as a fresh install and opens the wizard.
+        match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).spawn()) {
+            Ok(_) => {
+                if let Some(app) = win.window().application() {
+                    app.quit();
+                }
+            }
+            Err(err) => {
+                tracing::warn!(%err, "relaunch failed");
+                win.add_toast("Reset done. Start Mixtapes again to run the setup.");
+            }
+        }
+    });
 }
 
 // -- appearance -------------------------------------------------------------------

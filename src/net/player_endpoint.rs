@@ -79,6 +79,17 @@ fn pick_format(formats: &[Format]) -> Option<&Format> {
     formats.iter().max_by_key(|f| (f.is_opus(), f.bitrate))
 }
 
+/// The audio-only media playlist of an HLS master: the `EXT-X-MEDIA` line with
+/// a URI, the AAC-LC rendition (itag 234) over the low-bitrate HE-AAC one (233).
+fn audio_rendition(master: &str) -> Option<String> {
+    let uris: Vec<&str> = master
+        .lines()
+        .filter(|l| l.starts_with("#EXT-X-MEDIA:") && l.contains("URI=\""))
+        .filter_map(|l| l.split("URI=\"").nth(1).and_then(|rest| rest.split('"').next()))
+        .collect();
+    uris.iter().find(|u| u.contains("/itag/234/")).or_else(|| uris.first()).map(|u| u.to_string())
+}
+
 /// Why the player refused, in the words it used. None when it is playable.
 fn refusal(response: &Value) -> Option<String> {
     let status = response.pointer("/playabilityStatus/status").and_then(Value::as_str).unwrap_or("missing");
@@ -173,6 +184,32 @@ impl PlayerEndpointResolver {
         if response.pointer("/videoDetails/videoId").and_then(Value::as_str).is_some_and(|id| id != video_id.as_str()) {
             return Err("answered for a different video".to_owned());
         }
+        // A live stream has no file to probe. Its adaptive entries are segment
+        // endpoints, so the HLS manifest is what plays, through hlsdemux.
+        if response.pointer("/videoDetails/isLive").and_then(Value::as_bool).unwrap_or(false) {
+            let manifest = response.pointer("/streamingData/hlsManifestUrl").and_then(Value::as_str).ok_or("live stream without an HLS manifest")?;
+            // The master lists video variants with the audio as separate renditions.
+            // Playing the audio rendition alone keeps the video stream out of the pipeline.
+            let uri = match self.http.get(manifest).send().await.and_then(|r| r.error_for_status()) {
+                Ok(resp) => resp.text().await.ok().and_then(|master| audio_rendition(&master)).unwrap_or_else(|| manifest.to_owned()),
+                Err(err) => {
+                    tracing::debug!(%err, "live master manifest not fetched, playing it whole");
+                    manifest.to_owned()
+                }
+            };
+            return Ok(StreamInfo {
+                uri,
+                format_id: Some("hls".to_owned()),
+                protocol: Some("m3u8".to_owned()),
+                ext: Some("m3u8".to_owned()),
+                acodec: None,
+                title: response.pointer("/videoDetails/title").and_then(Value::as_str).map(str::to_owned),
+                uploader: response.pointer("/videoDetails/author").and_then(Value::as_str).map(str::to_owned),
+                thumbnail: None,
+                is_local: false,
+                from_cache: false,
+            });
+        }
         let formats = audio_formats(&response);
         let format = pick_format(&formats).ok_or("no direct audio url")?;
         self.probe(format).await?;
@@ -202,13 +239,22 @@ impl StreamResolver for PlayerEndpointResolver {
     fn resolve(&self, video_id: VideoId, auth: Option<HttpAuth>) -> BoxFuture<'_, Result<StreamInfo, ResolveError>> {
         Box::pin(async move {
             if let Some(uri) = self.cache.get(&video_id).await {
-                return Ok(StreamInfo { uri, from_cache: true, ..StreamInfo::default() });
+                // A live broadcast's segment endpoint plays one fragment and stops. Older
+                // builds cached those. A cached playlist is fine but is not kept either.
+                if uri.contains("yt_live_broadcast") || crate::audio::is_live_uri(&uri) {
+                    self.cache.invalidate(&video_id).await;
+                } else {
+                    return Ok(StreamInfo { uri, from_cache: true, ..StreamInfo::default() });
+                }
             }
             let started = Instant::now();
             match self.resolve_native(&video_id).await {
                 Ok(info) => {
                     tracing::debug!(%video_id, itag = ?info.format_id, took_ms = started.elapsed().as_millis() as u64, "resolved through the player endpoint");
-                    self.cache.put(&video_id, &info.uri).await;
+                    // A live playlist is resolved fresh each time: it expires, and the queue must know it is live.
+                    if info.protocol.as_deref() != Some("m3u8") {
+                        self.cache.put(&video_id, &info.uri).await;
+                    }
                     Ok(info)
                 }
                 Err(reason) => {
@@ -256,6 +302,43 @@ mod tests {
         let formats: Vec<Format> = audio_formats(&response()).into_iter().filter(|f| !f.is_opus()).collect();
         assert_eq!(pick_format(&formats).unwrap().itag, 140);
         assert!(pick_format(&[]).is_none());
+    }
+
+    /// Hits the network. `cargo test -- --ignored live_stream_response --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_stream_response() {
+        struct Never;
+        impl StreamResolver for Never {
+            fn resolve(&self, _: VideoId, _: Option<HttpAuth>) -> BoxFuture<'_, Result<StreamInfo, ResolveError>> {
+                Box::pin(async { Err(ResolveError::Unavailable("fallback was reached".into())) })
+            }
+            fn invalidate(&self, _: &VideoId) -> BoxFuture<'_, ()> {
+                Box::pin(async {})
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let resolver = PlayerEndpointResolver::new(&Paths::for_tests(dir.path()), Arc::new(Never));
+        let http = resolver.http.clone();
+        let visitor = resolver.visitor_data().await.unwrap();
+        let response: Value = http.post(PLAYER_URL).header("User-Agent", CLIENT_USER_AGENT).header("X-YouTube-Client-Name", CLIENT_ID).header("X-YouTube-Client-Version", CLIENT_VERSION).header("X-Goog-Visitor-Id", &visitor).json(&player_body("h4hy2Gn-FVE", &visitor)).send().await.unwrap().json().await.unwrap();
+        println!("playability {:?}", response.pointer("/playabilityStatus/status"));
+        println!("isLive {:?} isLiveContent {:?}", response.pointer("/videoDetails/isLive"), response.pointer("/videoDetails/isLiveContent"));
+        println!("streamingData keys {:?}", response.get("streamingData").and_then(Value::as_object).map(|o| o.keys().cloned().collect::<Vec<_>>()));
+        println!("hls {:?}", response.pointer("/streamingData/hlsManifestUrl").and_then(Value::as_str).map(|u| &u[..u.len().min(80)]));
+        println!("audio formats {}", audio_formats(&response).len());
+        let info = resolver.resolve(VideoId("h4hy2Gn-FVE".to_owned()), None).await.unwrap();
+        assert_eq!(info.protocol.as_deref(), Some("m3u8"));
+        assert!(info.uri.contains("hls_playlist"), "audio rendition, not the master: {}", info.uri);
+        std::fs::write("/tmp/mx/hls.txt", &info.uri).unwrap();
+    }
+
+    #[test]
+    fn the_aac_lc_audio_rendition_is_picked_from_the_master() {
+        let master = "#EXTM3U\n#EXT-X-MEDIA:URI=\"https://m/hls_playlist/itag/233/x\",TYPE=AUDIO,GROUP-ID=\"233\"\n#EXT-X-MEDIA:URI=\"https://m/hls_playlist/itag/234/x\",TYPE=AUDIO,GROUP-ID=\"234\"\n#EXT-X-STREAM-INF:BANDWIDTH=1,AUDIO=\"234\"\nhttps://m/video\n";
+        assert_eq!(audio_rendition(master).as_deref(), Some("https://m/hls_playlist/itag/234/x"));
+        assert_eq!(audio_rendition("#EXTM3U\n#EXT-X-MEDIA:URI=\"https://only\"\n").as_deref(), Some("https://only"));
+        assert_eq!(audio_rendition("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nhttps://m/video\n"), None);
     }
 
     #[test]

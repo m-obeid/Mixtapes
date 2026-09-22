@@ -172,11 +172,98 @@ commit 180c3fe, along with `src/`.
 
 `widgets/card_grid.rs` holds two layout managers instead of a tick callback. `CardGridLayout` sizes the cards inside measure(VERTICAL, width), so the heights that pass reports already account for the new cover size and a resize paints once; sizing after allocation left the cards a frame behind the window and the grid flickered while dragging, which is the pitfall media_card.py's CardWrapLayout documents. `CardGrid` is the widget that carries it. `CardLayout` is CardBinLayout: a card's width is its size request and its height is measured against that width, so a strip never pulls a short row apart.
 
+## First launch and release notes
+
+`ui/onboarding.rs` is the setup wizard: an `adw::Dialog` over the main window
+with a `NavigationView` of four steps. Welcome, then the account step, which
+opens the login window and moves on when `YtMusic::login` succeeds, asking
+for the channel first when the account has more than one, then a short list of switches
+(Discord presence, scrobbling, dynamic accent, blurred background, release
+notes) that write the same prefs the Preferences dialog does, then a done page
+with the Ko-fi row. `onboarding::pending` decides on a fresh install: no
+saved session and no `login_skipped` pref. An empty `prefs.json` is no test,
+since startup writes a lyrics default before the check. A signed-in user is
+an existing one, marked done on the spot, so an update never opens the
+wizard over an account. Closing the dialog at any step
+counts as finished. While the wizard is pending, `check_auth_on_startup` does
+not open the login dialog on its own.
+
+`ui/release_notes.rs` compiles the metainfo in with `include_str!` and parses
+the newest `<release>` with roxmltree, so the About dialog, the notes and the
+packages agree on one version string. `release_notes::due` compares the pref
+`last_seen_version` against it and opens the notes once per version, unless
+the `show_release_notes` switch is off (under Preferences, Application, and in
+the wizard). The dialog is also in the main menu as What's New. It follows
+Bazaar's layout: the notes scroll in the content, and a purple donation banner
+sits in the toolbar view's bottom bar when the dialog is wide, and scrolls
+with the notes under 500 sp, where a pinned banner covered half the sheet. An
+`adw::Breakpoint` on the dialog moves it, so the dialog's own width decides
+and a live resize follows. The banner has its own gradient
+(`.donation-banner` in style.css), so a dynamic accent never recolors it. The
+banner has Ko-fi and GitHub Sponsors buttons and goes away with the
+`show_donation_prompt` pref, under Preferences, Application. A release
+entry holds two lists: the first is the highlights the dialog shows, the
+second the smaller changes and fixes, which appear as a count next to the
+Full Release Notes link. The notes
+viewport has `scroll-to-focus` off, because the first focusable widget is the
+link button at the bottom and a dialog focuses it on open. The
+`external-link`, `ko-fi` and `github` symbolic icons come from ChromaLeon
+(GPL-3, github.com/Fabito02/ChromaLeon), since Adwaita has none. A new icon
+also needs a line in `resources/resources.gresource.xml`, or GTK draws the
+missing-image blob.
+
+Demo hooks: `MIXTAPES_DEMO_ONBOARDING=ms[,page]` and
+`MIXTAPES_DEMO_WHATS_NEW=ms`. They write `onboarding_done` and
+`last_seen_version` into the real prefs when the dialog closes.
+
+## Without an account
+
+`local_library.rs` keeps playlists and likes on this device, in `local.db`
+under the data dir: SQLite through rusqlite, one row per track with the
+`Track` as JSON in its row. A like or an added song is one row written, not a
+file rewritten, and a list of thousands stays cheap. The pages render the
+tracks from the rows, so everything works offline. Ids start with `LOCAL_`, and `LOCAL_LIKED` is the likes list.
+The pages route on that prefix rather than on the auth state: a signed-in
+listener keeps local playlists too, listed after the account's own, and a
+signed-out one sees Downloads, Liked Songs and the local playlists as the
+whole library. `ui/playlist_ops.rs` is the one add-to-playlist path for the
+song menu, the queue and the playlist page, so callers hand over `Track`s
+rather than ids and a local target stores them. The playlist page opens a
+local id straight from the store (`load_local`), and its remove, edit and
+delete paths write there. Likes without a session go through
+`Player::set_like_status` into the store, and `LikeButton::set_data` reads the
+store when there is no session. The New Playlist dialog offers "Save To" when
+signed in and creates locally when signed out.
+
+Preferences, Application has Reset Mixtapes: after a confirmation it signs
+out, removes `prefs.json`, the library and album caches, the playlist cache
+and the whole cache dir, then spawns the same executable and quits. The new
+process is a fresh install and opens the wizard. Downloads and `local.db`
+stay, and the dialog says so.
+
+Sign-in is remembered as declined: closing the login window or leaving the
+wizard signed out sets `login_skipped`, and `check_auth_on_startup` stops
+opening the dialog until a sign-in clears it. The avatar menu and Preferences
+still offer Sign In.
+
+Brand accounts: `YtMusic::accounts` reads `account/accounts_list`, every
+`accountItem` with its `pageIdToken`, and `set_channel` rebuilds the crate
+client with `with_user(page_id)`, which is `onBehalfOfUser` in the InnerTube
+context, then re-validates so the account info follows. The choice persists
+as `account_page_id` in prefs and is applied at startup. Preferences, Account
+has a Channel expander with the list, and a switch redraws the account row
+above it from the new account info. The setup wizard asks the same question
+right after a sign-in when the account has more than one channel, and skips
+the step otherwise. The About dialog's issue link goes to the GitHub tracker;
+Ko-fi lives in the release notes and the wizard only. Untested against a real brand account:
+the parser has a unit test on the known response shape, the switch itself
+needs a listener with one.
+
 ## Connectivity
 
 `net/online.rs` ports the probe in ui/utils.py. Gio.NetworkMonitor stays silent for some transitions and calls a link available when DNS still fails, so the window only lets it trigger a probe after a 1.5 s settle; a TCP connect to music.youtube.com:443 on tokio decides, and a 5 s tick backstops the monitor (every tick while offline, every 30 s while online). `is_online` never blocks: it answers from the last probe, optimistic before the first, and honours the `force_offline` pref that both apps share. Listeners fire once per real transition: `MainWindow::apply_network_state` toasts, reloads Library, Explore and Home when back online and revalidates the session, and greys the library lists and reloads Explore and Home into their offline screens when the link drops. Home and Explore own the load state machine from their Python pages (`load_home_data`, `load_explore_data`): one fetch at a time, offline straight to the status page, transient errors retried with growing delays before a Retry button.
 
-`ui/login.rs` is login.py: an `adw::Window` with three `ViewStack` pages, a WebKitGTK view of the Google sign-in page (`resource-load-started` sniffs the browse request headers for SAPISID, falling back to the cookie jar), a browser.json import, and a manual header paste. Every path ends in `YtMusic::login`, which writes headers_auth.json, rebuilds the crate client and flips the auth watch channel. `MainWindow::check_auth_on_startup` waits half a second after presenting and opens the dialog when the saved session is missing or invalid and the network monitor reports connectivity, otherwise it toasts. `MediaObject` in `state/media_object.rs` wraps `MediaItem` so stores and expressions see GObject properties without the widgets becoming subclasses.
+`ui/login.rs` is the sign-in window: an `adw::Window` holding a WebKitGTK view of the Google sign-in page (`resource-load-started` sniffs the browse request headers for SAPISID, falling back to the cookie jar) and a Skip button. The Python app's browser.json and pasted-header tabs are gone, along with the manual "I'm logged in" button. Every path ends in `YtMusic::login`, which writes headers_auth.json, rebuilds the crate client and flips the auth watch channel. `MainWindow::check_auth_on_startup` waits half a second after presenting and opens the dialog when the saved session is missing or invalid and the network monitor reports connectivity, otherwise it toasts. On a fresh install the setup wizard replaces it, see First launch and release notes. The browser and manual pages use icons the Adwaita theme ships (`document-open-symbolic`, `edit-paste-symbolic`), since `web-browser-symbolic` is legacy and missing on most systems. `MediaObject` in `state/media_object.rs` wraps `MediaItem` so stores and expressions see GObject properties without the widgets becoming subclasses.
 
 ## Playlist and album pages
 
@@ -301,6 +388,69 @@ watch playlist for the shelf's last track is fetched, and when it lands the
 stamp is replaced by the real playlist id so the infinite extender takes over.
 A listener who has moved on is left alone: the reply is dropped unless the
 stamp is still the one on the queue.
+
+## What is JSON and what is not
+
+Audit of 2026-09-22. Stores that grow with use and are written often live in
+SQLite: downloads (`library.db`), local playlists and likes (`local.db`), and
+album track counts (`cache.db`, one row per album; it was a JSON map
+rewritten whole on the GTK thread each time an album was opened). Stores that
+stay JSON are small or written once per fetch: `prefs.json` and `config.json`
+(a few dozen keys), `headers_auth.json`, `library_cache.json` (one write per
+library load, on a thread), `scrobble_queue.json` (grows only offline), the
+per-playlist files in `playlist_cache/` (one write per fetch, on a thread),
+the per-track files in `streams/` and `lyrics/` (one file each, bounded by an
+eviction scan that now runs every 20 to 25 writes rather than on each). The
+history cache is a JSON blob in one `library.db` row, bounded by what YouTube
+returns. The cover cache is JPEG and PNG files, pruned at startup.
+
+## Live streams
+
+The "Listen together" shelf is stations: live streams, marked by a
+`liveBadgeRenderer` in a renderer's `subtitleBadges` or `badges`.
+`net::items::is_live` reads that into `MediaItem::is_live` and
+`Track::is_live`. The mark is a symbolic icon, as the rest of the interface:
+`MediaItem::kind_icon` answers the antenna (`triangular-antenna-symbolic`,
+accent colored) for a live item and `kind_word` says "Live", so rows show
+"Live · Artist" behind the antenna and cards put the antenna before the
+subtitle. No red badge. The player endpoint answers a live id with `isLive` and an
+`hlsManifestUrl`; its adaptive entries are segment endpoints, not files, so
+`resolve_native` skips the range probe and answers with protocol `m3u8`. The
+master manifest lists video variants with the audio as separate
+`EXT-X-MEDIA` renditions (itag 233 HE-AAC, 234 AAC-LC), so `audio_rendition`
+picks the AAC-LC media playlist and that is what plays: no video stream in
+the pipeline, a fraction of the bandwidth. The whole master is the fallback
+when the fetch fails. GStreamer plays it through hlsdemux (checked with
+gst-launch for 25 s on a live station; hlsdemux2 declines under playbin and
+decodebin moves on to the legacy element). `PlayerState::live` follows the track: both transports show
+LIVE instead of times, keep the pause button live rather than a spinner, and
+leave the seek bar insensitive, since a live stream has no duration.
+
+Two things ended a station after a few seconds. First, playbin fires
+`about-to-finish` at the end of every HLS fragment, and the gapless code took
+that as the cue to switch to the armed next track. The audio thread now knows
+a live URI (`audio::is_live_uri`: a googlevideo `/manifest/hls_` address or a
+`.m3u8` path) and neither arms nor honors a switch while one plays, and the
+player does not arm around a live track either. Second, the stream cache had
+kept a segment endpoint (`source=yt_live_broadcast`) from before the HLS
+path existed, which plays one fragment and stops. Live playlists are not
+cached, since they expire and the bars need to know the stream is live, and
+a cached entry of that shape is dropped on read. Checked with the demo
+(`MIXTAPES_DEMO_URI="" MIXTAPES_DEMO_VIDEO=<live id>,<song>
+MIXTAPES_DEMO_AUTOPLAY=1`): a station played for a minute with no switch.
+
+## Home straplines and long listens
+
+A shelf header carries a `strapline`, the small line the web feed shows above
+the title ("Similar to", "Stations", the account name over Listen again).
+`HomeSection::strapline` keeps it and the heading shows it in capitals over
+the title, beside the strapline thumbnail when there is one. "Long listens"
+used to be dropped as a podcast shelf. It is hour-long mixes, so it stays and
+uses the quick-picks tile grid, four rows high: `add_speed_dial` takes a
+title, a strapline and a row count, and the page keeps one `Dial` per grid so
+the compact layout resizes both. Durations past an hour read `1:59:59`.
+`MIXTAPES_DEMO_SCROLL=ms,<heading>` scrolls the visible page to a heading
+for a snapshot.
 
 ## Listening history
 
@@ -662,6 +812,17 @@ metainfo and the app icon. `rustypipe-botguard` still ships beside it
 (`/usr/lib/mixtapes/bin`, or `/app/bin`), and yt-dlp with Node stays a runtime
 dependency for the fallback resolver and downloads.
 
+Test builds on 2026-09-22, from a committed copy of the tree in /tmp so a
+PKGBUILD's `git+file://` source and the manifest's `type: dir` see the same
+files: the AUR package and the Flatpak both build and install the expected
+files. The PKGBUILD needs `options=(!lto)`: makepkg's `-flto` goes into the C
+build of aws-lc-sys (the crypto library under rustls) and the final link then
+misses every `aws_lc_*` symbol. The Flatpak needs the Rust and Node SDK
+extensions on the branch the GNOME 50 SDK declares (`version = 25.08` in its
+metadata), not on 50. The Nix flake builds too, once `openssl` is in its
+build inputs: the ytmusicapi crate's reqwest uses native TLS, so openssl-sys
+compiles even though the app's own client is rustls.
+
 ## Stutter, measured with sysprof
 
 Method: a release build with `-C force-frame-pointers=yes` in its own target
@@ -715,6 +876,10 @@ build stalls for its own reasons.
 - The queue model was replaced whole on every sync, 951 rows at each track
   start, and the list view showed blank rows while scrolling to the playing
   one. `sync_queue_model` splices only the changed span and updates kept
-  entries in place. Not reproduced, so not confirmed.
+  entries in place. That alone did not cure it. The second suspect is the
+  `FOCUS` flag on `scroll_to`: on a phone the panel sits inside the drawer's
+  own viewport, which follows focus and shifted the whole list under the list
+  view, so rows the view believed off screen were on screen and blank until a
+  scroll. The flag is gone. Random enough that neither fix is confirmed.
 - Open: a skip still shows one long frame gap in release (several hundred ms)
   that the frame phases do not account for.

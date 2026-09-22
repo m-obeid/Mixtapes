@@ -9,12 +9,14 @@ url="https://github.com/m-obeid/Mixtapes"
 license=('GPL3')
 # Note: webkitgtk-6.0 must come from the 'extra' repository. The CachyOS build
 # is known to malfunction with Mixtapes - see the install hook below.
-depends=('gtk4' 'libadwaita' 'webkitgtk-6.0' 'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'sqlite' 'yt-dlp' 'yt-dlp-ejs' 'nodejs')
+depends=('gtk4' 'libadwaita' 'webkitgtk-6.0' 'openssl' 'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'sqlite' 'yt-dlp' 'yt-dlp-ejs' 'nodejs')
 makedepends=('git' 'cargo')
 optdepends=('ffmpeg: for downloading music')
 provides=("mixtapes")
 conflicts=("mixtapes")
 install="${pkgname}.install"
+# makepkg's -flto breaks the link of aws-lc-sys, the C library under rustls.
+options=(!lto)
 _botguard_ver=0.1.2
 source=("${pkgname}::git+https://github.com/m-obeid/Mixtapes.git")
 source_x86_64=("rustypipe-botguard-${_botguard_ver}-x86_64.tar.xz::https://codeberg.org/ThetaDev/rustypipe-botguard/releases/download/v${_botguard_ver}/rustypipe-botguard-v${_botguard_ver}-x86_64-unknown-linux-gnu.tar.xz")

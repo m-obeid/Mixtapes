@@ -99,7 +99,7 @@ impl MainWindow {
     pub fn new(app: &adw::Application, ctx: &Rc<App>) -> Rc<Self> {
         let player = ctx.player.clone();
         let state = player.state().clone();
-        let ui = UiContext::new(player.clone(), ctx.net.clone(), ctx.paths.clone(), ctx.downloads.clone(), ctx.lyrics.clone());
+        let ui = UiContext::new(player.clone(), ctx.net.clone(), ctx.paths.clone(), ctx.downloads.clone(), ctx.lyrics.clone(), ctx.local.clone());
         if let Some(events) = ctx.download_events.borrow_mut().take() {
             ui.pump_downloads(events);
         }
@@ -390,12 +390,30 @@ impl MainWindow {
         install_close_handler(&this.window, ctx);
         this.install_network_state();
         this.sync_player_bar_visibility();
-        this.check_auth_on_startup();
+        this.check_auth_on_startup(ctx);
         this
     }
 
     pub fn window(&self) -> &adw::ApplicationWindow {
         &self.window
+    }
+
+    pub fn ui(&self) -> &Rc<UiContext> {
+        &self.ui
+    }
+
+    pub fn library_page(&self) -> Rc<LibraryPage> {
+        self.library.clone()
+    }
+
+    /// First launch: the setup wizard. After an update: the release notes, once.
+    pub fn welcome_or_release_notes(self: &Rc<Self>, ctx: &Rc<App>) {
+        if crate::ui::onboarding::pending(ctx) {
+            tracing::info!("fresh install, opening the setup wizard");
+            crate::ui::onboarding::present(self, ctx, None);
+        } else if crate::ui::release_notes::due(ctx) {
+            crate::ui::release_notes::present(self, ctx);
+        }
     }
 
     pub fn present(&self) {
@@ -602,7 +620,11 @@ impl MainWindow {
     }
 
     /// Port of check_auth: offer the login dialog when there is no session, or the saved one died.
-    fn check_auth_on_startup(self: &Rc<Self>) {
+    fn check_auth_on_startup(self: &Rc<Self>, ctx: &Rc<App>) {
+        // The setup wizard has its own sign-in step.
+        if crate::ui::onboarding::pending(ctx) {
+            return;
+        }
         let client = self.ui.net.client().clone();
         let weak = Rc::downgrade(self);
         let mut auth = client.subscribe_auth();
@@ -611,6 +633,10 @@ impl MainWindow {
                 let state = auth.borrow_and_update().clone();
                 let Some(w) = weak.upgrade() else { break };
                 match state {
+                    AuthState::Anonymous if crate::ui::login::login_skipped(&w.ui.paths) => {
+                        tracing::info!("no session, sign-in skipped earlier, not asking");
+                        break;
+                    }
                     AuthState::Anonymous | AuthState::Invalid(_) => {
                         if w.ui.online.is_online() {
                             tracing::info!(?state, "no valid session, showing login dialog");
@@ -1434,7 +1460,11 @@ impl MainWindow {
         let library = self.library.clone();
         self.ui
             .nav
-            .set_library_refresh(move || library.load_library(false));
+            .set_library_refresh(move || {
+                // Local changes show at once. Signed in, the account's lists reload too.
+                library.refresh_local_items();
+                library.load_library(false);
+            });
         {
             let library = self.library.clone();
             self.ui.nav.set_library_card_refresh(move |playlist_id| library.invalidate_card(playlist_id));
@@ -1501,10 +1531,12 @@ impl MainWindow {
         // Sidebar visibility mirrors into the bar and the window control placement.
         {
             let player_bar = self.player_bar.clone();
+            let cover_view = self.cover_view.clone();
             let header_bar = header_bar.clone();
             let queue_header = queue_header.clone();
             let sync = move |split_view: &adw::OverlaySplitView| {
                 player_bar.set_queue_active(split_view.shows_sidebar());
+                cover_view.set_queue_active(split_view.shows_sidebar());
                 apply_window_controls_position(split_view, &header_bar, &queue_header);
             };
             sync(&self.split_view);
@@ -2066,6 +2098,7 @@ fn build_primary_menu(window: &adw::ApplicationWindow) -> gtk::MenuButton {
     app_section.append(Some("Downloaded Songs"), Some("win.open-downloads"));
     app_section.append(Some("Keyboard Shortcuts"), Some("win.shortcuts"));
     app_section.append(Some("Preferences"), Some("win.preferences"));
+    app_section.append(Some("What's New"), Some("win.whats-new"));
     app_section.append(Some("About Mixtapes"), Some("win.about"));
     app_section.append(Some("Quit"), Some("win.quit"));
     menu.append_section(None, &app_section);
@@ -2400,12 +2433,25 @@ fn install_actions(
                     .application_icon(APP_ID)
                     .application_name(APP_NAME)
                     .developer_name("POCOGuy")
-                    .version(env!("CARGO_PKG_VERSION"))
+                    .version(crate::ui::release_notes::current_version())
+                    .issue_url("https://github.com/m-obeid/Mixtapes/issues")
                     .website("https://www.pocoguy.com/#!/mixtapes")
                     .copyright("© 2026 POCOGuy")
                     .license_type(gtk::License::Gpl30)
                     .build()
                     .present(Some(&win));
+            }),
+        );
+    }
+    {
+        let ctx = ctx.clone();
+        add(
+            "whats-new",
+            true,
+            Box::new(move || {
+                if let Some(win) = ctx.window.borrow().as_ref() {
+                    crate::ui::release_notes::present(win, &ctx);
+                }
             }),
         );
     }

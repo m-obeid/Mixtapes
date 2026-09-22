@@ -55,10 +55,18 @@ fn disk_path(url: &str, target: Option<u32>) -> Option<PathBuf> {
     Some(dir.join(format!("{}-{}", address_hash(url), target.unwrap_or(0))))
 }
 
+/// The cache file name for a cover address. YouTube re-signs `sqp` and `rs` on
+/// every request, so those two go. The rest of the query stays: a mix cover is
+/// `image/mixart?r=<payload>`, and without its query every mix is one picture.
 fn address_hash(url: &str) -> String {
     use sha1::{Digest, Sha1};
-    let address = url.split('?').next().unwrap_or(url);
-    Sha1::digest(address.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+    Sha1::digest(unsigned_address(url).as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn unsigned_address(url: &str) -> String {
+    let Some((path, query)) = url.split_once('?') else { return url.to_owned() };
+    let kept: Vec<&str> = query.split('&').filter(|param| !param.starts_with("sqp=") && !param.starts_with("rs=")).collect();
+    if kept.is_empty() { path.to_owned() } else { format!("{path}?{}", kept.join("&")) }
 }
 
 /// Through a sibling tmp file, so a partial write is never read back as a cover.
@@ -491,4 +499,17 @@ fn remember(url: &str, texture: &gdk::Texture) {
         }
         cache.insert(url.to_owned(), texture.clone());
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mix_covers_keep_their_query_in_the_cache_key() {
+        assert_eq!(unsigned_address("https://i.ytimg.com/vi/x/hqdefault.jpg?sqp=abc&rs=def"), "https://i.ytimg.com/vi/x/hqdefault.jpg");
+        assert_eq!(unsigned_address("https://music.youtube.com/image/mixart?r=AAA"), "https://music.youtube.com/image/mixart?r=AAA");
+        assert_ne!(address_hash("https://music.youtube.com/image/mixart?r=AAA"), address_hash("https://music.youtube.com/image/mixart?r=BBB"));
+        assert_eq!(address_hash("https://i.ytimg.com/vi/x/hqdefault.jpg?sqp=1"), address_hash("https://i.ytimg.com/vi/x/hqdefault.jpg?sqp=2"));
+    }
 }

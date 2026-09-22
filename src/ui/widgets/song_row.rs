@@ -172,6 +172,7 @@ impl SongRow {
         } else {
             self.subtitle_box.append(&kind_subtitle(item, true, false));
         }
+        // A live stream has no length. Its subtitle carries the antenna instead.
         self.duration.set_label(&item.duration_text().unwrap_or_default());
         self.explicit.set_visible(item.explicit);
         self.dl_icon.set_visible(item.kind == ItemKind::Song && self.ctx.downloads.is_downloaded(&item.id));

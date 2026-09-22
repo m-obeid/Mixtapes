@@ -386,6 +386,11 @@ listview.playlist-view > row:disabled {
   border-radius: 16px;
 }
 
+/* A live stream: the antenna icon beside the subtitle, in the accent color. */
+.live-icon {
+  color: @accent_color;
+}
+
 .explicit-badge {
   background-color: alpha(currentColor, 0.15);
   color: inherit;
@@ -416,6 +421,13 @@ listview.playlist-view > row:disabled {
 
 .home-section-title {
   font-weight: 800;
+}
+
+/* The small line above a section title, as the web feed has it: "SIMILAR TO", "STATIONS". */
+.home-section-strapline {
+  font-size: 0.75em;
+  font-weight: 600;
+  opacity: 0.7;
 }
 
 /* Spotify-style speed-dial tile: thumbnail on the left, title on the right. */
@@ -811,3 +823,24 @@ window > windowhandle,
 .player-visualizer {
   transform: translateY(10px);
 }
+
+/* The donation banner under the release notes. Its own purple, so a dynamic accent never washes it out. */
+.donation-banner {
+  padding: 24px 18px 30px;
+  background: linear-gradient(180deg, #613583 0%, #9141ac 100%);
+  color: white;
+}
+
+.donation-banner label {
+  color: white;
+}
+
+.donation-banner button.pill {
+  background-color: alpha(white, 0.2);
+  color: white;
+}
+
+.donation-banner button.pill:hover {
+  background-color: alpha(white, 0.3);
+}
+

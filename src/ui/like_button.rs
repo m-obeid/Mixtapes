@@ -109,6 +109,15 @@ impl LikeButton {
             return;
         };
         let client = self.player.net().client();
+        // Without a session the local library is the only source of likes.
+        if !client.auth_state().has_session() {
+            let liked = self.player.local().is_liked(video_id.as_str());
+            self.video_id.replace(Some(video_id));
+            self.status.set(if liked { LikeStatus::Like } else { LikeStatus::Indifferent });
+            self.update_icon();
+            self.button.set_visible(true);
+            return;
+        }
         // What this session has seen wins: it is the only thing that knows
         // about a like the listener has just made.
         let resolved = match (client.known_like_status(video_id.as_str()), status) {

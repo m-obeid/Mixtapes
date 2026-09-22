@@ -168,6 +168,7 @@ impl StreamResolver for DemoResolver {
 /// Disk cache of resolved URIs. Layout matches player/cache.py: `<id>.json` with url + timestamp.
 pub struct StreamCache {
     dir: PathBuf,
+    puts: std::sync::atomic::AtomicUsize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -178,10 +179,11 @@ struct CacheEntry {
 
 impl StreamCache {
     const MAX_ENTRIES: usize = 500;
+    const EVICT_EVERY: usize = 20;
     const TTL: Duration = Duration::from_secs(5 * 3600);
 
     pub fn new(dir: PathBuf) -> Self {
-        Self { dir }
+        Self { dir, puts: std::sync::atomic::AtomicUsize::new(0) }
     }
 
     fn path_for(&self, video_id: &VideoId) -> PathBuf {
@@ -209,8 +211,11 @@ impl StreamCache {
                 tracing::warn!(%err, %video_id, "stream cache write failed");
             }
         }
-        let dir = self.dir.clone();
-        let _ = tokio::task::spawn_blocking(move || evict_old(&dir, Self::MAX_ENTRIES)).await;
+        // A scan of 500 files per resolved track is waste. Every so often holds the cap.
+        if self.puts.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % Self::EVICT_EVERY == 0 {
+            let dir = self.dir.clone();
+            let _ = tokio::task::spawn_blocking(move || evict_old(&dir, Self::MAX_ENTRIES)).await;
+        }
     }
 
     pub async fn invalidate(&self, video_id: &VideoId) {

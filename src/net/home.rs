@@ -26,6 +26,8 @@ pub struct HomeSection {
     pub items: Vec<MediaItem>,
     /// The seed's picture on a "Based on ..." row, which the heading shows.
     pub strapline_thumb: Option<String>,
+    /// The small line above the title: "Similar to", "Discover the hits", "Stations".
+    pub strapline: Option<String>,
 }
 
 /// The feed, paged until `limit` sections have arrived.
@@ -67,13 +69,19 @@ fn parse_section(shelf: &Value) -> Option<HomeSection> {
     let title = header.and_then(|h| owned_at(h, "/title/runs/0/text"))?;
     let items = array_at(renderer, "/contents").iter().filter_map(|entry| parse_mixed_item(entry, &title)).collect();
     let strapline_thumb = header.and_then(|h| last_thumbnail_url(array_at(h, "/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")));
-    Some(HomeSection { title, items, strapline_thumb })
+    let strapline = header.and_then(|h| owned_at(h, "/strapline/runs/0/text")).filter(|s| !s.trim().is_empty());
+    Some(HomeSection { title, items, strapline_thumb, strapline })
 }
 
-/// Shelves the feed shows that no page here draws.
+/// Shelves the feed shows that no page here draws. Long listens stay: those are mixes, not podcasts.
 pub fn is_podcast_section(title: &str) -> bool {
     let low = title.to_lowercase();
-    ["shows for you", "long listen", "podcast", "episode"].iter().any(|k| low.contains(k))
+    ["shows for you", "podcast", "episode"].iter().any(|k| low.contains(k))
+}
+
+/// The "Long listens" shelf: hour-long mixes, shown as rows with their length.
+pub fn is_long_listens(title: &str) -> bool {
+    title.to_lowercase().contains("long listen")
 }
 
 /// Port of home.py _classify_section: the four rows that lead the feed,
@@ -186,6 +194,7 @@ mod tests {
         let mut header = json!({ "musicCarouselShelfBasicHeaderRenderer": { "title": { "runs": [{ "text": title }] } } });
         if strapline {
             header["musicCarouselShelfBasicHeaderRenderer"]["thumbnail"] = json!({ "musicThumbnailRenderer": { "thumbnail": { "thumbnails": [{ "url": "seed.jpg" }] } } });
+            header["musicCarouselShelfBasicHeaderRenderer"]["strapline"] = json!({ "runs": [{ "text": "SIMILAR TO" }] });
         }
         json!({ "musicCarouselShelfRenderer": { "header": header, "contents": contents } })
     }
@@ -195,11 +204,26 @@ mod tests {
     }
 
     #[test]
+    fn a_station_card_is_marked_live() {
+        let mut station = card("DECO*27 - MV STATION", None, "");
+        station["musicTwoRowItemRenderer"]["navigationEndpoint"] = json!({ "watchEndpoint": { "videoId": "h4hy2Gn-FVE" } });
+        station["musicTwoRowItemRenderer"]["subtitleBadges"] = json!([{ "liveBadgeRenderer": { "label": { "runs": [{ "text": "Live" }] } } }]);
+        let response = feed(vec![shelf("Listen together", json!([station]), false)]);
+        let sections = parse_home(&response);
+        let item = &sections[0].items[0];
+        assert!(item.is_live);
+        assert_eq!(item.id, "h4hy2Gn-FVE");
+        assert_eq!(item.duration_text(), None);
+        assert!(item.to_track().unwrap().is_live);
+    }
+
+    #[test]
     fn a_shelf_keeps_its_strapline_art_beside_its_cards() {
         let response = feed(vec![shelf("Based on Boards of Canada", json!([card("Geogaddi", Some("MUSIC_PAGE_TYPE_ALBUM"), "MPREb_1")]), true)]);
         let sections = parse_home(&response);
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].strapline_thumb.as_deref(), Some("seed.jpg"));
+        assert_eq!(sections[0].strapline.as_deref(), Some("SIMILAR TO"));
         assert_eq!(sections[0].items[0].kind, ItemKind::Album);
     }
 
@@ -243,7 +267,7 @@ mod tests {
             let kinds: Vec<String> = section.items.iter().take(3).map(|i| format!("{:?}", i.kind)).collect();
             println!("{:<34} {:>3} items  strapline={:?} {:?}", section.title.chars().take(32).collect::<String>(), section.items.len(), section.strapline_thumb.is_some(), kinds);
             for item in section.items.iter().take(2) {
-                println!("      {:?} {:<28} id={:<24} by {:<22} detail={:?}", item.kind, item.title.chars().take(26).collect::<String>(), item.id, item.artists_text().chars().take(20).collect::<String>(), item.detail());
+                println!("      {:?} {:<28} id={:<24} thumb={:?}", item.kind, item.title.chars().take(26).collect::<String>(), item.id, item.thumb);
             }
         }
         let (dial, ordered) = arrange(sections);

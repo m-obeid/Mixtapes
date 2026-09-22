@@ -26,6 +26,7 @@
   <url type="homepage">https://github.com/m-obeid/Mixtapes</url>
   <url type="bugtracker">https://github.com/m-obeid/Mixtapes/issues</url>
   <url type="vcs-browser">https://github.com/m-obeid/Mixtapes</url>
+  <url type="donation">https://ko-fi.com/M8P12091FB</url>
 
   <supports>
     <control>pointing</control>
@@ -92,9 +93,52 @@
 
   <releases>
 
+    <release version="2026-09-22.0" date="2026-09-22">
+      <description>
+        <p>Mixtapes is now written in Rust. The whole app was rebuilt from the ground up over the past weeks, with every feature of the Python version carried over, and it is faster, lighter and quicker to start in every way we could measure.</p>
+        <ul>
+          <li>Rewritten in Rust. One native binary replaces the Python app and its interpreter, GTK bindings and package list</li>
+          <li>Songs start in under a second. A new player client fetches streams directly, with yt-dlp kept only as a fallback</li>
+          <li>Less memory. The interface holds on to far less while you browse, and covers are cached on disk at the size they are shown</li>
+          <li>Smoother. The cover view, the queue, window resizing and track changes drop far fewer frames</li>
+          <li>Works offline: your library, covers and downloaded songs stay browsable and searchable without a connection</li>
+          <li>A setup wizard on first launch: sign in with Google or skip, then pick the settings people ask about most</li>
+          <li>This What's New dialog, once per update. Both it and the donation banner switch off under Preferences</li>
+          <li>Playlists and likes without a Google account. They live on this device, in the library beside Downloads, and every menu that adds to a playlist offers them</li>
+          <li>Live stations from the home feed play, marked with an antenna. The player shows LIVE instead of a length</li>
+        </ul>
+        <ul>
+          <li>Switch to a brand account: Preferences, Account lists the channels of the signed-in account</li>
+          <li>Skipping the sign-in is remembered. Startup stops asking until you sign in from the menu</li>
+          <li>Home sections show their small heading line, such as "Similar to" and "Stations", and the Long listens shelf is back as tiles</li>
+          <li>Lyrics with effects, romanization and the provider queue, scrobbling to Last.fm and ListenBrainz, Discord Rich Presence, dynamic accent and tint, download formats and folder layouts: all ported</li>
+          <li>Seeking works on uploaded songs that are not downloaded</li>
+          <li>Albums show as EP or Single from the card, matching the opened page</li>
+          <li>The default window is wide enough for the queue and lyrics side by side</li>
+          <li>Paxsenix lyrics removed, the service is gone</li>
+          <li>Fix: the visualizer no longer freezes on the previous track when a song changes</li>
+          <li>Fix: artists in the Uploads tab no longer read "x songs subscribers"</li>
+          <li>Fix: the library page no longer empties itself while a saved session is being checked</li>
+          <li>Fix: the player bar docks to the drawer on phones, so a tap or a pull opens the player</li>
+          <li>Fix: covers cached on disk are used offline and recover once you are back online</li>
+          <li>On battery, the audio pipeline no longer wakes a discrete GPU to probe a picture decoder</li>
+          <li>The login window uses icons every system ships</li>
+        </ul>
+      </description>
+    </release>
+
     <release version="2026-09-12.0" date="2026-09-12">
       <description>
         <p>A release aimed at small screens. The mini player is now a drawer you pull up with your finger, every card in the app comes from one template so pages line up at any width, and a long run of memory work cuts what the interface holds on to while you browse.</p>
+        <ul>
+          <li>On phones, the mini player is a drawer you pull up. Drag it and the player follows your finger, snapping open or back when you let go</li>
+          <li>The player drawer shows the visualizer, and its Player, Queue and Lyrics views switch through a toggle group</li>
+          <li>Every music card comes from one template, so sizes, spacing and labels match across Home, Library, Search and Explore</li>
+          <li>Redesigned desktop cover view, with a dislike button beside like</li>
+          <li>Search returns more results, groups them better, and marks the category each one came from</li>
+          <li>Emphasized lyrics glow, with the wave sized to how long the word is held</li>
+          <li>A long run of memory work: a large leak when opening playlists is gone, and views release their covers once they leave the screen</li>
+        </ul>
         <ul>
           <li>The mini player is a pullable drawer. Drag it up and the player follows your finger, snapping open or back when you let go. Tapping it still works</li>
           <li>The player drawer shows the visualizer, and its Player, Queue and Lyrics views switch through a toggle group</li>

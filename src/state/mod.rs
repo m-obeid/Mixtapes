@@ -47,6 +47,9 @@ mod imp {
         pub source_video_id: RefCell<String>,
         #[property(get, set)]
         pub like_status: RefCell<String>,
+        /// The playing track is a live stream: no length, no seeking.
+        #[property(get, set)]
+        pub live: Cell<bool>,
 
         #[property(get, set, minimum = 0.0, maximum = 1.0, default = 1.0)]
         pub volume: Cell<f64>,

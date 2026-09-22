@@ -15,6 +15,7 @@ use tokio::task::AbortHandle;
 use crate::audio::{AudioCommand, AudioEvent, AudioEvents, AudioHandle, AudioTelemetry};
 use crate::model::{LikeStatus, PlaybackStatus, RepeatMode, StreamInfo, Track, VideoId};
 use crate::downloads::Downloads;
+use crate::local_library::LocalLibrary;
 use crate::net::NetHandle;
 use crate::paths::Paths;
 use crate::net::ytmusic::AuthState;
@@ -68,6 +69,8 @@ pub struct Player {
     net: NetHandle,
     /// What is already on disk, checked before a stream is resolved.
     downloads: Arc<Downloads>,
+    /// Likes without an account land here instead of on the network.
+    local: Arc<LocalLibrary>,
     /// The stream behind what is playing, for the Stream Info panel.
     loaded: RefCell<Option<StreamInfo>>,
     /// Allocator for load generations. Monotonic, never reused.
@@ -105,10 +108,11 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(net: NetHandle, downloads: Arc<Downloads>, audio: AudioHandle, events: AudioEvents, paths: &Paths) -> Rc<Self> {
+    pub fn new(net: NetHandle, downloads: Arc<Downloads>, local: Arc<LocalLibrary>, audio: AudioHandle, events: AudioEvents, paths: &Paths) -> Rc<Self> {
         Rc::new_cyclic(|me| Self {
             me: me.clone(),
             downloads,
+            local,
             loaded: RefCell::new(None),
             state: PlayerState::new(),
             queue: RefCell::new(Queue::default()),
@@ -279,9 +283,22 @@ impl Player {
         self.position_mark.set(None);
     }
 
+    pub fn local(&self) -> &Arc<LocalLibrary> {
+        &self.local
+    }
+
     /// Rate a track. Applies locally at once, reverts if the server rejects it.
+    /// Without a session the like lives in the local library instead.
     pub fn set_like_status(&self, video_id: VideoId, status: LikeStatus) {
         let client = self.net.client().clone();
+        if !client.auth_state().has_session() {
+            let known = self.queue.borrow().tracks().iter().find(|t| t.video_id == video_id).cloned();
+            let track = self.local.track_or_stub(&video_id, known);
+            self.local.set_liked(&track, status == LikeStatus::Like);
+            self.apply_like_locally(&video_id, status);
+            self.state.emit_queue_changed();
+            return;
+        }
         let previous = client
             .known_like_status(video_id.as_str())
             .or_else(|| {
@@ -708,6 +725,10 @@ impl Player {
             };
             match result {
                 Ok(info) => {
+                    // The bars show LIVE from the stream itself, so a queue entry that did not know still gets it.
+                    if !arm_only && crate::audio::is_live_uri(&info.uri) {
+                        player.state.set_live(true);
+                    }
                     *player.loaded.borrow_mut() = Some(info.clone());
                     if !info.from_cache {
                         player.refine_metadata(
@@ -783,10 +804,15 @@ impl Player {
     fn arm_gapless(&self) {
         let next = {
             let q = self.queue.borrow();
+            // A live stream fires about-to-finish a few seconds in, at the end of each
+            // fragment, and playbin would take the armed track as its cue to switch.
+            if q.current_track().is_some_and(|t| t.is_live) {
+                return;
+            }
             q.armable_next().and_then(|i| q.track_at(i).map(|t| (i, t.clone())))
         };
         let Some((index, track)) = next else { return };
-        if track.is_upload() {
+        if track.is_upload() || track.is_live {
             return;
         }
         let generation = self.alloc_generation();
@@ -980,10 +1006,12 @@ impl Player {
                 self.state.set_video_id(t.video_id.0.clone());
                 self.state
                     .set_like_status(t.like_status.as_str().to_owned());
+                self.state.set_live(t.is_live);
             }
             None => {
                 self.state.set_title(String::new());
                 self.state.set_artist(String::new());
+                self.state.set_live(false);
                 self.state.set_thumbnail_url(String::new());
                 self.state.set_video_id(String::new());
                 self.state.set_like_status("INDIFFERENT".to_owned());

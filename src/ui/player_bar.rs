@@ -407,7 +407,7 @@ impl PlayerBar {
                 }
             });
         }
-        for prop in ["status", "duration", "queue-length"] {
+        for prop in ["status", "duration", "queue-length", "live"] {
             let weak = Rc::downgrade(self);
             state.connect_notify_local(Some(prop), move |_, _| {
                 if let Some(bar) = weak.upgrade() {
@@ -513,9 +513,12 @@ impl PlayerBar {
         let status = state.status();
         let duration = state.duration();
         let has_queue = state.queue_length() > 0;
+        // A live stream never reports a length. That is not still loading.
+        let live = state.live();
 
         let (child, icon, sensitive, scale_sensitive) = match status {
             PlaybackStatus::Loading => ("spinner", "media-playback-start-symbolic", false, false),
+            PlaybackStatus::Playing if live => ("icon", "media-playback-pause-symbolic", true, false),
             PlaybackStatus::Playing if duration <= 0.0 => {
                 ("spinner", "media-playback-pause-symbolic", false, false)
             }
@@ -524,7 +527,7 @@ impl PlayerBar {
                 "icon",
                 "media-playback-start-symbolic",
                 true,
-                duration > 0.0,
+                duration > 0.0 && !live,
             ),
             PlaybackStatus::Stopped => ("icon", "media-playback-start-symbolic", has_queue, false),
         };
@@ -560,6 +563,12 @@ impl PlayerBar {
         let state = self.state();
         let position = state.position();
         let duration = state.duration();
+        if state.live() {
+            self.scale.set_range(0.0, 1.0);
+            self.scale.set_value(0.0);
+            self.timings.set_label("LIVE");
+            return;
+        }
         self.scale.set_range(0.0, duration.max(1.0));
         self.scale.set_value(position.min(duration.max(1.0)));
         self.timings.set_label(&format!(
@@ -713,7 +722,7 @@ impl PlayerBar {
     }
 
     fn seek(&self, seconds: f64) {
-        if self.state().duration() <= 0.0 {
+        if self.state().duration() <= 0.0 || self.state().live() {
             return;
         }
         self.last_seek.set(Some(Instant::now()));

@@ -29,10 +29,35 @@ impl LibraryIds {
 /// `{videoId: number}` behind a metric sort.
 pub type SortMetric = HashMap<String, i64>;
 
-const ALBUM_TRACKS_FILE: &str = "album_track_counts.json";
+/// Album track counts, one row each, in a small SQLite file. It used to be one
+/// JSON map rewritten whole on the GTK thread every time an album was opened.
+const ALBUM_TRACKS_DB: &str = "cache.db";
+const ALBUM_TRACKS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS album_track_counts (album_id TEXT PRIMARY KEY, track_count INTEGER NOT NULL)";
+/// The JSON file the counts lived in before, read once and folded in.
+const ALBUM_TRACKS_LEGACY: &str = "album_track_counts.json";
 
-fn read_album_tracks(path: &std::path::Path) -> HashMap<String, u32> {
-    std::fs::read(path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+fn open_album_tracks(paths: &Paths) -> (Option<rusqlite::Connection>, HashMap<String, u32>) {
+    let db = rusqlite::Connection::open(paths.data_dir.join(ALBUM_TRACKS_DB)).and_then(|db| db.execute_batch(ALBUM_TRACKS_SCHEMA).map(|_| db));
+    let db = match db {
+        Ok(db) => db,
+        Err(err) => {
+            tracing::warn!(%err, "album count cache unavailable");
+            return (None, HashMap::new());
+        }
+    };
+    let mut counts: HashMap<String, u32> = db
+        .prepare("SELECT album_id, track_count FROM album_track_counts")
+        .and_then(|mut stmt| stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u32))).map(|rows| rows.flatten().collect()))
+        .unwrap_or_default();
+    let legacy = paths.data_dir.join(ALBUM_TRACKS_LEGACY);
+    if let Some(old) = std::fs::read(&legacy).ok().and_then(|bytes| serde_json::from_slice::<HashMap<String, u32>>(&bytes).ok()) {
+        for (id, count) in old {
+            let _ = db.execute("INSERT OR IGNORE INTO album_track_counts (album_id, track_count) VALUES (?1, ?2)", rusqlite::params![id, count as i64]);
+            counts.entry(id).or_insert(count);
+        }
+        let _ = std::fs::remove_file(legacy);
+    }
+    (Some(db), counts)
 }
 
 pub struct Caches {
@@ -44,12 +69,13 @@ pub struct Caches {
     subscribed_artists: Mutex<HashSet<String>>,
     /// Track counts of albums that were opened, by browse id. Saved to disk.
     album_tracks: Mutex<HashMap<String, u32>>,
-    album_tracks_file: std::path::PathBuf,
+    album_tracks_db: Mutex<Option<rusqlite::Connection>>,
 }
 
 impl Caches {
     pub fn new(paths: &Paths) -> Self {
-        Self { disk: PlaylistDiskCache::new(paths), playlist_tracks: Mutex::default(), sort_metrics: Mutex::default(), library_ids: Mutex::default(), library_playlists: Mutex::default(), subscribed_artists: Mutex::default(), album_tracks: Mutex::new(read_album_tracks(&paths.data_dir.join(ALBUM_TRACKS_FILE))), album_tracks_file: paths.data_dir.join(ALBUM_TRACKS_FILE) }
+        let (db, counts) = open_album_tracks(paths);
+        Self { disk: PlaylistDiskCache::new(paths), playlist_tracks: Mutex::default(), sort_metrics: Mutex::default(), library_ids: Mutex::default(), library_playlists: Mutex::default(), subscribed_artists: Mutex::default(), album_tracks: Mutex::new(counts), album_tracks_db: Mutex::new(db) }
     }
 
     /// "Single", "EP" or "Album" by track count, the rule the album page uses.
@@ -68,20 +94,13 @@ impl Caches {
     }
 
     pub fn set_album_track_count(&self, album_id: &str, track_count: u32) {
-        let snapshot = {
-            let mut counts = self.album_tracks.lock().unwrap();
-            if track_count == 0 || counts.insert(album_id.to_owned(), track_count) == Some(track_count) {
-                return;
+        if track_count == 0 || self.album_tracks.lock().unwrap().insert(album_id.to_owned(), track_count) == Some(track_count) {
+            return;
+        }
+        if let Some(db) = self.album_tracks_db.lock().unwrap().as_ref() {
+            if let Err(err) = db.execute("INSERT OR REPLACE INTO album_track_counts (album_id, track_count) VALUES (?1, ?2)", rusqlite::params![album_id, track_count as i64]) {
+                tracing::debug!(%err, "album track count not saved");
             }
-            counts.clone()
-        };
-        match serde_json::to_vec(&snapshot) {
-            Ok(bytes) => {
-                if let Err(err) = std::fs::write(&self.album_tracks_file, bytes) {
-                    tracing::debug!(%err, "album track counts not saved");
-                }
-            }
-            Err(err) => tracing::debug!(%err, "album track counts not encoded"),
         }
     }
 

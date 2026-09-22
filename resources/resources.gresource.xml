@@ -9,6 +9,9 @@
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/triangular-antenna-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/heart-broken-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/heart-filled-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">hicolor/scalable/actions/external-link-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">hicolor/scalable/actions/ko-fi-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">hicolor/scalable/actions/github-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/heart-outline-thick-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/apps/com.pocoguy.Muse.svg</file>
     <file preprocess="xml-stripblanks">hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg</file>

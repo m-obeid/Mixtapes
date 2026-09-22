@@ -106,7 +106,11 @@ pub struct LyricsCache {
     /// Held across each read-modify-write, so providers finishing together do not lose a result.
     writer: Mutex<()>,
     max_entries: usize,
+    writes: std::sync::atomic::AtomicUsize,
 }
+
+/// Writes between two eviction scans of the cache folder.
+const EVICT_EVERY: usize = 25;
 
 #[allow(dead_code)]
 impl LyricsCache {
@@ -115,7 +119,7 @@ impl LyricsCache {
         if let Err(err) = std::fs::create_dir_all(&dir) {
             tracing::warn!(?dir, %err, "could not create the lyrics cache directory");
         }
-        Self { dir, mem: Mutex::new(HashMap::new()), writer: Mutex::new(()), max_entries: MAX_ENTRIES }
+        Self { dir, mem: Mutex::new(HashMap::new()), writer: Mutex::new(()), max_entries: MAX_ENTRIES, writes: std::sync::atomic::AtomicUsize::new(0) }
     }
 
     fn path_for(&self, video_id: &str) -> PathBuf {
@@ -269,8 +273,17 @@ impl LyricsCache {
             tracing::warn!(%err, video_id, "lyrics cache write failed");
             return;
         }
-        self.mem.lock().unwrap().insert(video_id.to_owned(), entry);
-        self.evict_old();
+        let in_memory = {
+            let mut mem = self.mem.lock().unwrap();
+            mem.insert(video_id.to_owned(), entry);
+            mem.len()
+        };
+        // A scan of the folder per write is waste. Every so often is enough to hold
+        // the cap, and at once when this session alone has written past it.
+        let nth = self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if nth % EVICT_EVERY == 0 || in_memory > self.max_entries {
+            self.evict_old();
+        }
     }
 
     fn evict_old(&self) {

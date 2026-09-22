@@ -33,8 +33,18 @@ const SPEED_TILE_TEXT_INSET_COMPACT: i32 = 22;
 const SPEED_DIAL_PEEK: i32 = 32;
 const SPEED_DIAL_ROWS: i32 = 3;
 const SPEED_DIAL_ROWS_COMPACT: i32 = 4;
+const LONG_LISTENS_ROWS: i32 = 4;
 const SPEED_DIAL_SPACING: i32 = 8;
 const LABEL_NATURAL_MAX_CHARS: i32 = 12;
+
+/// A grid of tiles that scrolls sideways, `rows` high.
+struct Dial {
+    tiles: Vec<SpeedTile>,
+    wrap: adw::WrapBox,
+    scroll: Rc<HorizontalScrollBox>,
+    rows: i32,
+    rows_compact: i32,
+}
 
 struct SpeedTile {
     tile: gtk::Button,
@@ -55,9 +65,8 @@ pub struct HomePage {
     /// Each card strip with its cards, so a layout flip resizes one strip at a time.
     strips: RefCell<Vec<(gtk::Box, Vec<Rc<MediaCard>>)>>,
     scrollers: RefCell<Vec<Rc<HorizontalScrollBox>>>,
-    speed_tiles: RefCell<Vec<SpeedTile>>,
-    speed_wrap: RefCell<Option<adw::WrapBox>>,
-    speed_scroll: RefCell<Option<Rc<HorizontalScrollBox>>>,
+    /// The tile grids: Quick picks, and Long listens laid out the same way.
+    dials: RefCell<Vec<Dial>>,
     /// The widgets whose rows read the `compact` class. Card strips stay out, so a flip restyles no card.
     compact_scopes: RefCell<Vec<gtk::Widget>>,
     /// The items of each rendered shelf, in the order they are drawn.
@@ -90,9 +99,7 @@ impl HomePage {
             strips: RefCell::new(Vec::new()),
             compact_scopes: RefCell::new(Vec::new()),
             scrollers: RefCell::new(Vec::new()),
-            speed_tiles: RefCell::new(Vec::new()),
-            speed_wrap: RefCell::new(None),
-            speed_scroll: RefCell::new(None),
+            dials: RefCell::new(Vec::new()),
             shelves: RefCell::new(Vec::new()),
         });
         let weak = Rc::downgrade(&page);
@@ -266,21 +273,24 @@ impl HomePage {
         self.strips.borrow_mut().clear();
         self.compact_scopes.borrow_mut().clear();
         self.scrollers.borrow_mut().clear();
-        self.speed_tiles.borrow_mut().clear();
-        self.speed_wrap.replace(None);
-        self.speed_scroll.replace(None);
+        self.dials.borrow_mut().clear();
         self.shelves.borrow_mut().clear();
 
         let (dial, ordered) = home::arrange(sections);
         if !dial.is_empty() {
             self.shelves.borrow_mut().push(dial.clone());
-            self.add_speed_dial(&dial);
+            self.add_speed_dial("Quick picks", None, None, &dial, SPEED_DIAL_ROWS, SPEED_DIAL_ROWS_COMPACT);
         }
         for section in ordered {
             self.shelves.borrow_mut().push(section.items.clone());
+            // Hour-long mixes, as tiles like the quick picks so the two rows match.
+            if home::is_long_listens(&section.title) {
+                self.add_speed_dial(&section.title, section.strapline.as_deref(), section.strapline_thumb.as_deref(), &section.items, LONG_LISTENS_ROWS, LONG_LISTENS_ROWS);
+                continue;
+            }
             let songs = section.items.iter().filter(|i| i.kind == ItemKind::Song).count();
             let section_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).build();
-            section_box.append(&self.section_header(&section.title, section.strapline_thumb.as_deref()));
+            section_box.append(&self.section_header(&section.title, section.strapline.as_deref(), section.strapline_thumb.as_deref()));
             // A shelf that is mostly songs reads better as a list than as cards.
             if songs >= 3.max((section.items.len() as f64 * 0.66) as usize) {
                 self.add_song_list(&section_box, &section.items);
@@ -294,7 +304,7 @@ impl HomePage {
 
     /// The seed's picture on a "Based on ..." row, the matching icon on the
     /// rows that have one, and nothing in front of the rest.
-    fn section_header(&self, title: &str, strapline_thumb: Option<&str>) -> gtk::Box {
+    fn section_header(&self, title: &str, strapline: Option<&str>, strapline_thumb: Option<&str>) -> gtk::Box {
         let header = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(10).halign(gtk::Align::Start).css_classes(["home-section-header"]).build();
         match strapline_thumb {
             Some(url) => {
@@ -311,26 +321,37 @@ impl HomePage {
                 }
             }
         }
-        header.append(&gtk::Label::builder().label(title).css_classes(["title-2", "home-section-title"]).halign(gtk::Align::Start).valign(gtk::Align::Center).ellipsize(gtk::pango::EllipsizeMode::End).build());
+        let title_label = gtk::Label::builder().label(title).css_classes(["title-2", "home-section-title"]).halign(gtk::Align::Start).valign(gtk::Align::Center).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        match strapline {
+            // The web feed's small line above the title, in capitals like there.
+            Some(strapline) => {
+                let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).build();
+                column.append(&gtk::Label::builder().label(strapline.to_uppercase()).css_classes(["home-section-strapline"]).halign(gtk::Align::Start).xalign(0.0).build());
+                column.append(&title_label);
+                header.append(&column);
+            }
+            None => header.append(&title_label),
+        }
         header
     }
 
     // -- quick picks ------------------------------------------------------
 
-    fn add_speed_dial(self: &Rc<Self>, items: &[MediaItem]) {
+    fn add_speed_dial(self: &Rc<Self>, title: &str, strapline: Option<&str>, strapline_thumb: Option<&str>, items: &[MediaItem], rows: i32, rows_compact: i32) {
         let section_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).css_classes(["home-speed-dial"]).build();
-        section_box.append(&self.section_header("Quick picks", None));
+        section_box.append(&self.section_header(title, strapline, strapline_thumb));
 
         let scroll_box = HorizontalScrollBox::new();
         let wrap = adw::WrapBox::builder().orientation(gtk::Orientation::Vertical).line_homogeneous(true).line_spacing(SPEED_DIAL_SPACING).child_spacing(SPEED_DIAL_SPACING).valign(gtk::Align::Start).build();
         let heights = gtk::SizeGroup::new(gtk::SizeGroupMode::Vertical);
         let pool: Vec<MediaItem> = items.iter().filter(|i| i.kind.is_playable()).cloned().collect();
 
+        let mut tiles = Vec::with_capacity(items.len());
         for item in items {
             let tile = self.build_speed_tile(item, &pool);
             heights.add_widget(&tile.tile);
             wrap.append(&tile.tile);
-            self.speed_tiles.borrow_mut().push(tile);
+            tiles.push(tile);
         }
         scroll_box.set_content(&wrap);
         section_box.append(scroll_box.widget());
@@ -344,8 +365,7 @@ impl HomePage {
             }
         });
         self.add_compact_scope(wrap.upcast_ref());
-        self.speed_wrap.replace(Some(wrap));
-        self.speed_scroll.replace(Some(scroll_box));
+        self.dials.borrow_mut().push(Dial { tiles, wrap, scroll: scroll_box, rows, rows_compact });
         self.feed_box.append(&section_box);
         self.apply_speed_tile_style(self.ctx.compact.get());
         self.sync_speed_dial_height(self.ctx.compact.get());
@@ -390,11 +410,11 @@ impl HomePage {
         SpeedTile { tile, text_col, title, cover }
     }
 
-    fn speed_tile_width(&self, compact: bool) -> i32 {
+    fn speed_tile_width(dial: &Dial, compact: bool) -> i32 {
         if !compact {
             return SPEED_TILE_WIDTH;
         }
-        let viewport = self.speed_scroll.borrow().as_ref().map(|s| s.hadjustment().page_size() as i32).unwrap_or(0);
+        let viewport = dial.scroll.hadjustment().page_size() as i32;
         if viewport <= 0 {
             return SPEED_TILE_WIDTH_COMPACT;
         }
@@ -402,25 +422,27 @@ impl HomePage {
     }
 
     fn apply_speed_tile_style(&self, compact: bool) {
-        let width = self.speed_tile_width(compact);
         let cover = if compact { SPEED_TILE_COVER_COMPACT } else { SPEED_TILE_COVER };
         let inset = if compact { SPEED_TILE_TEXT_INSET_COMPACT } else { SPEED_TILE_TEXT_INSET };
-        for t in self.speed_tiles.borrow().iter() {
-            t.tile.set_size_request(width, -1);
-            t.text_col.set_size_request(width - cover - inset, -1);
-            t.title.set_wrap(!compact);
-            t.title.set_lines(if compact { 1 } else { 2 });
-            t.cover.set_size(cover);
+        for dial in self.dials.borrow().iter() {
+            let width = Self::speed_tile_width(dial, compact);
+            for t in &dial.tiles {
+                t.tile.set_size_request(width, -1);
+                t.text_col.set_size_request(width - cover - inset, -1);
+                t.title.set_wrap(!compact);
+                t.title.set_lines(if compact { 1 } else { 2 });
+                t.cover.set_size(cover);
+            }
         }
     }
 
     fn sync_speed_dial_height(&self, compact: bool) {
-        let Some(wrap) = self.speed_wrap.borrow().clone() else { return };
-        let tiles = self.speed_tiles.borrow();
-        let Some(first) = tiles.first() else { return };
-        let rows = if compact { SPEED_DIAL_ROWS_COMPACT } else { SPEED_DIAL_ROWS };
-        let row = first.tile.measure(gtk::Orientation::Vertical, -1).1;
-        wrap.set_size_request(-1, rows * row + (rows - 1) * SPEED_DIAL_SPACING);
+        for dial in self.dials.borrow().iter() {
+            let Some(first) = dial.tiles.first() else { continue };
+            let rows = if compact { dial.rows_compact } else { dial.rows };
+            let row = first.tile.measure(gtk::Orientation::Vertical, -1).1;
+            dial.wrap.set_size_request(-1, rows * row + (rows - 1) * SPEED_DIAL_SPACING);
+        }
     }
 
     // -- sections ---------------------------------------------------------

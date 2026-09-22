@@ -11,6 +11,7 @@ mod bootstrap;
 mod demo;
 mod discord;
 mod downloads;
+mod local_library;
 mod lyrics;
 mod model;
 mod mpris;
@@ -58,6 +59,8 @@ pub struct App {
     pub lyrics: lyrics::Lyrics,
     /// Discord Rich Presence. A no-op while Discord is not running.
     pub discord: discord::Discord,
+    /// Playlists and likes kept on this device, for listeners without an account.
+    pub local: Arc<local_library::LocalLibrary>,
 }
 
 fn main() -> glib::ExitCode {
@@ -120,8 +123,10 @@ fn main() -> glib::ExitCode {
     let scrobbler = scrobbler::Scrobbler::start(&paths, runtime.handle());
     let lyrics = lyrics::Lyrics::new(&paths, net.client().http().clone(), net.client().clone());
     scrobbler.set_muted(!publish);
+    let local = local_library::LocalLibrary::open(&paths);
     let app_ctx = Rc::new(App {
-        player: Player::new(net.clone(), downloads.clone(), audio, audio_events, &paths),
+        player: Player::new(net.clone(), downloads.clone(), local.clone(), audio, audio_events, &paths),
+        local,
         net,
         downloads,
         download_events: RefCell::new(Some(download_events)),
@@ -200,4 +205,12 @@ fn on_activate(app: &adw::Application, ctx: &Rc<App>) {
     }
     window.present();
     tracing::info!("main window presented");
+    if ctx.demo.is_none() {
+        let (window, ctx) = (Rc::downgrade(&window), ctx.clone());
+        glib::timeout_add_local_once(Duration::from_millis(700), move || {
+            if let Some(window) = window.upgrade() {
+                window.welcome_or_release_notes(&ctx);
+            }
+        });
+    }
 }

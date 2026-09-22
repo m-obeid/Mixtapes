@@ -73,7 +73,7 @@ impl Transport {
 
     fn connect(self: &Rc<Self>) {
         let state = self.player.state();
-        for prop in ["status", "duration", "queue-length"] {
+        for prop in ["status", "duration", "queue-length", "live"] {
             let weak = Rc::downgrade(self);
             state.connect_notify_local(Some(prop), move |_, _| {
                 if let Some(t) = weak.upgrade() {
@@ -129,6 +129,8 @@ impl Transport {
         let duration = state.duration();
         let (child, icon, sensitive) = match status {
             PlaybackStatus::Loading => ("spinner", "media-playback-start-symbolic", false),
+            // A live stream never reports a length. That is not still loading.
+            PlaybackStatus::Playing if state.live() => ("icon", "media-playback-pause-symbolic", true),
             PlaybackStatus::Playing if duration <= 0.0 => ("spinner", "media-playback-pause-symbolic", false),
             PlaybackStatus::Playing => ("icon", "media-playback-pause-symbolic", true),
             PlaybackStatus::Paused => ("icon", "media-playback-start-symbolic", true),
@@ -137,7 +139,7 @@ impl Transport {
         self.play_icon.set_icon_name(Some(icon));
         self.play_stack.set_visible_child_name(child);
         self.play_btn.set_sensitive(sensitive);
-        self.scale.set_sensitive(duration > 0.0 && status != PlaybackStatus::Loading);
+        self.scale.set_sensitive(duration > 0.0 && status != PlaybackStatus::Loading && !state.live());
         if status == PlaybackStatus::Loading {
             self.scale.set_value(0.0);
             self.pos_label.set_label("0:00");
@@ -151,6 +153,13 @@ impl Transport {
         }
         let state = self.player.state();
         let (position, duration) = (state.position(), state.duration());
+        if state.live() {
+            self.scale.set_range(0.0, 1.0);
+            self.scale.set_value(0.0);
+            self.pos_label.set_label("LIVE");
+            self.dur_label.set_label("");
+            return;
+        }
         self.scale.set_range(0.0, duration.max(1.0));
         self.scale.set_value(position.min(duration.max(1.0)));
         self.pos_label.set_label(&format_time(position));

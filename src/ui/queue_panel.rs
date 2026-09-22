@@ -9,14 +9,13 @@ use gtk::{gdk, gio, glib, prelude::*};
 
 use crate::model::RepeatMode;
 use crate::net::library;
-use crate::net::playlists::{self, editable_playlists};
+use crate::net::playlists::editable_playlists;
 use crate::net::ytmusic::AuthState;
 use crate::player::Player;
 use crate::state::QueueEntry;
 use crate::ui::context::UiContext;
 use crate::ui::context_menu::{MenuAction, Section, SongMenuOptions, show_song_menu};
-use crate::ui::toast;
-use crate::ui::widgets::add_to_playlist::{AddToPlaylistPopover, mark_playlist_used};
+use crate::ui::widgets::add_to_playlist::AddToPlaylistPopover;
 
 pub struct QueuePanel {
     root: gtk::Box,
@@ -248,9 +247,11 @@ impl QueuePanel {
             }
             let index = panel.player.state().current_index();
             if index >= 0 && (index as u32) < panel.player.state().queue_length() {
+                // No FOCUS flag: on phones the panel sits in the drawer's viewport, which
+                // follows focus and shifted the list under the list view, leaving blank rows.
                 panel
                     .list
-                    .scroll_to(index as u32, gtk::ListScrollFlags::FOCUS, None);
+                    .scroll_to(index as u32, gtk::ListScrollFlags::NONE, None);
             }
         });
     }
@@ -464,6 +465,10 @@ impl QueuePanel {
     /// only online and only when there is an editable playlist to add to.
     fn refresh_playlists_menu(self: &Rc<Self>) {
         self.more_menu.remove_all();
+        if !self.ctx.local.playlist_items().is_empty() {
+            self.more_menu.append(Some("Add all to Playlist…"), Some("queue.show_add_all_to_playlist"));
+            return;
+        }
         if !self.ctx.online.is_online() {
             return;
         }
@@ -510,37 +515,8 @@ impl QueuePanel {
         });
     }
 
-    /// Port of _do_add_all_to_playlist: every queued id into the chosen playlist.
+    /// Port of _do_add_all_to_playlist: every queued track into the chosen playlist.
     fn add_all_to_playlist(self: &Rc<Self>, playlist_id: &str) {
-        let video_ids: Vec<String> = self
-            .player
-            .queue_tracks()
-            .into_iter()
-            .map(|t| t.video_id.0)
-            .filter(|v| !v.is_empty())
-            .collect();
-        if playlist_id.is_empty() || video_ids.is_empty() {
-            return;
-        }
-        mark_playlist_used(&self.ctx.paths, playlist_id);
-        let api = self.ctx.net.client().api();
-        let count = video_ids.len();
-        let pid = playlist_id.to_owned();
-        let handle = self
-            .ctx
-            .net
-            .spawn(async move { playlists::add_playlist_items(&api, &pid, video_ids, None).await });
-        let weak = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(panel) = weak.upgrade() else { return };
-            match handle.await {
-                Ok(Ok(())) => toast(&panel.root, &format!("Added {count} tracks to playlist")),
-                Ok(Err(err)) => {
-                    tracing::warn!(%err, "queue add to playlist failed");
-                    toast(&panel.root, "Failed to add tracks");
-                }
-                Err(_) => {}
-            }
-        });
+        crate::ui::playlist_ops::add_tracks(&self.ctx, self.root.upcast_ref(), playlist_id.to_owned(), self.player.queue_tracks());
     }
 }

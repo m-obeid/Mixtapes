@@ -110,6 +110,8 @@ pub struct UiContext {
     pub downloads: Arc<Downloads>,
     /// Lyrics providers and their cache, shared by both lyrics views.
     pub lyrics: crate::lyrics::Lyrics,
+    /// Playlists and likes kept on this device.
+    pub local: Arc<crate::local_library::LocalLibrary>,
     pub compact: Cell<bool>,
     compact_listeners: RefCell<Vec<CompactListener>>,
     download_listeners: RefCell<Vec<DownloadListener>>,
@@ -117,7 +119,7 @@ pub struct UiContext {
 }
 
 impl UiContext {
-    pub fn new(player: Rc<Player>, net: NetHandle, paths: Paths, downloads: Arc<Downloads>, lyrics: crate::lyrics::Lyrics) -> Rc<Self> {
+    pub fn new(player: Rc<Player>, net: NetHandle, paths: Paths, downloads: Arc<Downloads>, lyrics: crate::lyrics::Lyrics, local: Arc<crate::local_library::LocalLibrary>) -> Rc<Self> {
         let online = Online::new(net.clone(), paths.clone());
         Rc::new(Self {
             player,
@@ -127,6 +129,7 @@ impl UiContext {
             online,
             downloads,
             lyrics,
+            local,
             compact: Cell::new(false),
             compact_listeners: RefCell::new(Vec::new()),
             download_listeners: RefCell::new(Vec::new()),

@@ -267,6 +267,11 @@ fn joined_names(artists: &[Person]) -> String {
 const VIDEO_TYPE_PATH: &str = "/menu/menuRenderer/items/0/menuNavigationItemRenderer/navigationEndpoint/watchEndpoint/watchEndpointMusicSupportedConfigs/watchEndpointMusicConfig/musicVideoType";
 const BADGE_LABEL: &str = "/badges/0/musicInlineBadgeRenderer/accessibilityData/accessibilityData/label";
 
+/// Whether a renderer carries YouTube's Live badge, in either badge list.
+pub fn is_live(data: &Value) -> bool {
+    ["/badges", "/subtitleBadges"].iter().any(|key| data.pointer(key).and_then(Value::as_array).is_some_and(|list| list.iter().any(|b| b.get("liveBadgeRenderer").is_some())))
+}
+
 // -- playlist and album rows ----------------------------------------------
 
 /// Port of ytmusicapi's parse_playlist_item for a `musicResponsiveListItemRenderer`.
@@ -357,6 +362,7 @@ pub fn parse_playlist_item(data: &Value, is_album: bool, is_collaborative: bool)
         video_type: owned_at(data, VIDEO_TYPE_PATH),
         entity_id: None,
         is_explicit: data.pointer(BADGE_LABEL).is_some(),
+        is_live: is_live(data),
         set_video_id,
         is_available,
         track_number,
@@ -571,6 +577,7 @@ pub fn parse_song_card(data: &Value, section_title: &str) -> Option<MediaItem> {
         views: runs.views,
         duration_seconds: runs.duration.as_deref().and_then(parse_duration),
         explicit: data.pointer(SUBTITLE_BADGE_LABEL).is_some(),
+        is_live: is_live(data),
         ..MediaItem::default()
     };
     let video_type = str_at(data, &format!("/navigationEndpoint/watchEndpoint{MUSIC_VIDEO_TYPE}"));
@@ -637,6 +644,7 @@ pub fn parse_song_row(data: &Value, section_title: &str) -> Option<MediaItem> {
         views: runs.views,
         duration_seconds: runs.duration.as_deref().and_then(parse_duration),
         explicit: data.pointer(BADGE_LABEL).is_some(),
+        is_live: is_live(data),
         ..MediaItem::default()
     };
     let video_type = str_at(data, &format!("{PLAY_ENDPOINT}/watchEndpoint{MUSIC_VIDEO_TYPE}"));

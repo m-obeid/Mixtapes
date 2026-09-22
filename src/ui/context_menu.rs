@@ -160,12 +160,13 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
                 toast(&anchor, "Starting radio...");
             }));
         }
-        let video_ids: Vec<String> = if tracks.is_empty() { if vid.is_empty() { Vec::new() } else { vec![vid.clone()] } } else { tracks.iter().map(|t| t.video_id.0.clone()).collect() };
-        if !video_ids.is_empty() && online && ctx.net.client().is_authenticated() && !hidden("add_to_playlist") {
+        let to_add: Vec<Track> = if tracks.is_empty() { if vid.is_empty() { Vec::new() } else { vec![track.clone()] } } else { tracks.clone() };
+        // A local playlist takes tracks offline and signed out.
+        if !to_add.is_empty() && crate::ui::playlist_ops::can_add_to_playlist(&ctx) && !hidden("add_to_playlist") {
             let anchor = anchor.clone();
-            let label = if multi { format!("Add {} to Playlist…", video_ids.len()) } else { "Add to Playlist…".to_owned() };
+            let label = if multi { format!("Add {} to Playlist…", to_add.len()) } else { "Add to Playlist…".to_owned() };
             builder.add(Section::Actions, &label, "add-to-playlist", false, Rc::new(move || {
-                add_to_playlist_via_popover(&ctx, &anchor, video_ids.clone());
+                add_to_playlist_via_popover(&ctx, &anchor, to_add.clone());
             }));
         }
     }
@@ -218,27 +219,12 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
     builder.build()
 }
 
-/// Port of _add_to_playlist: pick a playlist in the popover, then add on the runtime.
-pub fn add_to_playlist_via_popover(ctx: &Rc<UiContext>, anchor: &gtk::Widget, video_ids: Vec<String>) {
+/// Port of _add_to_playlist: pick a playlist in the popover, then add it where it belongs.
+pub fn add_to_playlist_via_popover(ctx: &Rc<UiContext>, anchor: &gtk::Widget, tracks: Vec<Track>) {
     let ctx_c = ctx.clone();
     let anchor_c = anchor.clone();
     crate::ui::widgets::add_to_playlist::AddToPlaylistPopover::show(ctx, anchor, move |playlist_id| {
-        crate::ui::widgets::add_to_playlist::mark_playlist_used(&ctx_c.paths, &playlist_id);
-        let api = ctx_c.net.client().api();
-        let ids = video_ids.clone();
-        let count = ids.len();
-        let handle = ctx_c.net.spawn(async move { crate::net::playlists::add_playlist_items(&api, &playlist_id, ids, None).await });
-        let anchor = anchor_c.clone();
-        glib::spawn_future_local(async move {
-            match handle.await {
-                Ok(Ok(())) => toast(&anchor, &if count > 1 { format!("Added {count} tracks to playlist") } else { "Added to playlist".to_owned() }),
-                Ok(Err(err)) => {
-                    tracing::warn!(%err, "add to playlist failed");
-                    toast(&anchor, "Failed to add to playlist");
-                }
-                Err(_) => {}
-            }
-        });
+        crate::ui::playlist_ops::add_tracks(&ctx_c, &anchor_c, playlist_id, tracks.clone());
     });
 }
 

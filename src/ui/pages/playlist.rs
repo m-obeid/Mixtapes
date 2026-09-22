@@ -25,7 +25,7 @@ use crate::ui::context::{NavRequest, UiContext};
 use crate::ui::context_menu::{MenuAction, Section, SongMenuOptions, show_song_menu};
 use crate::ui::cover::CoverImage;
 use crate::ui::pages::track_list::{needs_metric, TrackList, SORT_ADDED, SORT_DEFAULT, SORT_VIEWS};
-use crate::ui::widgets::add_to_playlist::{AddToPlaylistPopover, mark_playlist_used};
+use crate::ui::widgets::add_to_playlist::AddToPlaylistPopover;
 use crate::ui::widgets::track_row::{TrackRow, TrackRowHost};
 use crate::ui::{copy_to_clipboard, toast};
 
@@ -679,6 +679,10 @@ impl PlaylistPage {
             self.clear_track_store();
         }
 
+        if crate::local_library::is_local(playlist_id) {
+            self.load_local(playlist_id);
+            return;
+        }
         if !self.ctx.online.is_online() {
             self.load_playlist_offline(playlist_id, initial);
             return;
@@ -733,6 +737,18 @@ impl PlaylistPage {
             self.content_spinner.set_visible(false);
         }
         self.populate_from_disk_cache(playlist_id, None, false);
+    }
+
+    /// A playlist kept on this device: rendered from the store in one go.
+    fn load_local(self: &Rc<Self>, playlist_id: &str) {
+        let Some(details) = self.ctx.local.details(playlist_id) else {
+            self.update_ui(HeaderText { title: "Playlist Not Found".into(), description: String::new(), meta1: "Playlist".into(), meta2: "0 songs".into() }, Vec::new(), Vec::new(), false, Some(0), false);
+            return;
+        };
+        self.is_fully_loaded.set(true);
+        self.is_fully_fetched.set(true);
+        self.tracks.borrow_mut().set(details.tracks.clone());
+        self.apply_fetch(playlist_id, Fetched::Details(Box::new(details)), false);
     }
 
     /// Port of _populate_from_disk_cache: read the cached copy on the
@@ -973,7 +989,7 @@ impl PlaylistPage {
     /// Port of _fetch_playlist_details: pick the endpoint by id shape, fetch
     /// on the runtime, then build the header on the GTK thread.
     fn fetch_playlist_details(self: &Rc<Self>, playlist_id: &str, incremental: bool) {
-        if Self::is_virtual(playlist_id) {
+        if Self::is_virtual(playlist_id) || crate::local_library::is_local(playlist_id) {
             self.is_fully_loaded.set(true);
             self.is_fully_fetched.set(true);
             return;
@@ -1031,10 +1047,15 @@ impl PlaylistPage {
         };
         let is_upload = playlist_id.starts_with("FEmusic_library_privately_owned");
         let is_album = playlist_id.starts_with("MPRE") || playlist_id.starts_with("OLAK");
+        let is_local = crate::local_library::is_local(playlist_id);
         let track_len = details.tracks.len();
         let song_text = if track_len == 1 { "song" } else { "songs" };
 
-        let (count_str, is_owned, author, album_type) = if is_upload {
+        let (count_str, is_owned, author, album_type) = if is_local {
+            // The likes list is yours but not something to rename or delete.
+            let owned = playlist_id != crate::local_library::LIKED_ID;
+            (format!("{track_len} {song_text}"), owned, crate::local_library::HERE.to_owned(), None)
+        } else if is_upload {
             let author = details.author.iter().map(|a| glib::markup_escape_text(&a.name).to_string()).collect::<Vec<_>>().join(", ");
             (format!("{track_len} {song_text}"), false, author, Some("Upload".to_owned()))
         } else if playlist_id == "LM" {
@@ -1074,6 +1095,8 @@ impl PlaylistPage {
             meta1_parts.push(album_type.clone().unwrap_or_else(|| "Album".to_owned()));
         } else if is_upload {
             meta1_parts.push("Upload".to_owned());
+        } else if is_local {
+            meta1_parts.push("Playlist".to_owned());
         } else {
             let privacy = self.privacy_text.borrow().clone().or_else(|| details.privacy.clone());
             meta1_parts.push(privacy.map(capitalize).unwrap_or_else(|| "Playlist".to_owned()));
@@ -1107,7 +1130,7 @@ impl PlaylistPage {
         if !incremental && !is_album && track_count.is_some_and(|count| (track_len as u32) < count) {
             self.start_background_full_fetch();
         }
-        if !incremental {
+        if !incremental && !is_local {
             let mut for_cache = details.clone();
             for_cache.title = title.clone();
             self.schedule_disk_cache_write(self.cache_entry_from(&for_cache, &tracks));
@@ -1143,7 +1166,8 @@ impl PlaylistPage {
         self.sort_row.set_visible(has_tracks && !is_album);
 
         self.is_owned.set(is_owned);
-        let editable = self.ctx.net.client().is_authenticated() && !is_album && is_owned;
+        let local = crate::local_library::is_local(&pid);
+        let editable = (self.ctx.net.client().is_authenticated() || local) && !is_album && is_owned;
         self.is_editable.set(editable);
         let check_id = self.audio_playlist_id.borrow().clone().unwrap_or_else(|| pid.clone());
         self.is_saved_to_library.set(is_owned || self.is_in_library(&check_id));
@@ -1190,12 +1214,10 @@ impl PlaylistPage {
                 self.ctx.net.caches().set_cached_tracks(&pid, tracks.clone());
             }
             if !keep_richer {
-                let mut list = self.tracks.borrow_mut();
-                list.set_rendered(tracks.clone());
-                if list.fetched().is_empty() {
-                    list.set_fetched(tracks.clone());
-                }
-                drop(list);
+                // The fresh list is at least as long as what was rendered from the cache, so
+                // it replaces both views. Leaving the cached `fetched` in place hid songs added
+                // since: the queue came from it, and a click on a new row found no such track.
+                self.tracks.borrow_mut().set(tracks.clone());
                 self.sort_dropdown.set_selected(SORT_DEFAULT);
                 self.populate_tracks_chunked(tracks);
             } else {
@@ -1576,14 +1598,17 @@ impl PlaylistPage {
         queue_section.append(Some("Add to Queue"), Some("page.add_all_to_queue"));
         self.more_menu.append_section(None, &queue_section);
         let authed = self.ctx.net.client().is_authenticated();
-        if authed {
+        let local = self.playlist_id.borrow().as_deref().is_some_and(crate::local_library::is_local);
+        if crate::ui::playlist_ops::can_add_to_playlist(&self.ctx) {
             self.more_menu.append(Some("Add all to Playlist…"), Some("page.show_add_all_to_playlist"));
         }
         if self.ctx.online.is_online() && (self.audio_playlist_id.borrow().is_some() || self.playlist_id.borrow().is_some()) {
             self.more_menu.append(Some("Start Radio"), Some("page.start_radio"));
         }
-        self.more_menu.append(Some("Copy Link"), Some("page.copy_link"));
-        if !is_owned && authed {
+        if !local {
+            self.more_menu.append(Some("Copy Link"), Some("page.copy_link"));
+        }
+        if !is_owned && authed && !local {
             if self.is_saved_to_library.get() {
                 self.more_menu.append(Some("Remove from Library"), Some("page.remove_from_library"));
             } else {
@@ -1648,30 +1673,12 @@ impl PlaylistPage {
     }
 
     fn do_add_all_to_playlist(self: &Rc<Self>, playlist_id: &str) {
-        let video_ids: Vec<String> = self.tracks.borrow().rendered().iter().map(|t| t.video_id.0.clone()).filter(|v| !v.is_empty()).collect();
-        if playlist_id.is_empty() || video_ids.is_empty() {
-            return;
-        }
-        mark_playlist_used(&self.ctx.paths, playlist_id);
-        self.add_to_playlist(playlist_id.to_owned(), video_ids, false);
+        let tracks = self.tracks.borrow().rendered().to_vec();
+        self.add_to_playlist(playlist_id.to_owned(), tracks);
     }
 
-    fn add_to_playlist(self: &Rc<Self>, playlist_id: String, video_ids: Vec<String>, _selection: bool) {
-        let api = self.ctx.net.client().api();
-        let count = video_ids.len();
-        let handle = self.ctx.net.spawn(async move { playlists::add_playlist_items(&api, &playlist_id, video_ids, None).await });
-        let weak = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(page) = weak.upgrade() else { return };
-            match handle.await {
-                Ok(Ok(())) => toast(&page.stack, &format!("Added {count} tracks to playlist")),
-                Ok(Err(err)) => {
-                    tracing::warn!(%err, "add to playlist failed");
-                    toast(&page.stack, "Failed to add tracks");
-                }
-                Err(_) => {}
-            }
-        });
+    fn add_to_playlist(self: &Rc<Self>, playlist_id: String, tracks: Vec<Track>) {
+        crate::ui::playlist_ops::add_tracks(&self.ctx, self.stack.upcast_ref(), playlist_id, tracks);
     }
 
     fn on_copy_link_clicked(&self) {
@@ -1727,6 +1734,9 @@ impl PlaylistPage {
     fn rate_library(self: &Rc<Self>, rating: LikeStatus) {
         let pid = self.audio_playlist_id.borrow().clone().or_else(|| self.playlist_id());
         let Some(pid) = pid else { return };
+        if crate::local_library::is_local(&pid) {
+            return;
+        }
         let api = self.ctx.net.client().api();
         let handle = self.ctx.net.spawn(async move { playlists::rate_playlist(&api, &pid, rating).await });
         let weak = Rc::downgrade(self);
@@ -1840,12 +1850,7 @@ impl PlaylistPage {
         if target.is_empty() {
             return;
         }
-        let video_ids: Vec<String> = self.selected_tracks().into_iter().map(|t| t.video_id.0).filter(|v| !v.is_empty()).collect();
-        if video_ids.is_empty() {
-            return;
-        }
-        mark_playlist_used(&self.ctx.paths, target);
-        self.add_to_playlist(target.to_owned(), video_ids, true);
+        self.add_to_playlist(target.to_owned(), self.selected_tracks());
     }
 
     fn on_sel_remove(self: &Rc<Self>) {
@@ -1858,6 +1863,23 @@ impl PlaylistPage {
 
     fn remove_items(self: &Rc<Self>, items: Vec<(String, String)>, announce: bool) {
         let Some(pid) = self.playlist_id() else { return };
+        if crate::local_library::is_local(&pid) {
+            let ids: Vec<String> = items.iter().map(|(video_id, _)| video_id.clone()).collect();
+            if pid == crate::local_library::LIKED_ID {
+                // Removing from the likes list is an unlike, so every heart follows.
+                for id in &ids {
+                    self.ctx.player.set_like_status(crate::model::VideoId(id.clone()), LikeStatus::Indifferent);
+                }
+            } else {
+                self.ctx.local.remove_tracks(&pid, &ids);
+            }
+            if announce {
+                toast(&self.stack, &format!("Removed {} tracks", ids.len()));
+            }
+            self.ctx.nav.refresh_library();
+            self.load_playlist(&pid, None);
+            return;
+        }
         let api = self.ctx.net.client().api();
         let count = items.len();
         let pid_c = pid.clone();
@@ -2268,6 +2290,14 @@ impl PlaylistPage {
 
     fn delete_playlist_confirmed(self: &Rc<Self>) {
         let Some(pid) = self.playlist_id() else { return };
+        if crate::local_library::is_local(&pid) {
+            self.ctx.local.delete(&pid);
+            self.ctx.nav.refresh_library();
+            if let Some(nav) = self.stack.ancestor(adw::NavigationView::static_type()).and_downcast::<adw::NavigationView>() {
+                nav.pop();
+            }
+            return;
+        }
         self.content_spinner.set_visible(true);
         self.stack.set_visible_child_name("loading");
         let api = self.ctx.net.client().api();
@@ -2411,6 +2441,26 @@ impl PlaylistPage {
         let clean_title = new_title.trim().to_owned();
         let clean_desc = new_desc.trim().to_owned();
         let changed = clean_title != old_title.trim() || clean_desc != old_desc.trim() || new_privacy != old_privacy;
+        if crate::local_library::is_local(&pid) {
+            // Title and description only. A local list has no privacy and no uploaded cover,
+            // though the cover mirror on disk still keys on the title like any other.
+            let title = (!clean_title.is_empty() && clean_title != old_title.trim()).then_some(clean_title.as_str());
+            let desc = (clean_desc != old_desc.trim()).then_some(clean_desc.as_str());
+            self.ctx.local.edit(&pid, title, desc);
+            if let (Some(src), Some(dst)) = (img_path.as_ref(), self.ctx.paths.playlist_cover_path(if clean_title.is_empty() { &old_title } else { &clean_title })) {
+                if let Some(dir) = dst.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                if let Err(err) = std::fs::copy(src, &dst) {
+                    tracing::warn!(%err, "local cover copy failed");
+                }
+                crate::ui::cover::forget_texture(&dst.to_string_lossy());
+            }
+            let _ = old_cover;
+            self.ctx.nav.refresh_library();
+            self.load_playlist(&pid, None);
+            return;
+        }
         let api = self.ctx.net.client().api();
         let http = self.ctx.net.client().http().clone();
         let headers = self.ctx.net.client().browser_headers();

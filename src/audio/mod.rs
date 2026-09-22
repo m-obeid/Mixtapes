@@ -123,6 +123,13 @@ struct Shared {
     armed_next: Mutex<Option<(String, u64)>>,
     pending_gapless: Mutex<Option<u64>>,
     http_auth: Mutex<Option<HttpAuth>>,
+    /// The playing URI is a live HLS stream. Its about-to-finish fires per fragment and means nothing.
+    live: std::sync::atomic::AtomicBool,
+}
+
+/// A live HLS playlist, by its address. The queue's track may not know it is live.
+pub fn is_live_uri(uri: &str) -> bool {
+    uri.contains("/manifest/hls_") || uri.split('?').next().is_some_and(|path| path.ends_with(".m3u8"))
 }
 
 struct Engine {
@@ -296,6 +303,7 @@ impl Engine {
             armed_next: Mutex::new(None),
             pending_gapless: Mutex::new(None),
             http_auth: Mutex::new(None),
+            live: std::sync::atomic::AtomicBool::new(false),
         });
 
         // Streaming thread: push cookies and UA onto every HTTP request the source makes.
@@ -316,6 +324,9 @@ impl Engine {
             let shared = shared.clone();
             playbin.connect("about-to-finish", false, move |values| {
                 let Ok(playbin) = values[0].get::<gst::Element>() else { return None };
+                if shared.live.load(Ordering::Acquire) {
+                    return None;
+                }
                 let armed = shared.armed_next.lock().unwrap().take();
                 if let Some((uri, generation)) = armed {
                     // The pipeline plays the tail of the current stream for about
@@ -421,6 +432,7 @@ impl Engine {
                 *self.shared.armed_next.lock().unwrap() = None;
                 *self.shared.pending_gapless.lock().unwrap() = None;
                 *self.shared.http_auth.lock().unwrap() = auth;
+                self.shared.live.store(is_live_uri(&uri), Ordering::Release);
                 self.loading.set(true);
                 self.last_status.set(PlaybackStatus::Loading);
                 self.emit(AudioEvent::StateChanged { generation, status: PlaybackStatus::Loading });
@@ -436,7 +448,9 @@ impl Engine {
                 }
             }
             AudioCommand::ArmNext { uri, generation } => {
-                *self.shared.armed_next.lock().unwrap() = Some((uri, generation));
+                if !self.shared.live.load(Ordering::Acquire) && !is_live_uri(&uri) {
+                    *self.shared.armed_next.lock().unwrap() = Some((uri, generation));
+                }
             }
             AudioCommand::DisarmNext => {
                 *self.shared.armed_next.lock().unwrap() = None;
@@ -718,5 +732,13 @@ mod tests {
             assert_eq!(element.property::<Option<String>>("device"), None, "{} still names a device", element.name());
         }
         let _ = sink.set_state(gst::State::Null);
+    }
+
+    #[test]
+    fn a_live_playlist_is_told_by_its_address() {
+        assert!(is_live_uri("https://manifest.googlevideo.com/api/manifest/hls_playlist/expire/1/itag/234/x/index.m3u8"));
+        assert!(is_live_uri("https://example.com/live/stream.m3u8?token=1"));
+        assert!(!is_live_uri("https://rr1.googlevideo.com/videoplayback?expire=1&mime=audio%2Fwebm"));
+        assert!(!is_live_uri("file:///home/me/Music/song.opus"));
     }
 }

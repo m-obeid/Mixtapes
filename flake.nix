@@ -47,6 +47,8 @@
             pkgs.webkitgtk_6_0
             pkgs.sqlite
             pkgs.glib-networking
+            # The ytmusicapi crate brings reqwest with native TLS, so openssl-sys builds too.
+            pkgs.openssl
           ] ++ gstPlugins;
 
           # The tests that matter need the network or a signed-in session.

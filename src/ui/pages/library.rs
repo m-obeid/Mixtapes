@@ -325,6 +325,9 @@ impl LibraryPage {
         let signed_out = matches!(self.ctx.net.client().auth_state(), crate::net::ytmusic::AuthState::Anonymous);
         if signed_out {
             forget_library(&self.ctx.paths);
+            // Signed out, the library is what lives on this device.
+            sync_store(&self.sections[0].store, with_local_items(&self.ctx, Vec::new()));
+            self.apply_layout();
         } else if self.sections[0].store.n_items() == 0 {
             self.fill_from_disk();
         }
@@ -354,7 +357,7 @@ impl LibraryPage {
                     Ok(Ok(mut items)) => {
                         saved.insert(label.to_owned(), items.clone());
                         if label == "playlists" {
-                            items.insert(items.len().min(1), downloads_entry());
+                            items = with_local_items(&page.ctx, items);
                         }
                         if label == "artists" {
                             page.ctx.net.caches().add_subscriptions(items.iter().map(|i| i.id.clone()));
@@ -389,7 +392,7 @@ impl LibraryPage {
         for (section, label) in targets.into_iter().zip(LIBRARY_LABELS) {
             let mut items = saved.remove(label).unwrap_or_default();
             if label == "playlists" {
-                items.insert(items.len().min(1), downloads_entry());
+                items = with_local_items(&self.ctx, items);
             }
             sync_store(&section.store, items);
         }
@@ -491,10 +494,7 @@ impl LibraryPage {
     /// Port of on_new_playlist_clicked: title, description and visibility,
     /// then create it and open it.
     fn ask_new_playlist(self: &Rc<Self>) {
-        if !self.ctx.net.client().is_authenticated() {
-            toast(&self.root, "Sign in to create playlists");
-            return;
-        }
+        let signed_in = self.ctx.net.client().is_authenticated();
         let dialog = adw::Dialog::builder().title("New Playlist").content_width(500).build();
         let main_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         let header = adw::HeaderBar::builder().css_classes(["flat"]).build();
@@ -507,8 +507,16 @@ impl LibraryPage {
         let title_row = adw::EntryRow::builder().title("Title").activates_default(true).build();
         let desc_row = adw::EntryRow::builder().title("Description").build();
         let privacy_row = adw::ComboRow::builder().title("Visibility").model(&gtk::StringList::new(&["Public", "Private", "Unlisted"])).selected(1).build();
+        // Signed out, the only place is this device. Signed in, the account is the default.
+        let where_row = adw::ComboRow::builder().title("Save To").model(&gtk::StringList::new(&["YouTube Music", "This device"])).selected(if signed_in { 0 } else { 1 }).visible(signed_in).build();
+        {
+            let privacy_row = privacy_row.clone();
+            where_row.connect_selected_notify(move |row| privacy_row.set_visible(row.selected() == 0));
+        }
+        privacy_row.set_visible(signed_in);
         group.add(&title_row);
         group.add(&desc_row);
+        group.add(&where_row);
         group.add(&privacy_row);
         prefs_page.add(&group);
         main_box.append(&prefs_page);
@@ -516,19 +524,41 @@ impl LibraryPage {
 
         let page = self.clone();
         let dialog_c = dialog.clone();
-        let (title_c, desc_c, privacy_c) = (title_row.clone(), desc_row.clone(), privacy_row.clone());
+        let (title_c, desc_c, privacy_c, where_c) = (title_row.clone(), desc_row.clone(), privacy_row.clone(), where_row.clone());
         create_btn.connect_clicked(move |_| {
             let title = title_c.text().trim().to_owned();
             if title.is_empty() {
                 return;
             }
             let description = desc_c.text().trim().to_owned();
-            let privacy = ["PUBLIC", "PRIVATE", "UNLISTED"][privacy_c.selected().min(2) as usize];
-            page.create_playlist(title, description, privacy);
+            if where_c.selected() == 1 {
+                page.create_local_playlist(title, description);
+            } else {
+                let privacy = ["PUBLIC", "PRIVATE", "UNLISTED"][privacy_c.selected().min(2) as usize];
+                page.create_playlist(title, description, privacy);
+            }
             dialog_c.close();
         });
         dialog.present(Some(&self.root));
         title_row.grab_focus();
+    }
+
+    fn create_local_playlist(self: &Rc<Self>, title: String, description: String) {
+        let id = self.ctx.local.create(&title, &description);
+        tracing::info!(id, title, "local playlist created");
+        self.refresh_local_items();
+        self.ctx.nav.go(NavRequest::Playlist { id, title, thumb: None });
+    }
+
+    /// Re-read the local playlists into the Playlists section without a network round trip.
+    pub fn refresh_local_items(self: &Rc<Self>) {
+        let store = &self.sections[0].store;
+        let remote: Vec<MediaItem> = (0..store.n_items())
+            .filter_map(|i| store.item(i).and_downcast::<MediaObject>().map(|o| o.item()))
+            .filter(|item| item.id != DOWNLOADS_ID && !crate::local_library::is_local(&item.id))
+            .collect();
+        sync_store(store, with_local_items(&self.ctx, remote));
+        self.apply_layout();
     }
 
     /// Create it on the runtime, then refresh the library and open the page.
@@ -699,11 +729,30 @@ fn downloads_entry() -> MediaItem {
     MediaItem { kind: ItemKind::Playlist, id: DOWNLOADS_ID.to_owned(), title: "Downloads".to_owned(), description: Some("Downloaded songs".to_owned()), ..MediaItem::default() }
 }
 
+/// The account's playlists with what lives on this device: YouTube's likes
+/// list stays first when there is one, then Downloads, then the local likes
+/// and playlists, then the rest.
+fn with_local_items(ctx: &UiContext, remote: Vec<MediaItem>) -> Vec<MediaItem> {
+    let mut items = remote;
+    let head = items.len().min(1);
+    let mut local = vec![downloads_entry()];
+    let signed_in = ctx.net.client().is_authenticated();
+    for item in ctx.local.items() {
+        // Signed in, YouTube's own likes list is the one that matters. An empty local one stays out of the way.
+        if item.id == crate::local_library::LIKED_ID && signed_in && ctx.local.liked().is_empty() {
+            continue;
+        }
+        local.push(item);
+    }
+    items.splice(head..head, local);
+    items
+}
+
 /// Subtitle and icons for a grid card, following _rebuild_*_grid.
 fn card_style(item: &MediaItem) -> (String, &'static str, Option<&'static str>) {
     match item.kind {
         ItemKind::Playlist if item.id == DOWNLOADS_ID => (item.description.clone().unwrap_or_default(), "media-playlist-audio-symbolic", Some("folder-download-symbolic")),
-        ItemKind::Playlist if item.id.len() == 2 => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", None),
+        ItemKind::Playlist if item.id.len() == 2 || crate::local_library::is_local(&item.id) => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", None),
         ItemKind::Playlist => (item.count.as_ref().map(|c| format!("{c} songs")).unwrap_or_default(), "folder-music-symbolic", None),
         ItemKind::Album => (album_subtitle(item), "media-optical-symbolic", None),
         ItemKind::Artist => (artist_subtitle(item), "avatar-default-symbolic", None),
@@ -840,10 +889,17 @@ fn is_upload_album(item: &MediaItem) -> bool {
 }
 
 fn playlist_extras(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) -> Vec<MenuAction> {
+    let (id, title) = (item.id.clone(), item.title.clone());
+    if crate::local_library::is_local(&id) {
+        if id == crate::local_library::LIKED_ID {
+            return Vec::new();
+        }
+        let (ctx, anchor) = (ctx.clone(), anchor.clone());
+        return vec![MenuAction::new("Delete Playlist", context_menu::Section::Remove, move || confirm_delete(&ctx, &anchor, &id, &title))];
+    }
     if !ctx.net.client().is_authenticated() {
         return Vec::new();
     }
-    let (id, title) = (item.id.clone(), item.title.clone());
     if is_upload_album(item) {
         let (ctx, anchor) = (ctx.clone(), anchor.clone());
         return vec![MenuAction::new("Delete Album", context_menu::Section::Remove, move || confirm_delete_upload(&ctx, &anchor, &id, &title))];
@@ -952,6 +1008,12 @@ fn confirm_delete(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: &str, 
     let (ctx, anchor, id) = (ctx.clone(), anchor.clone(), playlist_id.to_owned());
     dialog.connect_response(None, move |_, response| {
         if response != "delete" {
+            return;
+        }
+        if crate::local_library::is_local(&id) {
+            ctx.local.delete(&id);
+            toast(&anchor, "Playlist deleted");
+            ctx.nav.refresh_library();
             return;
         }
         let api = ctx.net.client().api();

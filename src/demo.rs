@@ -30,10 +30,13 @@
 //! MIXTAPES_DEMO_UPLOAD_ARTIST=id[,name]  open an uploaded artist's songs
 //! MIXTAPES_DEMO_SET_COVER=path  set the open playlist's cover from an image
 //! MIXTAPES_DEMO_NEW_PLAYLIST=ms  open the new playlist dialog
+//! MIXTAPES_DEMO_SCROLL=ms,px|title  scroll the visible page down by px, or to the heading with that text
+//! MIXTAPES_DEMO_LOCAL=ms[,open]  make a local playlist and a like, show the library, optionally open the list
 //! MIXTAPES_DEMO_CARD_MENUS=ms  log what the library card menus offer
 //! MIXTAPES_DEMO_BACK=ms      press the back button
 //! MIXTAPES_DEMO_TOGGLE=ms    from then on, open or close the player view once a second (for profiling)
 //! MIXTAPES_DEMO_NEXT_EVERY=ms  after ten seconds, skip to the next track at that interval (for profiling)
+//! MIXTAPES_DEMO_ONBOARDING=ms[,page] open the setup wizard (page: account, extras, done), MIXTAPES_DEMO_WHATS_NEW=ms the release notes
 //! MIXTAPES_DEMO_RESIZE=ms    from then on, flip the window between 1040 and 420 px wide once a second
 //! MIXTAPES_DEMO_WATCHDOG=ms  raise SIGUSR2 when the GTK thread has not run for that long, for a gdb backtrace
 //! MIXTAPES_DEMO_PHASES=1     log frame clock phases that take more than 40 ms
@@ -251,6 +254,21 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
+    for (var, wizard) in [("MIXTAPES_DEMO_ONBOARDING", true), ("MIXTAPES_DEMO_WHATS_NEW", false)] {
+        let Ok(spec) = std::env::var(var) else { continue };
+        let (ms, tag) = spec.split_once(',').map(|(ms, tag)| (ms, Some(tag.to_owned()))).unwrap_or((spec.as_str(), None));
+        let ctx_w = ctx.clone();
+        let delay = ms.parse::<u64>().unwrap_or(2000);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            let Some(mw) = ctx_w.window.borrow().clone() else { return };
+            if wizard {
+                crate::ui::onboarding::present(&mw, &ctx_w, tag.as_deref());
+            } else {
+                crate::ui::release_notes::present(&mw, &ctx_w);
+            }
+        });
+    }
+
     if let Ok(ms) = std::env::var("MIXTAPES_DEMO_RESIZE") {
         let win = window.clone();
         let delay = ms.parse::<u64>().unwrap_or(8000);
@@ -300,6 +318,54 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
                 mw.card_menus();
+            }
+        });
+    }
+
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SCROLL") {
+        // Scroll the visible page by px, or to the heading with that text, for a snapshot further down.
+        let (ms, target) = spec.split_once(',').map(|(ms, t)| (ms.parse::<u64>().unwrap_or(3000), t.to_owned())).unwrap_or((3000, "600".to_owned()));
+        let win = window.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            let mut scrollers = Vec::new();
+            collect_scrollers(win.upcast_ref(), &mut scrollers);
+            for scroller in scrollers.iter().filter(|s| s.is_mapped() && s.vadjustment().upper() > s.vadjustment().page_size()) {
+                let adj = scroller.vadjustment();
+                let px = match target.parse::<f64>() {
+                    Ok(px) => px,
+                    Err(_) => {
+                        let Some(label) = find_label(scroller.upcast_ref(), &target) else { continue };
+                        let Some(child) = scroller.child() else { continue };
+                        label.compute_bounds(&child).map(|b| b.y() as f64 - 12.0).unwrap_or(0.0)
+                    }
+                };
+                adj.set_value(px.clamp(0.0, adj.upper() - adj.page_size()));
+            }
+        });
+    }
+
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_LOCAL") {
+        // A local playlist of the staged tracks and a like, then the library tab. ",open" opens the list.
+        let (ms, open) = spec.split_once(',').map(|(ms, rest)| (ms, rest == "open")).unwrap_or((spec.as_str(), false));
+        let ctx_w = ctx.clone();
+        let delay = ms.parse::<u64>().unwrap_or(2500);
+        glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+            let Some(mw) = ctx_w.window.borrow().clone() else { return };
+            let tracks = ctx_w.player.queue_tracks();
+            let id = ctx_w.local.create("Road Trip", "Made in the demo");
+            ctx_w.local.add_tracks(&id, &tracks);
+            if let Some(first) = tracks.first() {
+                ctx_w.player.set_like_status(first.video_id.clone(), crate::model::LikeStatus::Like);
+            }
+            mw.library_page().refresh_local_items();
+            mw.select_tab("library");
+            if open {
+                let title = "Road Trip".to_owned();
+                let ctx_w = ctx_w.clone();
+                glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+                    mw.ui().nav.go(crate::ui::context::NavRequest::Playlist { id, title, thumb: None });
+                    let _ = &ctx_w;
+                });
             }
         });
     }
@@ -707,6 +773,23 @@ fn dump_classes(widget: &gtk::Widget, depth: usize, max: usize, out: &mut Vec<St
         dump_classes(&c, depth + 1, max, out);
         child = c.next_sibling();
     }
+}
+
+/// The first label showing exactly this text, anywhere under the widget.
+fn find_label(widget: &gtk::Widget, text: &str) -> Option<gtk::Label> {
+    if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+        if label.text() == text {
+            return Some(label.clone());
+        }
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if let Some(found) = find_label(&c, text) {
+            return Some(found);
+        }
+        child = c.next_sibling();
+    }
+    None
 }
 
 fn collect_scrollers(widget: &gtk::Widget, out: &mut Vec<gtk::ScrolledWindow>) {

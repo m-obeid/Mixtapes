@@ -92,6 +92,9 @@ pub struct Track {
     pub entity_id: Option<String>,
     #[serde(default)]
     pub is_explicit: bool,
+    /// A live stream: no duration, no seeking, a LIVE badge.
+    #[serde(default)]
+    pub is_live: bool,
     /// Playlist item id, needed to remove or move the row in its playlist.
     #[serde(default)]
     pub set_video_id: Option<String>,
@@ -121,6 +124,7 @@ impl Default for Track {
             video_type: None,
             entity_id: None,
             is_explicit: false,
+            is_live: false,
             set_video_id: None,
             is_available: true,
             track_number: None,
@@ -228,6 +232,9 @@ pub struct MediaItem {
     pub item_type: Option<String>,
     #[serde(default)]
     pub explicit: bool,
+    /// A live stream, from the Live badge beside the subtitle.
+    #[serde(default)]
+    pub is_live: bool,
     #[serde(default)]
     pub duration_seconds: Option<u32>,
     #[serde(default)]
@@ -252,7 +259,15 @@ impl MediaItem {
         self.artists.iter().map(|a| a.name.as_str()).filter(|n| !n.is_empty()).collect::<Vec<_>>().join(", ")
     }
 
+    /// The small icon beside the subtitle. A live stream shows an antenna, whatever its kind.
+    pub fn kind_icon(&self) -> &'static str {
+        if self.is_live { "triangular-antenna-symbolic" } else { self.kind.icon() }
+    }
+
     pub fn kind_word(&self) -> String {
+        if self.is_live {
+            return "Live".to_owned();
+        }
         match self.kind {
             ItemKind::Album => self.item_type.clone().unwrap_or_else(|| "Album".to_owned()),
             ItemKind::Song => "Song".to_owned(),
@@ -262,8 +277,12 @@ impl MediaItem {
         }
     }
 
+    /// "3:45", or "1:59:59" past an hour, as a long mix reads. Nothing for a live stream.
     pub fn duration_text(&self) -> Option<String> {
-        self.duration_seconds.map(|s| format!("{}:{:02}", s / 60, s % 60))
+        if self.is_live {
+            return None;
+        }
+        self.duration_seconds.map(|s| if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60) } else { format!("{}:{:02}", s / 60, s % 60) })
     }
 
     /// Port of home.py _detail_for: the secondary line under a title.
@@ -320,6 +339,7 @@ impl MediaItem {
             like_status: self.like_status.unwrap_or_default(),
             video_type: Some(if self.kind == ItemKind::Song { "MUSIC_VIDEO_TYPE_ATV".to_owned() } else { "MUSIC_VIDEO_TYPE_OMV".to_owned() }),
             is_explicit: self.explicit,
+            is_live: self.is_live,
             ..Track::default()
         })
     }

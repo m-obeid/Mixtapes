@@ -35,6 +35,7 @@ pub struct DesktopCoverView {
     #[allow(dead_code)]
     lyrics_view: Rc<LyricsView>,
     more_btn: gtk::MenuButton,
+    queue_btn: gtk::ToggleButton,
     ctx: Rc<UiContext>,
     lyrics_intent: Cell<bool>,
     suppress_sync: Cell<bool>,
@@ -230,18 +231,20 @@ impl DesktopCoverView {
             .max_sidebar_width(900.0)
             .build();
 
+        // Flat and square-cornered, both of them, like the player bar's buttons.
         let collapse_btn = gtk::Button::builder()
             .icon_name("go-down-symbolic")
-            .css_classes(["flat", "circular"])
+            .css_classes(["flat"])
             .valign(gtk::Align::End)
             .halign(gtk::Align::End)
             .tooltip_text("Collapse player")
             .margin_end(24)
             .margin_bottom(24)
             .build();
-        let queue_btn = gtk::Button::builder()
+        // A toggle, so it lights up while the queue is open, as the player bar's does.
+        let queue_btn = gtk::ToggleButton::builder()
             .icon_name("music-queue-symbolic")
-            .css_classes(["flat", "circular"])
+            .css_classes(["flat"])
             .valign(gtk::Align::End)
             .halign(gtk::Align::End)
             .tooltip_text("Queue")
@@ -284,6 +287,7 @@ impl DesktopCoverView {
             metadata_pending: Cell::new(false),
             lyrics_view,
             more_btn: more_btn.clone(),
+            queue_btn: queue_btn.clone(),
             ctx,
             lyrics_intent: Cell::new(false),
             suppress_sync: Cell::new(false),
@@ -565,6 +569,13 @@ impl DesktopCoverView {
     }
 
     /// Port of _show_stream_info: what is playing and how the pipeline sees it.
+    /// Mirror the queue sidebar into the toggle, without re-firing its click.
+    pub fn set_queue_active(&self, active: bool) {
+        if self.queue_btn.is_active() != active {
+            self.queue_btn.set_active(active);
+        }
+    }
+
     pub fn visualizer(&self) -> &Rc<Visualizer> {
         &self.visualizer
     }
