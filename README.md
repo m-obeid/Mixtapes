@@ -117,6 +117,9 @@ yay -S mixtapes-git
 
 ### Nix
 
+> [!WARNING]
+> This is not extensively tested, if there are any issues to fix, please open a PR!
+
 ```
 nix run github:m-obeid/Mixtapes       # run directly from GitHub
 nix run                               # run from local checkout
@@ -161,9 +164,6 @@ cd Mixtapes
 cargo build --release
 ./target/release/mixtapes
 ```
-
-The stylesheet and the icons are compiled into the binary, so it runs from
-anywhere. To update, `git pull` and build again.
 
 > [!NOTE]
 > **What the helper programs are for.** Most songs play through YouTube's
@@ -254,7 +254,7 @@ Without a `browser.json` file, the app falls back to the unauthenticated API, wh
 
 ## Roadmap
 
-✅️ = implemented · ☑️ = partially implemented · 🔜 = planned · ❎️ = unlikely
+✅️ = implemented · ☑️ = partially implemented · 🔜 = planned · 🚧 = missing/broken
 
 | Status | Feature                      | Details                                                                                                                                                                                                                                                                                      |
 | :----: | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
