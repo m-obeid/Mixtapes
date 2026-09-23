@@ -150,7 +150,6 @@ sudo dnf install git cargo gtk4-devel libadwaita-devel webkitgtk6.0-devel sqlite
 sudo apt install git cargo libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev libsqlite3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-bad yt-dlp nodejs ffmpeg
 ```
 
-> [!NOTE]
 > The build needs Rust 1.85 or newer, GTK 4.18, libadwaita 1.7 and GStreamer 1.24.
 > On Debian/Ubuntu, consider the Flatpak to avoid outdated packages.
 
