@@ -8,10 +8,6 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 
 </div>
 
-> [!NOTE]
-> Mixtapes is written in Rust. The original Python app was retired once the port reached feature parity.
-> [ARCHITECTURE.md](ARCHITECTURE.md) describes how it is put together.
-
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/m-obeid/Mixtapes)](https://github.com/m-obeid/Mixtapes/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/m-obeid/Mixtapes)](https://github.com/m-obeid/Mixtapes/issues)
@@ -19,15 +15,18 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 [![Flatpak CI](https://img.shields.io/github/actions/workflow/status/m-obeid/Mixtapes/build-flatpak.yml?label=Flatpak%20Build)](https://github.com/m-obeid/Mixtapes/actions/workflows/build-flatpak.yml)
 [![Windows Build](https://img.shields.io/github/actions/workflow/status/m-obeid/Mixtapes/build-windows.yml?label=Windows%20Build)](https://github.com/m-obeid/Mixtapes/actions/workflows/build-windows.yml)
 [![Windows Download](https://img.shields.io/badge/Windows-Download%20Installer-blue?logo=windows)](https://nightly.link/m-obeid/Mixtapes/workflows/build-windows/main/mixtapes-windows-x86_64-setup.zip)
-<br>
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/M8P12091FB)
-
-<br clear="both"/>
 
 > [!NOTE]
 > This software is in alpha. Expect bugs and missing features.
 > It is not affiliated with, funded, authorized, endorsed, or in any way associated with YouTube, Google LLC or any of their affiliates and subsidiaries.
-> Help is always appreciated -- feel free to open an issue or a pull request!
+> Help is always appreciated through donations or contributions - feel free to open an issue or a pull request!
+
+<br>
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/M8P12091FB)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/m-obeid?style=for-the-badge&logo=githubsponsors)](https://github.com/sponsors/m-obeid/)
+
+<br clear="both"/>
 
 ---
 
@@ -56,19 +55,19 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 
 ## Features
 
-- **YouTube Music Integration** -- Connect with your account and access your full library
-- **Library Access** -- Playlists, liked songs, artists, albums, and uploads
-- **Search & Discovery** -- New releases, moods & moments, genres, trending, and charts
-- **Full Playback Control** -- Play/pause, seeking, queue management, shuffle, repeat modes
-- **Downloads** -- Download tracks for offline playback as local files
-- **Scrobbling** -- Submit your plays to Last.fm and ListenBrainz, with an offline backlog
-- **MPRIS Support** -- Control playback from system media controls (Linux)
-- **Windows SMTC** -- System media transport controls integration (Windows)
-- **Radio & Mixes** -- Start a radio station from any song or artist
-- **Background Playback** -- Music keeps playing when the window is closed (system tray on Windows)
-- **Playlist Editing** -- Reorder, multi-select edit, change covers, visibility, and metadata
-- **Caching** -- Cached data for snappy performance
-- **Responsive UI** -- Adaptive layout built with Libadwaita
+- **YouTube Music Integration** - Connect with your account and access your full library
+- **Library Access** - Playlists, liked songs, artists, albums, and uploads
+- **Search & Discovery** - New releases, moods & moments, genres, trending, and charts
+- **Full Playback Control** - Play/pause, seeking, queue management, shuffle, repeat modes
+- **Downloads** - Download tracks for offline playback as local files
+- **Scrobbling** - Submit your plays to Last.fm and ListenBrainz, with an offline backlog
+- **MPRIS Support** - Control playback from system media controls (Linux)
+- **Windows SMTC** - System media transport controls integration (Windows)
+- **Radio & Mixes** - Start a radio station from any song or artist
+- **Background Playback** - Music keeps playing when the window is closed (system tray on Windows)
+- **Playlist Editing** - Reorder, multi-select edit, change covers, visibility, and metadata
+- **Caching** - Cached data for snappy performance
+- **Responsive UI** - Adaptive layout built with Libadwaita
 
 ## Installation
 
@@ -125,6 +124,10 @@ nix develop                           # enter dev shell
 ```
 
 ### From Source
+
+> [!NOTE]
+> Mixtapes is written in Rust. The original Python app was retired once the port reached feature parity.
+> [ARCHITECTURE.md](ARCHITECTURE.md) describes how it is put together.
 
 <details>
 <summary>Install dependencies for your distro</summary>
@@ -225,8 +228,8 @@ With no credentials the Last.fm row in Preferences stays disabled and says so. L
 ## Authentication
 
 > [!TIP]
-> **Linux:** You can authenticate directly in the app using the built-in WebKit browser -- no manual setup needed!
-> **Windows:** Use the bundled Login Helper (Start Menu > Mixtapes > Login Helper) to sign in via Edge WebView2.
+> You can authenticate directly in the app using the built-in browser - no manual setup needed!
+> Only do the manual authentication if you know what you are doing.
 
 <details>
 <summary>Manual authentication (legacy)</summary>
