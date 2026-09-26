@@ -1,5 +1,5 @@
 {
-  description = "Python development setup with Nix for Mixtapes project";
+  description = "Mixtapes, a Linux-first YouTube Music player written in Rust";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -17,70 +17,71 @@
           builtins.head
         ];
 
-        lines = pkgs.lib.pipe (self + "/requirements.txt") [
-          builtins.readFile
-          (builtins.split "\n")
-          (builtins.filter (x: builtins.isString x && x != ""))
+        gstPlugins = with pkgs.gst_all_1; [
+          gstreamer
+          gst-plugins-base
+          gst-plugins-good
+          gst-plugins-bad
         ];
 
-        pipName = line: let
-          m = builtins.match "([a-zA-Z][a-zA-Z0-9._-]*).*" line;
-        in
-          if m == null then null else builtins.head m;
+        # yt-dlp is the fallback stream resolver and the downloader. It wants a
+        # JavaScript runtime for YouTube's player code, and ffmpeg to convert.
+        runtimeTools = [ pkgs.yt-dlp pkgs.nodejs pkgs.ffmpeg ];
 
-        pipToNix = {
-          PyGObject = "pygobject3";
-          Pillow = "pillow";
-          StrEnum = "strenum";
-        };
-
-        nixAttr = name: pipToNix.${name} or (pkgs.lib.strings.toLower name);
-
-        pythonDeps = pkgs.lib.pipe lines [
-          (builtins.map pipName)
-          (builtins.filter (n: n != null))
-          (builtins.map (name: pkgs.python314Packages.${nixAttr name} or null))
-          (builtins.filter (d: d != null))
-        ];
-
-        pythonEnv = pkgs.python314.withPackages (ps: pythonDeps);
-
-        mixtapes = pkgs.stdenv.mkDerivation {
+        mixtapes = pkgs.rustPlatform.buildRustPackage {
           pname = "mixtapes";
           inherit version;
           src = self;
+          cargoLock.lockFile = ./Cargo.lock;
 
-          nativeBuildInputs = [ pkgs.makeWrapper pkgs.wrapGAppsHook3 ];
+          nativeBuildInputs = [
+            pkgs.pkg-config
+            pkgs.wrapGAppsHook4
+            # build.rs runs glib-compile-resources for the stylesheet and icons.
+            pkgs.glib
+          ];
 
           buildInputs = [
             pkgs.gtk4
             pkgs.libadwaita
             pkgs.webkitgtk_6_0
-            pkgs.gobject-introspection
-            pkgs.gst_all_1.gstreamer
-            pkgs.gst_all_1.gst-plugins-base
-            pkgs.gst_all_1.gst-plugins-good
-            pkgs.gst_all_1.gst-plugins-bad
-            pkgs.gst_all_1.gst-plugins-ugly
-            pythonEnv
-          ];
+            pkgs.sqlite
+            pkgs.glib-networking
+            # The ytmusicapi crate brings reqwest with native TLS, so openssl-sys builds too.
+            pkgs.openssl
+          ] ++ gstPlugins;
 
-          installPhase = ''
-            mkdir -p $out/bin $out/share/mixtapes
-            cp -r src/* $out/share/mixtapes/
-            makeWrapper ${pythonEnv}/bin/python $out/bin/mixtapes \
-              --add-flags "$out/share/mixtapes/main.py"
+          # The tests that matter need the network or a signed-in session.
+          doCheck = false;
+
+          postInstall = ''
+            ln -s mixtapes $out/bin/muse
+            install -Dm644 com.pocoguy.Muse.desktop $out/share/applications/com.pocoguy.Muse.desktop
+            install -Dm644 com.pocoguy.Muse.metainfo.xml $out/share/metainfo/com.pocoguy.Muse.metainfo.xml
+            install -Dm644 assets/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg $out/share/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg
+            install -Dm644 assets/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg $out/share/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg
           '';
+
+          preFixup = ''
+            gappsWrapperArgs+=(--prefix PATH : ${pkgs.lib.makeBinPath runtimeTools})
+          '';
+
+          meta = {
+            description = "A modern, Linux-first YouTube Music player";
+            homepage = "https://github.com/m-obeid/Mixtapes";
+            license = pkgs.lib.licenses.gpl3Plus;
+            mainProgram = "mixtapes";
+            platforms = pkgs.lib.platforms.linux;
+          };
         };
       in {
         packages.default = mixtapes;
 
         devShells.default = pkgs.mkShell {
           inputsFrom = [ mixtapes ];
-          packages = [ pkgs.nodejs ];
-          shellHook = ''
-            python --version
-          '';
+          packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt ] ++ runtimeTools;
+          # GStreamer finds its plugins through this outside a wrapped binary.
+          GST_PLUGIN_SYSTEM_PATH_1_0 = pkgs.lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" gstPlugins;
         };
       }
     );
