@@ -84,8 +84,8 @@ window.cover-bg-active .banner-scrim {
   background: linear-gradient(
     to bottom,
     transparent 0%,
-    alpha(@window_bg_color, 0.25) 55%,
-    alpha(@window_bg_color, 0.45) 75%,
+    alpha(var(--window-bg-color), 0.25) 55%,
+    alpha(var(--window-bg-color), 0.45) 75%,
     transparent 100%
   );
 }
@@ -378,7 +378,7 @@ impl Appearance {
     fn set_blurred_background_css(&self, path: &std::path::Path) {
         let Ok(uri) = glib::filename_to_uri(path, None) else { return };
         let rule = format!(
-            "\nwindow.cover-bg-active, window.cover-bg-active.background, window.cover-bg-active bottom-sheet sheet {{\n  background: none;\n  background-color: @window_bg_color;\n  background-image: url(\"{uri}\");\n  background-size: cover;\n  background-position: center;\n  background-repeat: no-repeat;\n}}\n"
+            "\nwindow.cover-bg-active, window.cover-bg-active.background, window.cover-bg-active bottom-sheet sheet {{\n  background: none;\n  background-color: var(--window-bg-color);\n  background-image: url(\"{uri}\");\n  background-size: cover;\n  background-position: center;\n  background-repeat: no-repeat;\n}}\n"
         );
         self.bg_part.replace(format!("{BLUR_OVERRIDE_CSS}{rule}"));
     }
@@ -426,7 +426,7 @@ impl Appearance {
             (true, false) => format!("{TINT_LIGHT}{TINT_COMMON}"),
         };
         let css = format!(
-            "@define-color accent_bg_color {};\n@define-color accent_color {};\n@define-color accent_fg_color {};\n{tint}\ntoast {{\n  background-color: mix(#28282a, @accent_bg_color, 0.12);\n  color: #ffffff;\n}}\ntoggle:checked {{\n  background-color: @card_bg_color;\n}}\n.inline {{\n  background-color: rgba(0, 0, 0, 0);\n}}\nbanner {{ --banner-color: mix(#3e3e42, @accent_bg_color, 0.12); }}\n",
+            "@define-color accent_bg_color {};\n@define-color accent_color {};\n@define-color accent_fg_color {};\n{tint}\ntoast {{\n  background-color: mix(#28282a, @accent_bg_color, 0.12);\n  color: #ffffff;\n}}\ntoggle:checked {{\n  background-color: var(--card-bg-color);\n}}\n.inline {{\n  background-color: rgba(0, 0, 0, 0);\n}}\nbanner {{ --banner-color: mix(#3e3e42, @accent_bg_color, 0.12); }}\n",
             color::to_css(solid),
             color::to_css(standalone),
             color::to_css(accent_fg),

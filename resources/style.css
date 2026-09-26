@@ -15,6 +15,11 @@
                sans-serif;
 }
 
+/* Surface colors are read as var(--window-bg-color) and friends, not the
+   @window_bg_color names. libadwaita feeds the vars from the names, never
+   the reverse, so a gtk.css theme (Rewaita, Gradience) that sets only the
+   vars left every @name rule on stock Adwaita grey. */
+
 /* Static fallbacks for the tokens MainWindow recomputes per cover in
    _refresh_derived_colors. Needed so the rules below still parse before
    the derived provider loads; GTK drops a declaration naming a color it
@@ -153,9 +158,9 @@ listview.playlist-view > row:focus:selected {
   background: linear-gradient(
     to bottom,
     transparent 0%,
-    alpha(@window_bg_color, 0.4) 40%,
-    alpha(@window_bg_color, 0.8) 70%,
-    @window_bg_color 100%
+    alpha(var(--window-bg-color), 0.4) 40%,
+    alpha(var(--window-bg-color), 0.8) 70%,
+    var(--window-bg-color) 100%
   );
 }
 
@@ -283,7 +288,7 @@ list row.playing label {
    and 1.06 in dark, inverted, which is why the sidebar was invisible.
    ExpandedPlayer builds its own QueuePanel and never adds `.sidebar`. */
 bottom-sheet .queue-panel:not(.sidebar) {
-  background-color: @view_bg_color;
+  background-color: var(--view-bg-color);
 }
 bottom-sheet .queue-panel toolbarview,
 bottom-sheet .queue-panel headerbar,
@@ -299,7 +304,7 @@ bottom-sheet .queue-panel listview {
    and that shade is the seam that shows up between the mini player and
    the tabs. Paint the background here instead and drop the shade. */
 .sheet-bottom-bar actionbar > revealer > box {
-  background-color: @headerbar_bg_color;
+  background-color: var(--headerbar-bg-color);
   box-shadow: none;
   padding-top: 6px;
 }
@@ -410,7 +415,7 @@ listview.playlist-view > row:disabled {
 }
 
 .queue-header {
-  background-color: alpha(@window_bg_color, 0.4);
+  background-color: alpha(var(--window-bg-color), 0.4);
 }
 
 /* ── Home page ─────────────────────────────────────────────────────────── */
@@ -434,18 +439,18 @@ listview.playlist-view > row:disabled {
 .home-speed-tile {
   padding: 8px;
   border-radius: 12px;
-  background-color: @card_bg_color;
+  background-color: var(--card-bg-color);
   background-image: none;
   transition: background-color 200ms cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .home-speed-tile:hover {
-  background-color: mix(@card_bg_color, @card_fg_color, 0.07);
+  background-color: mix(var(--card-bg-color), var(--card-fg-color), 0.07);
   background-image: none;
 }
 
 .home-speed-tile:active {
-  background-color: mix(@card_bg_color, @card_fg_color, 0.14);
+  background-color: mix(var(--card-bg-color), var(--card-fg-color), 0.14);
   background-image: none;
 }
 
@@ -589,24 +594,14 @@ flowboxchild:focus-visible {
   transition: background-color 300ms ease;
 }
 
-/* The queue sidebar's surface.
+/* The queue sidebar's surface. QueuePanel carries `.background`, which
+   paints the window color over the split view's `.sidebar-pane`. Clear it
+   so the pane shows through: its --sidebar-bg-color and the inset 1px
+   --sidebar-border-color line, the same as Nautilus under any theme.
 
-   Nautilus and the Adwaita demo put their sidebar next to @view_bg_color,
-   where @sidebar_bg_color stands 1.244 in dark and 1.191 in light. Our
-   content pane paints @window_bg_color instead, and against that the same
-   token only reaches 1.172 / 1.141, which is why the pane reads as part
-   of the page here and not there.
-
-   Mixing 2% of @window_fg_color into it restores 1.245 / 1.192. The
-   direction comes free: @window_fg_color is white on dark themes and
-   black on light ones, so one rule lifts in dark and deepens in light,
-   which GTK has no media query for.
-
-   Needs both classes to out-rank `.queue-panel`'s transparent rule below
-   and libadwaita's `.background`, which is why the bare `.sidebar` above
-   never painted anything. */
+   Needs both classes to out-rank libadwaita's `.background`. */
 .queue-panel.sidebar {
-  background-color: mix(@sidebar_bg_color, @window_fg_color, 0.02);
+  background-color: transparent;
 }
 
 /* Crossfade on dark/light scheme switch — GTK doesn't animate
@@ -634,7 +629,7 @@ window > windowhandle,
 
 .sidebar-title {
     font-weight: 800;
-    color: @theme_fg_color;
+    color: var(--window-fg-color);
 }
 
 /* ── Lyrics view ───────────────────────────────────────────────────────── */
@@ -725,7 +720,7 @@ window > windowhandle,
    them feel like static text. Kept low-opacity so it doesn't fight
    the Pango alpha fade that carries the actual active-line state. */
 .lyrics-line:hover {
-  background-color: alpha(@view_fg_color, 0.06);
+  background-color: alpha(var(--view-fg-color), 0.06);
 }
 
 .lyrics-line .lyrics-line-label {

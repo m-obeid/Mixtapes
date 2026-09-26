@@ -35,7 +35,7 @@ use gtk::{gdk, prelude::*};
 const PLAYER_BAR_CSS: &str = r#"
 .player-bar {
   padding: 0px;
-  background-color: @headerbar_bg_color;
+  background-color: var(--headerbar-bg-color);
   border-top: 1px solid @borders;
 }
 .link-btn {
@@ -93,7 +93,7 @@ const COVER_VIEW_CSS: &str = r#"
 .progress-scale trough {
   min-height: 6px;
   border-radius: 4px;
-  background-color: alpha(@window_fg_color, 0.2);
+  background-color: alpha(var(--window-fg-color), 0.2);
 }
 .progress-scale highlight {
   min-height: 4px;
@@ -102,7 +102,7 @@ const COVER_VIEW_CSS: &str = r#"
 }
 .progress-scale slider {
   border-radius: 50%;
-  background-color: @window_fg_color;
+  background-color: var(--window-fg-color);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   opacity: 0;
   transition: opacity 150ms ease;
