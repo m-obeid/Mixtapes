@@ -1012,5 +1012,15 @@ fn downloads_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup
         });
     }
     group.add(&subdir_row);
+
+    let liked_row = switch_row("Download Liked Songs", "Download a song when you like it", pref_bool(ctx, "download_liked", false));
+    {
+        let ctx = ctx.clone();
+        liked_row.connect_active_notify(move |row| {
+            save(&ctx, "download_liked", row.is_active());
+            ctx.player.set_download_liked(row.is_active());
+        });
+    }
+    group.add(&liked_row);
     group
 }

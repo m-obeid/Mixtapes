@@ -237,7 +237,7 @@ impl HistoryPage {
             let entry = &entries[index];
             let item = as_item(&entry.track);
             let row = SongRow::new(self.ctx.clone());
-            row.set_plain_subtitle(Some(subtitle(&entry.track)));
+            row.set_list_style(subtitle(&entry.track));
             row.bind(&item, None);
             let weak = Rc::downgrade(self);
             row.set_on_activate(move |_| {
@@ -358,13 +358,13 @@ fn heading_for(days_ago: i64, month: &str) -> String {
     }
 }
 
-/// Port of the row's subtitle: the artists, then the album behind a bullet.
+/// The row's subtitle: the artists, then the album behind a dot, as the home lists write theirs.
 fn subtitle(track: &Track) -> String {
     let album = track.album.as_ref().map(|a| a.name.as_str()).unwrap_or_default();
     match (track.artist.is_empty(), album.is_empty()) {
         (_, true) => track.artist.clone(),
         (true, false) => album.to_owned(),
-        (false, false) => format!("{} \u{2022} {album}", track.artist),
+        (false, false) => format!("{} \u{b7} {album}", track.artist),
     }
 }
 

@@ -465,6 +465,13 @@ gridview.playlist-view > child:disabled {
   background-image: none;
 }
 
+/* The tile grid carries an 8px margin inside its scroller, so the tile
+   shadows and the focus ring are not clipped at the scroller's edge. Pull
+   the scroller out by the same amount to keep the tiles on the page grid. */
+.home-speed-scroll {
+  margin: -8px;
+}
+
 /* In compact (mobile) layout a tile is one full-width row, so it can hold a
    whole title on one line and stay short. The 44 px cover comes from
    AsyncImage.set_compact, which puts the row at ~56 px with this padding. */

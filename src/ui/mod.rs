@@ -102,7 +102,7 @@ const COVER_VIEW_CSS: &str = r#"
 }
 .progress-scale slider {
   border-radius: 50%;
-  background-color: var(--window-fg-color);
+  background-color: white;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   opacity: 0;
   transition: opacity 150ms ease;
@@ -117,19 +117,22 @@ const COVER_VIEW_CSS: &str = r#"
 
 /// Playing indicator on song rows. song_row.py adds these classes but the
 /// Python stylesheet never styled them, so the bars were invisible there.
+/// The bars scale: a height change resized the row's whole list on every frame.
 const SONG_ROW_CSS: &str = r#"
 .playing-indicator {
   background-color: alpha(black, 0.35);
 }
 .playing-bar {
   min-width: 4px;
-  min-height: 8px;
+  min-height: 22px;
   border-radius: 2px;
   background-color: @accent_color;
-  transition: min-height 300ms ease;
+  transform-origin: bottom;
+  transform: scaleY(0.36);
+  transition: transform 300ms ease;
 }
 .playing-bar.bar-up {
-  min-height: 22px;
+  transform: scaleY(1);
 }
 "#;
 

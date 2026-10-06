@@ -33,6 +33,7 @@ static WIKIPEDIA_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\s*From Wikipedia[^\n]*").unwrap());
 static SPACES_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^\S\n]{2,}").unwrap());
 static NEWLINES_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n{3,}").unwrap());
+static BANNER_CROP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"=w\d+-h\d+-p").unwrap());
 
 const BANNER_HEIGHT: i32 = 260;
 const BANNER_HEIGHT_COMPACT: i32 = 200;
@@ -95,6 +96,7 @@ impl ArtistPage {
         let content_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(0)
+            .margin_top(12)
             .margin_bottom(24)
             .margin_start(12)
             .margin_end(12)
@@ -511,7 +513,7 @@ impl ArtistPage {
             .set_visible(!is_channel && data.radio_id.is_some());
 
         if let Some(url) = data.banner.last().or_else(|| data.thumbnails.last()) {
-            self.avatar.load(url);
+            self.avatar.load(&uncropped_banner(url));
         }
 
         if !self.ui_init.get() {
@@ -1222,6 +1224,13 @@ impl ArtistPage {
         self.read_more.borrow().set_halign(gtk::Align::Start);
         let _ = &self.content_box;
     }
+}
+
+/// YouTube hands the banner out cropped to 2.4:1 (`w2880-h1200-p`), and the
+/// cover loader would turn that into a 544 px square. Ask for the whole
+/// picture by width alone: the crop loses the top of a portrait.
+fn uncropped_banner(url: &str) -> String {
+    BANNER_CROP_RE.replace(url, "=w1920").into_owned()
 }
 
 fn read_more_label(text: &str) -> gtk::Label {

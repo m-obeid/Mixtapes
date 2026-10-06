@@ -46,8 +46,12 @@ pub struct SongRow {
     press_at: Cell<(f64, f64)>,
     /// Search rows tint the ListBoxRow and show no indicator, like attach_playing_highlight.
     row_highlight: Cell<bool>,
+    /// Tint the whole ListBoxRow while playing, edge to edge like the home lists, not the inner box.
+    row_tint: Cell<bool>,
     /// A subtitle the page named itself, drawn plain with no kind icon.
     plain_subtitle: RefCell<Option<String>>,
+    /// The page's subtitle goes behind the kind icon, as on the home lists.
+    subtitle_icon: Cell<bool>,
     /// Extra menu entries the page contributes, built when the menu opens.
     menu_extras: RefCell<Option<MenuExtras>>,
 }
@@ -119,7 +123,9 @@ impl SongRow {
             on_activate: RefCell::new(None),
             press_at: Cell::new((0.0, 0.0)),
             row_highlight: Cell::new(false),
+            row_tint: Cell::new(false),
             plain_subtitle: RefCell::new(None),
+            subtitle_icon: Cell::new(false),
             menu_extras: RefCell::new(None),
         });
         this.connect_gestures();
@@ -134,7 +140,15 @@ impl SongRow {
     /// and the "Kind • Artist • Album" subtitle search.py built.
     pub fn set_search_style(&self, enabled: bool) {
         self.row_highlight.set(enabled);
+        self.row_tint.set(enabled);
         self.duration.set_visible(!enabled);
+    }
+
+    /// Home-list look: the playing tint fills the row and the page's subtitle sits behind the kind icon.
+    pub fn set_list_style(&self, subtitle: String) {
+        self.row_tint.set(true);
+        self.subtitle_icon.set(true);
+        self.plain_subtitle.replace(Some(subtitle));
     }
 
     /// Entries this row's menu carries on top of the standard ones, the way
@@ -164,7 +178,9 @@ impl SongRow {
             self.subtitle_box.remove(&child);
         }
         if let Some(text) = self.plain_subtitle.borrow().clone() {
-            if !text.is_empty() {
+            if self.subtitle_icon.get() {
+                self.subtitle_box.append(&kind_subtitle_text(item, &text, false));
+            } else if !text.is_empty() {
                 self.subtitle_box.append(&gtk::Label::builder().label(&text).halign(gtk::Align::Start).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).lines(1).width_chars(1).tooltip_text(&text).css_classes(["dim-label", "caption"]).build());
             }
         } else if self.row_highlight.get() {
@@ -219,7 +235,7 @@ impl SongRow {
     }
 
     fn apply_playing(self: &Rc<Self>, playing: bool) {
-        let target: &gtk::Widget = if self.row_highlight.get() { self.row.upcast_ref() } else { self.inner.upcast_ref() };
+        let target: &gtk::Widget = if self.row_tint.get() { self.row.upcast_ref() } else { self.inner.upcast_ref() };
         if playing {
             target.add_css_class("playing");
             target.remove_css_class("flat");

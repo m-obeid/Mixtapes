@@ -98,10 +98,12 @@ impl DownloadQueue {
 
     fn apply(self: &Rc<Self>, event: &Event) {
         match event {
-            Event::Queued { video_id } => {
-                if !self.rows.borrow().contains_key(video_id) {
-                    self.add_row(video_id, "Downloading");
+            // A download queued past `start`, such as one a like triggers.
+            Event::Queued { video_id, title } => {
+                if let Some(id) = self.clearing.borrow_mut().take() {
+                    id.remove();
                 }
+                self.add_row(video_id, if title.is_empty() { "Downloading" } else { title });
             }
             Event::Progress { video_id, fraction } => {
                 if let Some(row) = self.rows.borrow().get(video_id) {

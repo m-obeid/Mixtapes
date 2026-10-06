@@ -138,6 +138,8 @@ pub struct LyricsView {
     suppress_activate: Cell<bool>,
     scroll_target: RefCell<Option<ScrollTarget>>,
     scroll_anim: RefCell<Option<gtk::TickCallbackId>>,
+    /// A recentre is waiting for the next frame.
+    recentre_queued: Cell<bool>,
     seek_pending: Cell<Option<(f64, Instant)>>,
     source_actions: RefCell<Vec<SourceAction>>,
     /// What the source rows were last built from.
@@ -359,6 +361,7 @@ impl LyricsView {
             suppress_activate: Cell::new(false),
             scroll_target: RefCell::new(None),
             scroll_anim: RefCell::new(None),
+            recentre_queued: Cell::new(false),
             seek_pending: Cell::new(None),
             source_actions: RefCell::new(Vec::new()),
             source_rows_key: RefCell::new(None),
@@ -402,6 +405,8 @@ impl LyricsView {
             }
         }));
         self.list.connect_row_activated(weak!(|v, _, row| v.on_row_activated(row)));
+        // A resize rewraps the lines and moves the current one out of the middle.
+        self.scroller.vadjustment().connect_changed(weak!(|v, _| v.recentre_after_layout()));
         // Only the scroll controller: a drag gesture fired on incidental pointer movement.
         let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
         let weak = Rc::downgrade(self);
@@ -886,15 +891,55 @@ impl LyricsView {
                 retries.set(retries.get() - 1);
                 return if retries.get() > 0 { glib::ControlFlow::Continue } else { glib::ControlFlow::Break };
             };
-            let viewport = f64::from(view.scroller.height());
-            if viewport <= 0.0 {
-                return glib::ControlFlow::Break;
+            if let Some(target) = view.centred_value(&bounds) {
+                view.animate_to(&view.scroller.vadjustment(), target);
             }
-            let adj = view.scroller.vadjustment();
-            let centred = f64::from(bounds.y()) - viewport / 2.0 + f64::from(bounds.height()) / 2.0;
-            view.animate_to(&adj, centred.clamp(adj.lower(), (adj.upper() - adj.page_size()).max(adj.lower())));
             glib::ControlFlow::Break
         });
+    }
+
+    /// Where the adjustment sits with a row of these bounds in the middle of the viewport.
+    fn centred_value(&self, bounds: &gtk::graphene::Rect) -> Option<f64> {
+        let viewport = f64::from(self.scroller.height());
+        if viewport <= 0.0 {
+            return None;
+        }
+        let adj = self.scroller.vadjustment();
+        let centred = f64::from(bounds.y()) - viewport / 2.0 + f64::from(bounds.height()) / 2.0;
+        Some(centred.clamp(adj.lower(), (adj.upper() - adj.page_size()).max(adj.lower())))
+    }
+
+    /// The viewport or the list changed size. The rows have their new bounds one frame later.
+    fn recentre_after_layout(self: &Rc<Self>) {
+        if !self.synced.get() || !self.root.is_mapped() || self.recentre_queued.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        self.root.add_tick_callback(move |_, _| {
+            if let Some(view) = weak.upgrade() {
+                view.recentre_queued.set(false);
+                view.recentre();
+            }
+            glib::ControlFlow::Break
+        });
+    }
+
+    /// Put the current line back in the middle at once: an eased scroll would trail a live resize.
+    fn recentre(&self) {
+        if self.user_scrolled_at.get().is_some_and(|at| at.elapsed() < USER_SCROLL_PAUSE) {
+            return;
+        }
+        let Some(bounds) = self.list.selected_row().and_then(|row| row.compute_bounds(&self.list)).filter(|b| b.height() > 0.0) else { return };
+        let Some(target) = self.centred_value(&bounds) else { return };
+        let adj = self.scroller.vadjustment();
+        if (adj.value() - target).abs() < 1.0 {
+            return;
+        }
+        // An eased scroll in flight is heading for where the line used to be.
+        if let Some(id) = self.scroll_anim.borrow_mut().take() {
+            id.remove();
+        }
+        adj.set_value(target);
     }
 
     /// Ease the adjustment to `target`. An animation in flight is replaced, so calls retarget smoothly.

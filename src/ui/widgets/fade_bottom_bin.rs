@@ -1,6 +1,9 @@
 //! Port of ui/widgets/fade_bottom_bin.py: a box that fades its content to
 //! alpha zero towards the bottom through a mask node in its snapshot. Used
 //! by the artist banner in blur mode, where the scrim cannot go opaque.
+//!
+//! The child hangs from the top edge at the height its width asks for, so a
+//! picture taller than the bin loses its bottom, under the fade, and keeps its top.
 
 use std::cell::Cell;
 
@@ -31,6 +34,12 @@ mod imp {
     impl ObjectImpl for FadeBottomBin {}
 
     impl WidgetImpl for FadeBottomBin {
+        fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
+            let Some(child) = self.obj().first_child() else { return };
+            let (_, natural, _, _) = child.measure(gtk::Orientation::Vertical, width);
+            child.allocate(width, natural.max(height), -1, None);
+        }
+
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let widget = self.obj();
             let (w, h) = (widget.width() as f32, widget.height() as f32);
