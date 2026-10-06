@@ -626,11 +626,16 @@ impl Player {
     /// appends to the queue, cancelled gapless for the rest of the track.
     fn resync_gapless(&self) {
         let armed = self.armed_next.borrow().as_ref().map(|a| a.video_id.clone());
-        let wanted = {
+        let (wanted_index, wanted) = {
             let q = self.queue.borrow();
-            q.armable_next().and_then(|i| q.track_at(i)).map(|t| t.video_id.clone())
+            let index = q.armable_next();
+            (index, index.and_then(|i| q.track_at(i)).map(|t| t.video_id.clone()))
         };
         if armed == wanted {
+            // Same track, but a shuffle toggle, a move or a removal may have shifted its row.
+            if let (Some(armed), Some(index)) = (self.armed_next.borrow_mut().as_mut(), wanted_index) {
+                armed.index = index;
+            }
             return;
         }
         self.disarm_gapless();

@@ -373,9 +373,10 @@ impl Queue {
             self.tracks = rest;
         } else {
             self.tracks = self.original.clone();
+            // Fall back to the id: a copy refined while playing no longer compares equal.
             self.current = playing
                 .as_ref()
-                .and_then(|p| self.tracks.iter().position(|t| t == p))
+                .and_then(|p| self.tracks.iter().position(|t| t == p).or_else(|| self.tracks.iter().position(|t| t.video_id == p.video_id)))
                 .or((!self.tracks.is_empty()).then_some(0));
         }
         self.shuffle = on;
@@ -409,6 +410,10 @@ impl Queue {
         let Some(slot) = self.current.and_then(|i| self.tracks.get_mut(i)) else { return false };
         if slot.video_id != refined.video_id {
             return false;
+        }
+        // The unshuffled order keeps its own copy, which shuffle-off brings back.
+        if let Some(original) = self.original.iter_mut().find(|t| **t == *slot) {
+            *original = refined.clone();
         }
         *slot = refined.clone();
         true
@@ -607,6 +612,20 @@ mod tests {
         assert!(!q.set_shuffle(false));
         assert_eq!(ids(&q), before, "the original order comes back");
         assert_eq!(q.current_track().map(|t| t.video_id.0.clone()), Some("c".to_owned()));
+    }
+
+    #[test]
+    fn turning_shuffle_off_follows_a_track_refined_while_it_played() {
+        let mut q = queue(&["a", "b", "c", "d", "e"], 3);
+        q.set_shuffle(true);
+        let mut refined = track("d");
+        refined.title = "Proper title".into();
+        assert!(q.refine_current(&refined));
+        q.set_repeat(RepeatMode::Track);
+        assert!(!q.set_shuffle(false));
+        assert_eq!(q.current(), Some(3), "the play-head lands on the playing track's own row");
+        assert_eq!(q.current_track().unwrap().title, "Proper title", "the refined copy survives the reorder");
+        assert_eq!(q.armable_next(), Some(3));
     }
 
     #[test]
