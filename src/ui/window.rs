@@ -468,6 +468,31 @@ impl MainWindow {
         self.on_expand_requested();
     }
 
+    /// The shortcut: open the player view, or close it when it is open. Does nothing without a queue.
+    pub fn toggle_player(&self) {
+        if self.ui.player.state().queue_length() == 0 {
+            return;
+        }
+        if self.is_compact.get() && self.bottom_sheet.is_open() {
+            self.dismiss_player();
+            return;
+        }
+        self.on_expand_requested();
+    }
+
+    /// The shortcut: reload the visible page, when it is one the refresh button serves.
+    pub fn refresh_current(&self) {
+        if self.lib_refresh.root.is_visible() && self.lib_refresh.button.is_visible() {
+            self.lib_refresh.button.emit_clicked();
+        }
+    }
+
+    /// The shortcut: open the search bar with the entry focused.
+    pub fn start_search(&self) {
+        self.search_bar.set_search_mode(true);
+        self.search_entry.grab_focus();
+    }
+
     /// Demo hook: show a page of the expanded player.
     pub fn show_sheet_page(&self, name: &str) {
         self.expanded_player.show_page(name);
@@ -692,6 +717,11 @@ impl MainWindow {
         self.ui.on_download(move |event| {
             let Some(this) = weak.upgrade() else { return false };
             match event {
+                // Not every download comes through `download_tracks`: a like queues one from the player.
+                crate::downloads::Event::Queued { .. } => {
+                    let (done, total) = this.ui.downloads.progress().unwrap_or((0, 1));
+                    this.download_progress.set_fraction(Some(done as f64 / total.max(1) as f64));
+                }
                 crate::downloads::Event::Advanced { done, total, .. } => {
                     this.download_progress.set_fraction(Some(*done as f64 / (*total).max(1) as f64));
                 }
@@ -1361,11 +1391,15 @@ impl MainWindow {
 
     /// Port of _get_refresh_target and _playlist_page_refresh.
     fn refresh_target(&self) -> Option<RefreshTarget> {
-        let on_library = self.view_stack.visible_child_name().as_deref() == Some("library");
         let nav = self.active_nav()?;
         let page = nav.visible_page()?;
-        if on_library && nav.previous_page(&page).is_none() {
-            return Some(RefreshTarget::Library);
+        if nav.previous_page(&page).is_none() {
+            return match self.view_stack.visible_child_name().as_deref() {
+                Some("library") => Some(RefreshTarget::Library),
+                Some("home") => Some(RefreshTarget::Home),
+                Some("explore") => Some(RefreshTarget::Explore),
+                _ => None,
+            };
         }
         match self.visible_pushed_page()? {
             PushedPage::Playlist(p) if p.is_refreshable() => Some(RefreshTarget::Playlist(p)),
@@ -1398,6 +1432,15 @@ impl MainWindow {
             };
             match target {
                 RefreshTarget::Library => w.library.refresh(done),
+                // These two put their own spinner up in place of the feed.
+                RefreshTarget::Home => {
+                    w.home.refresh();
+                    done();
+                }
+                RefreshTarget::Explore => {
+                    w.explore.load_explore_data(true);
+                    done();
+                }
                 RefreshTarget::Playlist(page) => {
                     page.refresh_in_place();
                     // The page hides its inline spinner once the fetch completes; poll for that.
@@ -2041,8 +2084,7 @@ impl ProgressButton {
     }
 }
 
-/// Refresh button plus spinner, shown only on the Library tab.
-/// The header-bar refresh button and its spinner, shown for the library root and user playlists.
+/// The header-bar refresh button and its spinner, shown for the root of each tab, user playlists and the history.
 pub struct LibraryRefresh {
     root: gtk::Box,
     button: gtk::Button,
@@ -2131,6 +2173,8 @@ impl PushedPage {
 
 enum RefreshTarget {
     Library,
+    Home,
+    Explore,
     Playlist(Rc<PlaylistPage>),
     History(Rc<HistoryPage>),
 }
@@ -2517,6 +2561,22 @@ fn install_actions(
             }),
         );
     }
+    for (name, run) in [
+        ("toggle-player", MainWindow::toggle_player as fn(&MainWindow)),
+        ("refresh", MainWindow::refresh_current),
+        ("search", MainWindow::start_search),
+    ] {
+        let ctx = ctx.clone();
+        add(
+            name,
+            true,
+            Box::new(move || {
+                if let Some(win) = ctx.window.borrow().as_ref() {
+                    run(win);
+                }
+            }),
+        );
+    }
     {
         let ctx = ctx.clone();
         add(
@@ -2663,6 +2723,9 @@ fn install_actions(
     app.set_accels_for_action("win.preferences", &["<Primary>comma"]);
     app.set_accels_for_action("win.shortcuts", &["<Primary>question", "<Primary>slash"]);
     app.set_accels_for_action("win.quit", &["<Primary>q"]);
+    app.set_accels_for_action("win.toggle-player", &["<Primary>e"]);
+    app.set_accels_for_action("win.refresh", &["F5", "<Primary>r"]);
+    app.set_accels_for_action("win.search", &["<Primary>f"]);
 }
 
 fn apply_color_scheme(value: &str) {
@@ -2674,44 +2737,36 @@ fn apply_color_scheme(value: &str) {
     adw::StyleManager::default().set_color_scheme(scheme);
 }
 
-/// Shortcut list as an AdwDialog, matching the sections of the Python dialog.
-fn build_shortcuts_dialog() -> adw::Dialog {
-    let page = adw::PreferencesPage::new();
+/// The shortcut list, as libadwaita's own dialog.
+fn build_shortcuts_dialog() -> adw::ShortcutsDialog {
+    let dialog = adw::ShortcutsDialog::new();
     for (title, entries) in [
         (
             "General",
             vec![
-                ("Preferences", "Ctrl + ,"),
-                ("Keyboard Shortcuts", "Ctrl + ?"),
-                ("Quit", "Ctrl + Q"),
-                ("Go Back / Close Search", "Esc"),
+                ("Preferences", "<Control>comma"),
+                ("Keyboard Shortcuts", "<Control>question"),
+                ("Refresh", "F5 <Control>r"),
+                ("Go Back / Close Search", "Escape"),
+                ("Quit", "<Control>q"),
             ],
         ),
-        ("Playback", vec![("Play / Pause", "Space")]),
-        ("Search", vec![("Start Typing to Search", "a")]),
+        (
+            "Playback",
+            vec![
+                ("Play / Pause", "space"),
+                ("Open / Close Player", "<Control>e"),
+            ],
+        ),
+        ("Search", vec![("Search", "<Control>f")]),
     ] {
-        let group = adw::PreferencesGroup::builder().title(title).build();
+        let section = adw::ShortcutsSection::new(Some(title));
         for (name, accel) in entries {
-            let row = adw::ActionRow::builder().title(name).build();
-            row.add_suffix(
-                &gtk::Label::builder()
-                    .label(accel)
-                    .css_classes(["dim-label", "numeric"])
-                    .build(),
-            );
-            group.add(&row);
+            section.add(adw::ShortcutsItem::new(name, accel));
         }
-        page.add(&group);
+        dialog.add(section);
     }
-    let view = adw::ToolbarView::new();
-    view.add_top_bar(&adw::HeaderBar::new());
-    view.set_content(Some(&page));
-    adw::Dialog::builder()
-        .title("Keyboard Shortcuts")
-        .content_width(420)
-        .content_height(480)
-        .child(&view)
-        .build()
+    dialog
 }
 
 /// Hide instead of quitting while something is queued, unless background play is off.

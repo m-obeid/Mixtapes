@@ -40,7 +40,7 @@ const STALE_TMP: Duration = Duration::from_secs(3600);
 #[derive(Debug, Clone)]
 pub enum Event {
     /// A track joined the queue.
-    Queued { video_id: String },
+    Queued { video_id: String, title: String },
     /// How far the file itself is, 0 to 1.
     Progress { video_id: String, fraction: f64 },
     /// One track finished, for better or worse.
@@ -188,7 +188,7 @@ impl Downloads {
     }
 
     fn queue_one(self: &Arc<Self>, track: Track, album_id: &str, track_number: Option<u32>) {
-        let video_id = track.video_id.0.clone();
+        let (video_id, title) = (track.video_id.0.clone(), track.title.clone());
         if video_id.is_empty() || self.is_downloaded(&video_id) {
             return;
         }
@@ -209,7 +209,7 @@ impl Downloads {
             queue.waiting.push_back(job);
             queue.total += 1;
         }
-        self.emit(Event::Queued { video_id });
+        self.emit(Event::Queued { video_id, title });
     }
 
     /// Remember a playlist so its .m3u8 mirror is rewritten as tracks land.

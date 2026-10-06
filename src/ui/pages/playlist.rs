@@ -606,7 +606,7 @@ impl PlaylistPage {
         self.ctx.on_download(move |event| {
             let Some(page) = weak.upgrade() else { return false };
             let video_id = match event {
-                crate::downloads::Event::Queued { video_id } | crate::downloads::Event::Removed { video_id } => video_id.clone(),
+                crate::downloads::Event::Queued { video_id, .. } | crate::downloads::Event::Removed { video_id } => video_id.clone(),
                 crate::downloads::Event::Item { video_id, ok: true, .. } => video_id.clone(),
                 _ => return true,
             };

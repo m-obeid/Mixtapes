@@ -102,6 +102,8 @@ pub struct Player {
     stamp: Cell<u64>,
     /// When a play is written to the account's history.
     history_mode: RefCell<String>,
+    /// `download_liked` in the prefs: a like also queues the download.
+    download_liked: Cell<bool>,
     /// The video this session has already recorded, so it records once.
     history_recorded: RefCell<Option<String>>,
     /// The video already written to the play log on this device.
@@ -138,6 +140,7 @@ impl Player {
             infinite_fetching: Cell::new(false),
             stamp: Cell::new(0),
             history_mode: RefCell::new(paths.read_prefs().get("history_mode").and_then(|v| v.as_str()).unwrap_or(HISTORY_IMMEDIATE).to_owned()),
+            download_liked: Cell::new(paths.read_prefs().get("download_liked").and_then(|v| v.as_bool()).unwrap_or(false)),
             history_recorded: RefCell::new(None),
             local_logged: RefCell::new(None),
             swap_checked: RefCell::new(std::collections::HashSet::new()),
@@ -229,6 +232,11 @@ impl Player {
         self.history_mode.replace(mode.to_owned());
     }
 
+    /// Turn downloading on a like on or off, live.
+    pub fn set_download_liked(&self, enabled: bool) {
+        self.download_liked.set(enabled);
+    }
+
     pub fn state(&self) -> &PlayerState {
         &self.state
     }
@@ -299,6 +307,9 @@ impl Player {
     /// Rate a track. Applies locally at once, reverts if the server rejects it.
     /// Without a session the like lives in the local library instead.
     pub fn set_like_status(&self, video_id: VideoId, status: LikeStatus) {
+        if status == LikeStatus::Like && self.download_liked.get() {
+            self.download_liked_track(&video_id);
+        }
         let client = self.net.client().clone();
         if !client.auth_state().has_session() {
             let known = self.queue.borrow().tracks().iter().find(|t| t.video_id == video_id).cloned();
@@ -333,6 +344,17 @@ impl Player {
                 player.state.emit_notice("Couldn't update rating");
             }
         });
+    }
+
+    /// Queue a liked track for download. A like from a card carries only the
+    /// id, and the download job fills in the rest.
+    fn download_liked_track(&self, video_id: &VideoId) {
+        let known = self.queue.borrow().tracks().iter().find(|t| t.video_id == *video_id).cloned();
+        let track = known.unwrap_or_else(|| Track { video_id: video_id.clone(), ..Track::default() });
+        if track.is_live {
+            return;
+        }
+        self.downloads.queue_tracks(vec![track], "", "");
     }
 
     fn apply_like_locally(&self, video_id: &VideoId, status: LikeStatus) {

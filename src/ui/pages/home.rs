@@ -35,6 +35,8 @@ const SPEED_DIAL_ROWS: i32 = 3;
 const SPEED_DIAL_ROWS_COMPACT: i32 = 4;
 const LONG_LISTENS_ROWS: i32 = 4;
 const SPEED_DIAL_SPACING: i32 = 8;
+/// Room around the tiles for their shadow and focus ring, which the scroller would clip.
+const SPEED_DIAL_BLEED: i32 = 8;
 const LABEL_NATURAL_MAX_CHARS: i32 = 12;
 
 /// A grid of tiles that scrolls sideways, `rows` high.
@@ -377,6 +379,10 @@ impl HomePage {
             wrap.append(&tile.tile);
             tiles.push(tile);
         }
+        for set_margin in [gtk::Widget::set_margin_top, gtk::Widget::set_margin_bottom, gtk::Widget::set_margin_start, gtk::Widget::set_margin_end] {
+            set_margin(wrap.upcast_ref(), SPEED_DIAL_BLEED);
+        }
+        scroll_box.widget().add_css_class("home-speed-scroll");
         scroll_box.set_content(&wrap);
         section_box.append(scroll_box.widget());
 
@@ -429,7 +435,7 @@ impl HomePage {
         tile.connect_clicked(move |_| activate_item_with_radio(&ctx, &item_c, &pool_c));
         attach_item_menu(&self.ctx, &tile, item.clone());
         if item.kind.is_playable() {
-            self.playing.track(&tile, &item.id);
+            self.playing.track_styled(&tile, &item.id);
         }
         SpeedTile { tile, text_col, title, cover }
     }
@@ -442,7 +448,7 @@ impl HomePage {
         if viewport <= 0 {
             return SPEED_TILE_WIDTH_COMPACT;
         }
-        SPEED_TILE_WIDTH_COMPACT.min(viewport - SPEED_DIAL_PEEK).max(SPEED_TILE_WIDTH_COMPACT_MIN)
+        SPEED_TILE_WIDTH_COMPACT.min(viewport - 2 * SPEED_DIAL_BLEED - SPEED_DIAL_PEEK).max(SPEED_TILE_WIDTH_COMPACT_MIN)
     }
 
     fn apply_speed_tile_style(&self, compact: bool) {

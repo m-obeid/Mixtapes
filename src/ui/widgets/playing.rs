@@ -9,7 +9,8 @@ use gtk::{glib, prelude::*};
 use crate::state::PlayerState;
 
 pub struct PlayingTracker {
-    entries: RefCell<Vec<(glib::WeakRef<gtk::Widget>, String)>>,
+    /// Widget, video id, and whether the widget is flat while it is not playing.
+    entries: RefCell<Vec<(glib::WeakRef<gtk::Widget>, String, bool)>>,
     state: PlayerState,
 }
 
@@ -31,30 +32,42 @@ impl PlayingTracker {
     }
 
     pub fn track(&self, widget: &impl IsA<gtk::Widget>, video_id: &str) {
+        self.track_as(widget, video_id, true);
+    }
+
+    /// For a widget with a look of its own, such as a card: `flat` would take its shadow.
+    pub fn track_styled(&self, widget: &impl IsA<gtk::Widget>, video_id: &str) {
+        self.track_as(widget, video_id, false);
+    }
+
+    fn track_as(&self, widget: &impl IsA<gtk::Widget>, video_id: &str, flat: bool) {
         if video_id.is_empty() {
             return;
         }
         let widget = widget.upcast_ref::<gtk::Widget>();
-        apply(widget, self.state.is_playing_id(video_id));
-        self.entries.borrow_mut().push((widget.downgrade(), video_id.to_owned()));
+        apply(widget, self.state.is_playing_id(video_id), flat);
+        self.entries.borrow_mut().push((widget.downgrade(), video_id.to_owned(), flat));
     }
 
     fn refresh(&self) {
-        self.entries.borrow_mut().retain(|(w, _)| w.upgrade().is_some());
-        for (weak, id) in self.entries.borrow().iter() {
+        self.entries.borrow_mut().retain(|(w, _, _)| w.upgrade().is_some());
+        for (weak, id, flat) in self.entries.borrow().iter() {
             if let Some(widget) = weak.upgrade() {
-                apply(&widget, self.state.is_playing_id(id));
+                apply(&widget, self.state.is_playing_id(id), *flat);
             }
         }
     }
 }
 
-fn apply(widget: &gtk::Widget, playing: bool) {
+fn apply(widget: &gtk::Widget, playing: bool, flat: bool) {
     if playing {
         widget.add_css_class("playing");
-        widget.remove_css_class("flat");
     } else {
         widget.remove_css_class("playing");
+    }
+    if flat && !playing {
         widget.add_css_class("flat");
+    } else {
+        widget.remove_css_class("flat");
     }
 }

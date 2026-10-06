@@ -14,9 +14,9 @@ path = "src/main.rs"
 [dependencies]
 # GNOME stack. gtk4 0.11, libadwaita 0.9 and gstreamer 0.25 all build on glib 0.22.
 # One glib major across the tree is what lets gst and gtk types cross freely.
-# Version floors: GTK 4.18, libadwaita 1.7, GStreamer 1.24 (GNOME 48 runtime).
+# Version floors: GTK 4.18, libadwaita 1.8, GStreamer 1.24 (GNOME 49 runtime).
 gtk = { package = "gtk4", version = "0.11", features = ["v4_18"] }
-adw = { package = "libadwaita", version = "0.9", features = ["v1_7"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_8"] }
 glib = "0.22"
 gio = "0.22"
 gst = { package = "gstreamer", version = "0.25", features = ["v1_24"] }
