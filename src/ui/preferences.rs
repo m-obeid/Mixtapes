@@ -359,6 +359,13 @@ fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup 
     group.add(&restore_row);
     group.add(&autoplay_row);
 
+    let queue_row = switch_row("Open Queue When Playback Starts", "Show the queue sidebar when you start a song, an album or a playlist", pref_bool(ctx, "auto_open_queue", false));
+    {
+        let ctx = ctx.clone();
+        queue_row.connect_active_notify(move |row| save(&ctx, "auto_open_queue", row.is_active()));
+    }
+    group.add(&queue_row);
+
     let current = pref_str(ctx, "history_mode", "immediate");
     let labels: Vec<&str> = HISTORY_MODES.iter().map(|(_, label)| *label).collect();
     let selected = HISTORY_MODES.iter().position(|(key, _)| *key == current).unwrap_or(0);

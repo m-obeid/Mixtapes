@@ -83,6 +83,8 @@ pub struct MainWindow {
     is_compact: Cell<bool>,
     sidebar_explicitly_opened: Cell<bool>,
     search_timer: RefCell<Option<glib::SourceId>>,
+    /// The page the search bar last filtered with a query, until that query is cleared.
+    applied_filter: RefCell<Option<SearchFilter>>,
     /// The channel behind the account's handle, resolved once per session.
     own_channel: RefCell<Option<String>>,
     upload_progress: Rc<ProgressButton>,
@@ -341,6 +343,7 @@ impl MainWindow {
             is_compact: Cell::new(false),
             sidebar_explicitly_opened: Cell::new(false),
             search_timer: RefCell::new(None),
+            applied_filter: RefCell::new(None),
             own_channel: RefCell::new(None),
             upload_progress,
             download_queue: DownloadQueue::new(ui_for_queue.clone(), download_progress.items_box().clone()),
@@ -416,7 +419,7 @@ impl MainWindow {
     }
 
     pub fn add_toast(&self, message: &str) {
-        self.toast_overlay.add_toast(adw::Toast::new(message));
+        self.toast_overlay.add_toast(adw::Toast::builder().title(message).use_markup(false).build());
     }
 
     /// Both live visualizers: the desktop cover view's and the expanded player's.
@@ -491,6 +494,11 @@ impl MainWindow {
     /// Demo hook: show a page of the expanded player.
     pub fn show_sheet_page(&self, name: &str) {
         self.expanded_player.show_page(name);
+    }
+
+    /// Demo hook: the search bar's entry, to type into and to press Escape on.
+    pub fn search_entry_for_demo(&self) -> &gtk::SearchEntry {
+        &self.search_entry
     }
 
     pub fn select_tab(&self, name: &str) {
@@ -1579,6 +1587,11 @@ impl MainWindow {
                 let Some(w) = weak.upgrade() else { return };
                 w.dismiss_cover_if_open();
                 w.update_back_button();
+                // The query was typed for the tab left behind: its page shows
+                // everything again, and the bar does not carry the text along.
+                if w.clear_applied_filter() {
+                    w.search_entry.set_text("");
+                }
                 if w.search_bar.is_search_mode()
                     && stack.visible_child_name().as_deref() != Some("search")
                 {
@@ -1674,6 +1687,9 @@ impl MainWindow {
                         nav.pop_to_tag("root");
                     }
                 } else {
+                    // The entry reports its emptied text late, and by then another
+                    // tab may be showing. The page that was filtered is known here.
+                    w.clear_applied_filter();
                     w.explore.show_explore();
                 }
             });
@@ -1694,6 +1710,7 @@ impl MainWindow {
             // The library, a playlist or a discography filters its own rows instead.
             if let Some(filter) = w.active_filter() {
                 filter(&text);
+                w.applied_filter.replace((!text.trim().is_empty()).then_some(filter));
                 return;
             }
             let weak = Rc::downgrade(&w);
@@ -1709,11 +1726,23 @@ impl MainWindow {
         self.search_entry.connect_stop_search(move |_| {
             if let Some(w) = weak.upgrade() {
                 w.search_bar.set_search_mode(false);
+                w.clear_applied_filter();
                 if let Some(filter) = w.active_filter() {
                     filter("");
                 }
             }
         });
+    }
+
+    /// Show everything again on the page the search bar filtered. True when there was one.
+    fn clear_applied_filter(&self) -> bool {
+        match self.applied_filter.take() {
+            Some(filter) => {
+                filter("");
+                true
+            }
+            None => false,
+        }
     }
 
     fn run_search(&self, text: &str) {
@@ -1845,6 +1874,17 @@ impl MainWindow {
                 w.sync_player_bar_visibility();
             }
         });
+        // The `auto_open_queue` pref: starting an album, a playlist or a song brings
+        // the queue up, the way an emptied queue closes it. Phones have no sidebar.
+        let weak = Rc::downgrade(self);
+        state.connect_local("queue-started", false, move |_| {
+            let w = weak.upgrade()?;
+            let wanted = w.ui.paths.read_prefs().get("auto_open_queue").and_then(|v| v.as_bool()).unwrap_or(false);
+            if wanted && !w.is_compact.get() && !w.split_view.shows_sidebar() {
+                w.show_queue(true);
+            }
+            None
+        });
         let overlay = self.toast_overlay.downgrade();
         state.connect_local("track-error", false, move |values| {
             let title = values
@@ -1861,7 +1901,7 @@ impl MainWindow {
                 } else {
                     format!("Couldn't play '{title}': {reason}")
                 };
-                overlay.add_toast(adw::Toast::new(&text));
+                overlay.add_toast(adw::Toast::builder().title(&text).use_markup(false).build());
             }
             None
         });
@@ -1872,7 +1912,7 @@ impl MainWindow {
                 .and_then(|v| v.get::<String>().ok())
                 .unwrap_or_default();
             if let Some(overlay) = overlay.upgrade() {
-                overlay.add_toast(adw::Toast::new(&text));
+                overlay.add_toast(adw::Toast::builder().title(&text).use_markup(false).build());
             }
             None
         });

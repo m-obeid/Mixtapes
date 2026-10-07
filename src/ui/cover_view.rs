@@ -325,6 +325,15 @@ impl DesktopCoverView {
                 }
             });
         }
+        // A click on the bar opens this view, and a click on anything here that is not a control closes it.
+        {
+            let weak = Rc::downgrade(&this);
+            crate::ui::on_background_click(&this.root, move || {
+                if let Some(view) = weak.upgrade() {
+                    view.dismiss();
+                }
+            });
+        }
         this.connect_lyrics(&cover_overlay);
         this.bind_state();
         this.refresh_metadata();

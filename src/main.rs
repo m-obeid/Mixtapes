@@ -221,6 +221,9 @@ fn on_startup(ctx: &Rc<App>) {
     // Event pumps must attach to the running GTK main context.
     ctx.player.start();
     let prefs = ctx.paths.read_prefs();
+    if !prefs.get("force_offline").and_then(|v| v.as_bool()).unwrap_or(false) {
+        ctx.player.fill_liked_stubs();
+    }
     ctx.player.restore_session(prefs.get("autoplay_on_start").and_then(|v| v.as_bool()).unwrap_or(false));
     ctx.mpris.replace(Some(Mpris::start(ctx)));
     tray::start(ctx);

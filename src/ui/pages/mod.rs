@@ -16,20 +16,22 @@ use std::rc::Rc;
 use gtk::prelude::*;
 
 use crate::model::{ItemKind, MediaItem, Track};
+use crate::queue::QueueSource;
 use crate::ui::context::{NavRequest, UiContext};
 
 /// Port of home.py _activate_item: play songs and videos, navigate for the rest.
-pub fn activate_item(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem]) {
+/// `from` names the queue a song starts: the shelf or the search it was clicked in.
+pub fn activate_item(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem], from: &str) {
     match item.kind {
         ItemKind::Song | ItemKind::Video => {
             let tracks: Vec<_> = pool.iter().filter_map(MediaItem::to_track).collect();
             let index = tracks.iter().position(|t| t.video_id.as_str() == item.id).unwrap_or(0);
             if tracks.is_empty() {
                 if let Some(track) = item.to_track() {
-                    ctx.player.play_tracks(vec![track], 0, false, None, false);
+                    ctx.player.play_tracks(vec![track], 0, false, QueueSource::shelf(from), false);
                 }
             } else {
-                ctx.player.play_tracks(tracks, index, false, None, false);
+                ctx.player.play_tracks(tracks, index, false, QueueSource::shelf(from), false);
             }
         }
         ItemKind::Album => {
@@ -47,9 +49,9 @@ pub fn activate_item(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem]) 
 /// Home's variant: a song or video plays the whole shelf it was in and then
 /// keeps going with a radio seeded from the shelf's last track, like
 /// _play_with_radio. Everything else navigates as usual.
-pub fn activate_item_with_radio(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem]) {
+pub fn activate_item_with_radio(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem], from: &str) {
     if !item.kind.is_playable() {
-        activate_item(ctx, item, pool);
+        activate_item(ctx, item, pool, from);
         return;
     }
     let mut tracks: Vec<Track> = pool.iter().filter_map(MediaItem::to_track).collect();
@@ -60,7 +62,7 @@ pub fn activate_item_with_radio(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[M
         index = 0;
     }
     let seed = tracks.last().map(|t| t.video_id.0.clone()).unwrap_or_default();
-    ctx.player.play_then_radio(tracks, index, &seed);
+    ctx.player.play_then_radio(tracks, index, &seed, from);
 }
 
 /// Right-click and long-press on a widget open the item menu.
@@ -80,6 +82,24 @@ pub fn attach_item_menu(ctx: &Rc<UiContext>, widget: &impl IsA<gtk::Widget>, ite
 }
 
 /// Loading placeholder used while a page fetches.
+/// A section's heading, with View All at the far end of the line when the
+/// section holds more than it shows. At the end of a carousel it took a
+/// scroll through every card to reach.
+pub fn section_header(title: &str, on_view_all: Option<Box<dyn Fn()>>) -> gtk::Box {
+    let header = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).build();
+    header.append(&gtk::Label::builder().label(title).css_classes(["heading"]).halign(gtk::Align::Start).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build());
+    if let Some(on_view_all) = on_view_all {
+        let content = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).build();
+        content.append(&gtk::Label::new(Some("View All")));
+        content.append(&gtk::Image::from_icon_name("go-next-symbolic"));
+        let button = gtk::Button::builder().child(&content).css_classes(["flat", "dim-label", "caption", "view-all"]).valign(gtk::Align::Center).tooltip_text(format!("View All {title}")).build();
+        button.set_cursor_from_name(Some("pointer"));
+        button.connect_clicked(move |_| on_view_all());
+        header.append(&button);
+    }
+    header
+}
+
 pub fn loading_box(text: &str) -> gtk::Box {
     let b = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).valign(gtk::Align::Center).halign(gtk::Align::Center).build();
     let spinner = adw::Spinner::new();

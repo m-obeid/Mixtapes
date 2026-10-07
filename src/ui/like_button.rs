@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use gtk::{gdk, glib, prelude::*};
 
-use crate::model::{LikeStatus, VideoId};
+use crate::model::{LikeStatus, Track, VideoId};
 use crate::player::Player;
 
 pub struct LikeButton {
@@ -15,6 +15,8 @@ pub struct LikeButton {
     dislike_label: gtk::Label,
     player: Rc<Player>,
     video_id: RefCell<Option<VideoId>>,
+    /// What the row knows about the song, so a like made off the queue keeps its title.
+    track: RefCell<Option<Track>>,
     status: Cell<LikeStatus>,
     suppress_next_click: Cell<bool>,
 }
@@ -40,6 +42,7 @@ impl LikeButton {
             dislike_label,
             player,
             video_id: RefCell::new(None),
+            track: RefCell::new(None),
             status: Cell::new(LikeStatus::Indifferent),
             suppress_next_click: Cell::new(false),
         });
@@ -101,6 +104,7 @@ impl LikeButton {
     /// know: a card off a carousel carries no rating, and seeding the session
     /// cache with its guess would tell every other row the song is unrated.
     pub fn set_data(&self, video_id: Option<VideoId>, status: Option<LikeStatus>) {
+        self.track.replace(None);
         let Some(video_id) = video_id.filter(|v| !v.0.is_empty()) else {
             self.video_id.replace(None);
             self.status.set(LikeStatus::Indifferent);
@@ -134,6 +138,15 @@ impl LikeButton {
         self.button.set_visible(true);
     }
 
+    /// Point the button at a track the row holds in full. The local library
+    /// stores a like as the whole track, and an id alone showed up as "Unknown".
+    pub fn set_track(&self, track: &Track, status: Option<LikeStatus>) {
+        self.set_data(Some(track.video_id.clone()), status);
+        if !track.video_id.0.is_empty() {
+            self.track.replace(Some(track.clone()));
+        }
+    }
+
     fn on_clicked(&self) {
         if self.video_id.borrow().is_none() {
             return;
@@ -159,7 +172,7 @@ impl LikeButton {
         let Some(video_id) = self.video_id.borrow().clone() else { return };
         self.status.set(status);
         self.update_icon();
-        self.player.set_like_status(video_id, status);
+        self.player.rate(video_id, status, self.track.borrow().clone());
     }
 
     fn update_icon(&self) {

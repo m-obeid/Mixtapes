@@ -211,8 +211,8 @@ impl CategoryPage {
         for item in items {
             let card = MediaCard::new(&self.ctx, item.clone(), CardOptions { title_lines: 1, ..CardOptions::default() });
             let ctx = self.ctx.clone();
-            let pool_c = pool.clone();
-            card.connect_clicked(move |item| activate_item(&ctx, item, &pool_c));
+            let (pool_c, shelf) = (pool.clone(), title.to_owned());
+            card.connect_clicked(move |item| activate_item(&ctx, item, &pool_c, &shelf));
             self.attach_card_menu(card.widget(), item);
             strip.append(card.widget());
             self.cards.borrow_mut().push(card);
@@ -246,10 +246,10 @@ impl CategoryPage {
             self.rows.borrow_mut().push(row);
         }
         let ctx = self.ctx.clone();
-        let shown = showing.to_vec();
+        let (shown, shelf) = (showing.to_vec(), title.to_owned());
         list.connect_row_activated(move |_, row| {
             if let Some(item) = shown.get(row.index().max(0) as usize) {
-                activate_item(&ctx, item, &pool);
+                activate_item(&ctx, item, &pool, &shelf);
             }
         });
         section.append(&list);

@@ -68,6 +68,13 @@ impl QueueSource {
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
         Self { id: id.into(), title: title.into() }
     }
+
+    /// A queue started from a shelf, a search or a card: named after where the
+    /// listener clicked, under an id no page answers to. None without a name.
+    pub fn shelf(title: &str) -> Option<Self> {
+        let title = title.trim();
+        (!title.is_empty()).then(|| Self::new(format!("shelf:{title}"), title))
+    }
 }
 
 impl From<String> for QueueSource {

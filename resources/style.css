@@ -869,10 +869,13 @@ gridview.playlist-view > child,
 }
 .queue-row:hover .queue-cover > image,
 .queue-row.playing .queue-cover > image {
-  filter: brightness(0.25);
+  filter: brightness(0.55);
 }
 .queue-badge {
   color: white;
+  /* The cover stays visible under the badge, so the shadow carries the contrast. */
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.8);
+  -gtk-icon-shadow: 0 0 4px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.8);
   opacity: 0;
   transition: opacity 150ms ease;
 }
@@ -893,4 +896,15 @@ gridview.queue-list > child {
 .mx-preferences viewswitcher button.toggle > stack > box.narrow > label {
   padding-left: 0;
   padding-right: 0;
+}
+
+/* View All beside a section heading: small, so the heading's line stays as tall as its text. */
+button.view-all {
+  min-height: 0;
+  padding: 2px 8px;
+  margin: -4px 0;
+  font-weight: normal;
+}
+button.view-all image {
+  -gtk-icon-size: 12px;
 }

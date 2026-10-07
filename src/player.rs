@@ -33,6 +33,40 @@ const HISTORY_NEVER: &str = "never";
 const AUDIO_VIDEO_TYPE: &str = "MUSIC_VIDEO_TYPE_ATV";
 /// How long "after_30s" waits. YT Music counts a play at about this point.
 const HISTORY_THRESHOLD_SECS: f64 = 30.0;
+/// Two position ticks further apart than this are a seek, not listening.
+const LISTEN_GAP_SECS: f64 = 2.0;
+
+/// How long the current track has been heard. The position says where the
+/// song is, and a seek past the mark is not a listen.
+#[derive(Default)]
+struct Listened {
+    video_id: String,
+    last_position: Option<f64>,
+    seconds: f64,
+}
+
+impl Listened {
+    /// Take a position tick and answer with the seconds heard so far.
+    fn tick(&mut self, video_id: &str, position: f64, playing: bool) -> f64 {
+        if self.video_id != video_id {
+            *self = Self { video_id: video_id.to_owned(), ..Self::default() };
+        }
+        let step = self.last_position.map(|last| position - last).unwrap_or(0.0);
+        if playing && step > 0.0 && step <= LISTEN_GAP_SECS {
+            self.seconds += step;
+        }
+        self.last_position = Some(position);
+        self.seconds
+    }
+
+    /// The audio twin of a video carries on the same listen under its own id.
+    fn rename(&mut self, from: &str, to: &str) {
+        if self.video_id == from {
+            self.video_id = to.to_owned();
+            self.last_position = None;
+        }
+    }
+}
 /// How long after a volume change made here the sink's own reports are taken
 /// as echoes of it. Windows' sink reports late and sometimes the value before.
 const VOLUME_ECHO_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
@@ -108,6 +142,8 @@ pub struct Player {
     history_recorded: RefCell<Option<String>>,
     /// The video already written to the play log on this device.
     local_logged: RefCell<Option<String>>,
+    /// Seconds of the current track heard, what "after 30 seconds" counts.
+    listened: RefCell<Listened>,
     /// Videos already looked up for an audio twin, so the lookup is paid once.
     swap_checked: RefCell<std::collections::HashSet<String>>,
     /// Told when a play starts or its metadata is corrected. See `on_play`.
@@ -151,6 +187,7 @@ impl Player {
             download_liked: Cell::new(paths.read_prefs().get("download_liked").and_then(|v| v.as_bool()).unwrap_or(false)),
             history_recorded: RefCell::new(None),
             local_logged: RefCell::new(None),
+            listened: RefCell::new(Listened::default()),
             swap_checked: RefCell::new(std::collections::HashSet::new()),
             play_listeners: RefCell::new(Vec::new()),
             swapping: Cell::new(false),
@@ -400,12 +437,18 @@ impl Player {
     /// Rate a track. Applies locally at once, reverts if the server rejects it.
     /// Without a session the like lives in the local library instead.
     pub fn set_like_status(&self, video_id: VideoId, status: LikeStatus) {
+        self.rate(video_id, status, None);
+    }
+
+    /// `set_like_status` from a row that holds the track: a song liked off
+    /// the queue is known by nothing else here.
+    pub fn rate(&self, video_id: VideoId, status: LikeStatus, known: Option<Track>) {
+        let known = self.queue.borrow().tracks().iter().find(|t| t.video_id == video_id).cloned().or(known);
         if status == LikeStatus::Like && self.download_liked.get() {
-            self.download_liked_track(&video_id);
+            self.download_liked_track(&video_id, known.clone());
         }
         let client = self.net.client().clone();
         if !client.auth_state().has_session() {
-            let known = self.queue.borrow().tracks().iter().find(|t| t.video_id == video_id).cloned();
             let track = self.local.track_or_stub(&video_id, known);
             self.local.set_liked(&track, status == LikeStatus::Like);
             self.apply_like_locally(&video_id, status);
@@ -441,13 +484,39 @@ impl Player {
 
     /// Queue a liked track for download. A like from a card carries only the
     /// id, and the download job fills in the rest.
-    fn download_liked_track(&self, video_id: &VideoId) {
-        let known = self.queue.borrow().tracks().iter().find(|t| t.video_id == *video_id).cloned();
+    fn download_liked_track(&self, video_id: &VideoId, known: Option<Track>) {
         let track = known.unwrap_or_else(|| Track { video_id: video_id.clone(), ..Track::default() });
         if track.is_live {
             return;
         }
         self.downloads.queue_tracks(vec![track], "", "");
+    }
+
+    /// Look up the likes that were saved as a bare id and give them their
+    /// title, artist and cover. Call once at startup, when the network may be used.
+    pub fn fill_liked_stubs(&self) {
+        let stubs = self.local.liked_stubs();
+        if stubs.is_empty() {
+            return;
+        }
+        tracing::info!(count = stubs.len(), "looking up likes saved without a title");
+        let (api, local) = (self.net.client().api(), self.local.clone());
+        self.net.spawn(async move {
+            for video_id in stubs {
+                match crate::net::playlists::get_watch_playlist(&*api, Some(video_id.as_str()), None, 1, false).await {
+                    Ok(watch) => {
+                        if let Some(track) = watch.tracks.into_iter().map(|w| w.track).find(|t| t.video_id == video_id) {
+                            local.fill_liked(&track);
+                        }
+                    }
+                    // Offline, most likely. The next start tries again.
+                    Err(err) => {
+                        tracing::debug!(%err, "like lookup failed");
+                        break;
+                    }
+                }
+            }
+        });
     }
 
     fn apply_like_locally(&self, video_id: &VideoId, status: LikeStatus) {
@@ -553,6 +622,9 @@ impl Player {
         self.state.set_shuffle(shuffle);
         self.sync_queue_model();
         self.apply(step);
+        if self.state.queue_length() > 0 {
+            self.state.emit_queue_started();
+        }
     }
 
     pub fn add_to_queue(&self, tracks: Vec<Track>, play_next: bool) {
@@ -1079,14 +1151,13 @@ impl Player {
                 self.state.set_position(position);
                 self.position_mark
                     .set(Some((std::time::Instant::now(), position)));
-                if self.history_mode.borrow().as_str() == HISTORY_AFTER_30S
-                    && position >= HISTORY_THRESHOLD_SECS
-                    && self.state.status() == PlaybackStatus::Playing
-                {
+                let playing = self.state.status() == PlaybackStatus::Playing;
+                let listened = self.listened.borrow_mut().tick(&self.state.video_id(), position, playing);
+                if self.history_mode.borrow().as_str() == HISTORY_AFTER_30S && listened >= HISTORY_THRESHOLD_SECS && playing {
                     self.record_play(&self.state.video_id());
                 }
-                if self.state.status() == PlaybackStatus::Playing {
-                    self.log_local_play(position, duration.unwrap_or(self.state.duration()));
+                if playing {
+                    self.log_local_play(listened, duration.unwrap_or(self.state.duration()));
                 }
                 if let Some(d) = duration {
                     if (self.state.duration() - d).abs() > 0.1 {
@@ -1223,7 +1294,11 @@ impl Player {
         }
         // This is the same play under a new id: the history entry the load
         // already recorded stands, so mark it before the metadata goes out.
-        self.history_recorded.replace(Some(swapped.video_id.0.clone()));
+        // One still waiting for its 30 seconds keeps waiting.
+        if self.history_recorded.borrow().as_deref() == Some(previous.video_id.as_str()) {
+            self.history_recorded.replace(Some(swapped.video_id.0.clone()));
+        }
+        self.listened.borrow_mut().rename(&previous.video_id.0, &swapped.video_id.0);
         if self.local_logged.borrow().as_deref() == Some(previous.video_id.as_str()) {
             self.local_logged.replace(Some(swapped.video_id.0.clone()));
         }
@@ -1404,10 +1479,10 @@ impl Player {
 
     /// Without an account, a listen goes to the play log on this device, which
     /// the local shelves on Home are built from. Once per track, after 30
-    /// seconds or half the song, and never when history is switched off.
-    fn log_local_play(&self, position: f64, duration: f64) {
+    /// seconds heard or half the song, and never when history is switched off.
+    fn log_local_play(&self, listened: f64, duration: f64) {
         let threshold = if duration > 0.0 { HISTORY_THRESHOLD_SECS.min(duration / 2.0) } else { HISTORY_THRESHOLD_SECS };
-        if position < threshold || self.history_mode.borrow().as_str() == HISTORY_NEVER {
+        if listened < threshold || self.history_mode.borrow().as_str() == HISTORY_NEVER {
             return;
         }
         if self.net.client().is_authenticated() {
@@ -1437,13 +1512,14 @@ impl Player {
     /// The queue is stamped with an id of its own so the reply can tell it is
     /// still the queue that asked; the real radio playlist replaces the stamp
     /// once the tracks land, and the infinite extender takes it from there.
-    pub fn play_then_radio(self: &Rc<Self>, tracks: Vec<Track>, start_index: usize, seed: &str) {
+    /// `title` names the queue in its header: the shelf the tracks came from.
+    pub fn play_then_radio(self: &Rc<Self>, tracks: Vec<Track>, start_index: usize, seed: &str, title: &str) {
         if tracks.is_empty() || seed.is_empty() {
-            self.play_tracks(tracks, start_index, false, None, false);
+            self.play_tracks(tracks, start_index, false, QueueSource::shelf(title), false);
             return;
         }
         let stamp = format!("home-radio:{seed}:{}", self.next_stamp());
-        self.play_tracks(tracks, start_index, false, Some(stamp.as_str().into()), false);
+        self.play_tracks(tracks, start_index, false, Some(QueueSource::new(stamp.as_str(), title.trim())), false);
 
         let api = self.net.client().api();
         let seed = seed.to_owned();
@@ -1696,5 +1772,45 @@ async fn fetch_new_radio_tracks(
             tracing::warn!(%err, "radio extension failed");
             Vec::new()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_seek_past_the_mark_is_not_thirty_seconds_heard() {
+        let mut listened = Listened::default();
+        for tick in 0..50 {
+            listened.tick("a", f64::from(tick) * 0.1, true);
+        }
+        let heard = listened.tick("a", 95.0, true);
+        assert!((heard - 4.9).abs() < 1e-6, "five seconds heard, the jump adds none: {heard}");
+        // Playing on from there counts again.
+        assert!((listened.tick("a", 95.5, true) - 5.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn paused_ticks_and_a_seek_back_add_nothing() {
+        let mut listened = Listened::default();
+        listened.tick("a", 10.0, true);
+        listened.tick("a", 11.0, true);
+        assert_eq!(listened.tick("a", 11.5, false), 1.0);
+        assert_eq!(listened.tick("a", 3.0, true), 1.0);
+        assert_eq!(listened.tick("a", 4.0, true), 2.0);
+    }
+
+    #[test]
+    fn another_track_starts_from_nothing_and_a_twin_carries_on() {
+        let mut listened = Listened::default();
+        listened.tick("a", 0.0, true);
+        listened.tick("a", 1.5, true);
+        assert_eq!(listened.tick("b", 40.0, true), 0.0);
+        listened.tick("b", 41.0, true);
+        listened.rename("b", "c");
+        // The twin restarts its own position, which is not a step back in the listen.
+        assert_eq!(listened.tick("c", 0.2, true), 1.0);
+        assert_eq!(listened.tick("c", 1.2, true), 2.0);
     }
 }

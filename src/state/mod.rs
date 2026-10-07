@@ -102,6 +102,8 @@ mod imp {
                         .build(),
                     // Structural queue change: the ListStore was rebuilt.
                     Signal::builder("queue-changed").build(),
+                    // The listener started something: a new queue plays from here.
+                    Signal::builder("queue-started").build(),
                     // Short message for a toast (rating failed, and similar).
                     Signal::builder("notice").param_types([String::static_type()]).build(),
                     // The position jumped somewhere clients cannot predict.
@@ -149,6 +151,10 @@ impl PlayerState {
 
     pub fn emit_queue_changed(&self) {
         self.emit_by_name::<()>("queue-changed", &[]);
+    }
+
+    pub fn emit_queue_started(&self) {
+        self.emit_by_name::<()>("queue-started", &[]);
     }
 
     pub fn emit_notice(&self, message: &str) {

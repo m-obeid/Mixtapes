@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS plays (
     track_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS plays_by_time ON plays (played_at);
+CREATE TABLE IF NOT EXISTS saved (
+    id TEXT PRIMARY KEY,
+    saved_at INTEGER NOT NULL,
+    item_json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS artists (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -68,6 +73,9 @@ const MIGRATIONS: [&str; 1] = ["ALTER TABLE artists ADD COLUMN subscribers TEXT"
 const PLAYS_KEPT_SECS: u64 = 180 * 24 * 3600;
 /// And never more rows than this.
 const PLAYS_KEPT_ROWS: i64 = 5000;
+
+/// The title of a like saved before anything about the song was known.
+const STUB_TITLE: &str = "Unknown";
 
 pub fn is_local(id: &str) -> bool {
     id.starts_with(PREFIX)
@@ -299,6 +307,62 @@ impl LocalLibrary {
         });
     }
 
+    // -- saved from YouTube ----------------------------------------------------
+
+    /// YouTube playlists and albums kept in the library without an account,
+    /// newest first. Only the card lives here: the tracks are fetched each
+    /// time the page opens, so the list follows its changes on YouTube.
+    pub fn saved_items(&self) -> Vec<MediaItem> {
+        self.with_db(|db| {
+            let mut stmt = db.prepare("SELECT item_json FROM saved ORDER BY saved_at DESC")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            Ok(rows.flatten().filter_map(|json| serde_json::from_str::<MediaItem>(&json).ok()).collect())
+        })
+    }
+
+    pub fn is_saved(&self, id: &str) -> bool {
+        self.with_db(|db| db.query_row("SELECT 1 FROM saved WHERE id = ?1", params![id], |_| Ok(true)).optional().map(|found| found.unwrap_or(false)))
+    }
+
+    pub fn set_saved(&self, item: &MediaItem, saved: bool) {
+        self.with_db(|db| {
+            if saved {
+                let json = serde_json::to_string(item).unwrap_or_default();
+                db.execute("INSERT OR REPLACE INTO saved (id, saved_at, item_json) VALUES (?1, ?2, ?3)", params![item.id, now_millis(), json])?;
+            } else {
+                db.execute("DELETE FROM saved WHERE id = ?1", params![item.id])?;
+            }
+            Ok(())
+        });
+    }
+
+    /// Write what the page has just fetched over a saved card: a new title,
+    /// cover or track count. It keeps its place. True when the card changed.
+    pub fn refresh_saved(&self, item: &MediaItem) -> bool {
+        self.with_db(|db| {
+            let json = serde_json::to_string(item).unwrap_or_default();
+            let changed = db.execute("UPDATE saved SET item_json = ?2 WHERE id = ?1 AND item_json != ?2", params![item.id, json])?;
+            Ok(changed > 0)
+        })
+    }
+
+    /// Likes saved with nothing but an id, which the list shows as "Unknown".
+    /// A like made from a row off the queue was stored that way.
+    pub fn liked_stubs(&self) -> Vec<VideoId> {
+        self.liked().into_iter().filter(|t| t.title == STUB_TITLE && t.artist.is_empty() && t.thumb.is_none()).map(|t| t.video_id).collect()
+    }
+
+    /// Write the full track over a like. It keeps its place in the list.
+    pub fn fill_liked(&self, track: &Track) {
+        self.with_db(|db| {
+            let mut track = with_set_id(track.clone());
+            track.like_status = LikeStatus::Like;
+            let json = serde_json::to_string(&track).unwrap_or_default();
+            db.execute("UPDATE liked SET track_json = ?2 WHERE video_id = ?1", params![track.video_id.as_str(), json])?;
+            Ok(())
+        });
+    }
+
     // -- subscriptions -------------------------------------------------------
 
     /// Artists followed on this device, newest first, as library cards.
@@ -404,7 +468,7 @@ impl LocalLibrary {
 
     /// A bare track for a like made from a card that carries no more than an id.
     pub fn track_or_stub(&self, video_id: &VideoId, known: Option<Track>) -> Track {
-        known.unwrap_or_else(|| Track { video_id: video_id.clone(), title: "Unknown".to_owned(), ..Track::default() })
+        known.unwrap_or_else(|| Track { video_id: video_id.clone(), title: STUB_TITLE.to_owned(), ..Track::default() })
     }
 }
 
@@ -470,6 +534,40 @@ mod tests {
         lib.delete(&id);
         assert!(lib.details(&id).is_none());
         assert!(lib.playlist_items().is_empty());
+    }
+
+    #[test]
+    fn a_like_saved_as_a_bare_id_gets_its_track_and_keeps_its_place() {
+        let (_dir, lib) = library();
+        let stub = VideoId("a".to_owned());
+        lib.set_liked(&lib.track_or_stub(&stub, None), true);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        lib.set_liked(&track("b"), true);
+        assert_eq!(lib.liked_stubs(), vec![stub]);
+        lib.fill_liked(&track("a"));
+        assert!(lib.liked_stubs().is_empty());
+        let titles: Vec<String> = lib.liked().into_iter().map(|t| t.title).collect();
+        assert_eq!(titles, ["B", "A"]);
+        // Nothing is liked by being looked up.
+        lib.fill_liked(&track("c"));
+        assert!(!lib.is_liked("c"));
+    }
+
+    #[test]
+    fn a_saved_playlist_keeps_its_place_when_its_card_is_refreshed() {
+        let (_dir, lib) = library();
+        let card = |id: &str, title: &str| MediaItem { kind: ItemKind::Playlist, id: id.to_owned(), title: title.to_owned(), ..MediaItem::default() };
+        lib.set_saved(&card("PL1", "One"), true);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        lib.set_saved(&card("PL2", "Two"), true);
+        assert!(lib.is_saved("PL1"));
+        assert!(lib.refresh_saved(&card("PL1", "One, renamed")));
+        assert!(!lib.refresh_saved(&card("PL1", "One, renamed")), "nothing new, nothing written");
+        assert!(!lib.refresh_saved(&card("PL3", "Never saved")));
+        let titles: Vec<String> = lib.saved_items().into_iter().map(|i| i.title).collect();
+        assert_eq!(titles, ["Two", "One, renamed"]);
+        lib.set_saved(&card("PL2", ""), false);
+        assert!(!lib.is_saved("PL2") && !lib.is_saved("PL3"));
     }
 
     #[test]

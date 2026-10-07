@@ -24,7 +24,7 @@ use crate::ui::widgets::media_card::{CardOptions, MediaCard};
 
 const VIEW_MODES: [&str; 2] = ["list", "grid"];
 const DEFAULT_VIEW_MODE: &str = "grid";
-const DOWNLOADS_ID: &str = "DL";
+pub(crate) const DOWNLOADS_ID: &str = "DL";
 /// A library shown again within this long is fresh enough to leave alone.
 const RELOAD_GAP: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -363,6 +363,7 @@ impl LibraryPage {
             forget_library(&self.ctx.paths);
             // Signed out, the library is what lives on this device.
             sync_store(&self.sections[0].store, with_local_items(&self.ctx, Vec::new()));
+            sync_store(&self.sections[1].store, saved_albums(&self.ctx));
             sync_store(&self.sections[2].store, self.ctx.local.subscriptions());
             self.apply_layout();
         } else if self.sections[0].store.n_items() == 0 {
@@ -389,10 +390,16 @@ impl LibraryPage {
             let Some(page) = weak.upgrade() else { return };
             let targets = [&page.sections[0], &page.sections[1], &page.sections[2], &page.upload_sections[0], &page.upload_sections[1]];
             let mut saved = read_library(&page.ctx.paths);
+            let (mut fresh_playlists, mut fresh_albums) = (None, None);
             for ((result, section), label) in results.into_iter().zip(targets).zip(LIBRARY_LABELS) {
                 match result {
                     Ok(Ok(mut items)) => {
                         saved.insert(label.to_owned(), items.clone());
+                        match label {
+                            "playlists" => fresh_playlists = Some(items.clone()),
+                            "albums" => fresh_albums = Some(items.clone()),
+                            _ => {}
+                        }
                         if label == "playlists" {
                             items = with_local_items(&page.ctx, items);
                         }
@@ -404,6 +411,13 @@ impl LibraryPage {
                     Ok(Err(err)) => tracing::warn!(%err, label, "library fetch failed"),
                     Err(_) => {}
                 }
+            }
+            // A playlist page asks "is this saved" as it opens. The answer is here already,
+            // and without it the page fetched the whole library again and showed the star seconds late.
+            if let (Some(playlists), Some(albums)) = (fresh_playlists, fresh_albums) {
+                let caches = page.ctx.net.caches();
+                caches.set_library_ids(crate::net::playlists::library_ids_of(&playlists, &albums));
+                caches.set_library_playlists(playlists);
             }
             write_library(&page.ctx.paths, saved);
             let has_uploads = page.upload_sections.iter().any(|s| s.store.n_items() > 0);
@@ -425,6 +439,12 @@ impl LibraryPage {
         let mut saved = read_library(&self.ctx.paths);
         if saved.is_empty() {
             return;
+        }
+        // Until the network answers, the library as it last loaded says what is saved.
+        let caches = self.ctx.net.caches();
+        if caches.library_ids().is_none() && self.ctx.player.state().authenticated() {
+            let empty = Vec::new();
+            caches.set_library_ids(crate::net::playlists::library_ids_of(saved.get("playlists").unwrap_or(&empty), saved.get("albums").unwrap_or(&empty)));
         }
         let targets = [&self.sections[0], &self.sections[1], &self.sections[2], &self.upload_sections[0], &self.upload_sections[1]];
         for (section, label) in targets.into_iter().zip(LIBRARY_LABELS) {
@@ -546,12 +566,15 @@ impl LibraryPage {
     /// Re-read the local playlists into the Playlists section without a network round trip.
     pub fn refresh_local_items(self: &Rc<Self>) {
         let store = &self.sections[0].store;
+        let signed_in = self.ctx.net.client().is_authenticated();
+        // Signed out, every card comes from this device and is read again below.
         let remote: Vec<MediaItem> = (0..store.n_items())
             .filter_map(|i| store.item(i).and_downcast::<MediaObject>().map(|o| o.item()))
-            .filter(|item| item.id != DOWNLOADS_ID && !crate::local_library::is_local(&item.id))
+            .filter(|item| signed_in && item.id != DOWNLOADS_ID && !crate::local_library::is_local(&item.id))
             .collect();
         sync_store(store, with_local_items(&self.ctx, remote));
-        if !self.ctx.net.client().is_authenticated() {
+        if !signed_in {
+            sync_store(&self.sections[1].store, saved_albums(&self.ctx));
             sync_store(&self.sections[2].store, self.ctx.local.subscriptions());
         }
         self.apply_layout();
@@ -718,8 +741,17 @@ fn with_local_items(ctx: &UiContext, remote: Vec<MediaItem>) -> Vec<MediaItem> {
         }
         local.push(item);
     }
+    // YouTube playlists saved without an account, after the ones made here.
+    if !ctx.net.client().is_authenticated() {
+        local.extend(ctx.local.saved_items().into_iter().filter(|item| item.kind == ItemKind::Playlist));
+    }
     items.splice(head..head, local);
     items
+}
+
+/// YouTube albums saved without an account. Signed in, the account's library is the one shown.
+fn saved_albums(ctx: &UiContext) -> Vec<MediaItem> {
+    ctx.local.saved_items().into_iter().filter(|item| item.kind == ItemKind::Album).collect()
 }
 
 /// Subtitle and icons for a grid card, following _rebuild_*_grid.
@@ -843,7 +875,9 @@ fn list_rows(list: &gtk::ListBox) -> Vec<gtk::ListBoxRow> {
 /// playlist of your own can be deleted, one you saved can be dropped again.
 fn attach_playlist_menu(ctx: &Rc<UiContext>, widget: &impl IsA<gtk::Widget>, item: MediaItem) {
     let is_playlist = item.kind == ItemKind::Playlist && item.id != DOWNLOADS_ID;
-    if !is_playlist && !is_upload_album(&item) {
+    // An album saved without an account can be dropped again too.
+    let saved_here = !ctx.net.client().is_authenticated() && ctx.local.is_saved(&item.id);
+    if !is_playlist && !is_upload_album(&item) && !saved_here {
         attach_item_menu(ctx, widget, item);
         return;
     }
@@ -880,6 +914,14 @@ fn playlist_extras(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) 
         return vec![MenuAction::new("Delete Playlist", context_menu::Section::Remove, move || confirm_delete(&ctx, &anchor, &id, &title))];
     }
     if !ctx.net.client().is_authenticated() {
+        if item.kind != ItemKind::Artist && ctx.local.is_saved(&id) {
+            let (ctx, anchor, item) = (ctx.clone(), anchor.clone(), item.clone());
+            return vec![MenuAction::new("Remove from Library", context_menu::Section::Remove, move || {
+                ctx.local.set_saved(&item, false);
+                toast(&anchor, "Removed from library");
+                ctx.nav.refresh_library();
+            })];
+        }
         if item.kind == ItemKind::Artist && ctx.local.is_subscribed(&id) {
             let ctx = ctx.clone();
             return vec![MenuAction::new("Unsubscribe", context_menu::Section::Remove, move || {

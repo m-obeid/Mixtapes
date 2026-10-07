@@ -791,6 +791,11 @@ pub fn parse_channel_item(raw: &Value) -> Option<MediaItem> {
         if video_id.is_none() {
             video_id = owned_at(renderer, "/overlay/musicItemThumbnailOverlayRenderer/content/musicPlayButtonRenderer/playNavigationEndpoint/watchEndpoint/videoId");
         }
+        // A card in a channel's video grid carries the endpoint on itself and a plain title.
+        if video_id.is_none() && browse_id.is_none() {
+            video_id = owned_at(renderer, "/navigationEndpoint/watchEndpoint/videoId");
+            browse_id = owned_at(renderer, "/navigationEndpoint/browseEndpoint/browseId");
+        }
         let subtitle_runs = array_at(renderer, "/subtitle/runs");
         if !subtitle_runs.is_empty() {
             item.description = Some(runs_text(subtitle_runs));
@@ -833,6 +838,17 @@ pub fn parse_channel_item(raw: &Value) -> Option<MediaItem> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_card_of_a_channel_video_grid_plays_from_its_own_endpoint() {
+        let card = json!({"musicTwoRowItemRenderer": {
+            "title": {"runs": [{"text": "Russian Monastic Vespers"}]},
+            "subtitle": {"runs": [{"text": "Choir of Monks"}]},
+            "navigationEndpoint": {"watchEndpoint": {"videoId": "N0Q9TcXjHM4"}},
+        }});
+        let item = parse_channel_item(&card).expect("the card parses");
+        assert_eq!((item.kind, item.id.as_str(), item.title.as_str()), (ItemKind::Song, "N0Q9TcXjHM4", "Russian Monastic Vespers"));
+    }
 
     #[test]
     fn duration_parses_minutes_and_hours() {

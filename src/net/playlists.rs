@@ -62,9 +62,41 @@ pub struct PlaylistDetails {
 }
 
 impl PlaylistDetails {
+    /// The card a YouTube playlist or album makes in a library kept on this
+    /// device, under the id its page opens with. A playlist is the same list
+    /// with or without its browse prefix, so it is saved without.
+    pub fn library_card(&self, page_id: &str) -> MediaItem {
+        let is_album = page_id.starts_with("MPRE");
+        MediaItem {
+            // An album opened through its OLAK playlist is a playlist page, and comes back as one.
+            kind: if is_album { ItemKind::Album } else { ItemKind::Playlist },
+            id: saved_id(page_id).to_owned(),
+            title: self.title.clone(),
+            artists: self.author.clone(),
+            thumb: self.thumbnails.last().cloned(),
+            year: self.year.clone().filter(|y| !y.is_empty()),
+            item_type: is_album.then(|| self.track_count.map(crate::net::cache::Caches::release_kind).unwrap_or("Album").to_owned()),
+            count: self.track_count.or(Some(self.tracks.len() as u32).filter(|n| *n > 0)).map(|count| count.to_string()),
+            playlist_id: self.audio_playlist_id.clone(),
+            ..MediaItem::default()
+        }
+    }
+
     fn sum_duration(&mut self) {
         self.duration_seconds = Some(self.tracks.iter().filter_map(|t| t.duration_seconds).sum());
     }
+}
+
+/// The id a list is saved under on this device.
+pub fn saved_id(playlist_id: &str) -> &str {
+    playlist_id.strip_prefix("VL").unwrap_or(playlist_id)
+}
+
+/// Whether a page id names a YouTube list that can be kept in the library:
+/// not a radio, the account's likes, a podcast, an upload or a list made here.
+pub fn is_savable(page_id: &str) -> bool {
+    let id = saved_id(page_id);
+    !(id.is_empty() || id == "LM" || id.starts_with("RD") || id.starts_with("FEmusic") || id.starts_with("UPLOAD") || id == "DOWNLOADS" || id == "HISTORY" || is_podcast(id) || crate::local_library::is_local(id))
 }
 
 // -- playlists ------------------------------------------------------------
@@ -554,15 +586,20 @@ pub async fn delete_playlist(api: &dyn Browse, playlist_id: &str) -> Result<(), 
 pub async fn fetch_library_ids(api: Arc<dyn Browse>) -> Result<(LibraryIds, Vec<MediaItem>), NetError> {
     let playlists = library::library_playlists(api.clone()).await.unwrap_or_default();
     let albums = library::library_albums(api).await.unwrap_or_default();
+    Ok((library_ids_of(&playlists, &albums), playlists))
+}
+
+/// The ids a library's playlists and albums go by, for the "is this saved" lookup.
+pub fn library_ids_of(playlists: &[MediaItem], albums: &[MediaItem]) -> LibraryIds {
     let mut ids = LibraryIds::default();
     ids.playlists.extend(playlists.iter().map(|p| p.id.clone()));
-    for album in &albums {
+    for album in albums {
         ids.albums.insert(album.id.clone());
         if let Some(pid) = &album.playlist_id {
             ids.albums.insert(pid.clone());
         }
     }
-    Ok((ids, playlists))
+    ids
 }
 
 /// Port of get_editable_playlists: owned or collaborative playlists only.
@@ -831,6 +868,47 @@ pub async fn artist_albums(api: &dyn Browse, channel_id: &str, params: Option<&s
         }
     }
     raw_parse_channel_content(api, channel_id, params).await
+}
+
+/// The web client version the visitor request names. YouTube takes old ones, the date is not checked.
+const VISITOR_CLIENT_VERSION: &str = "1.20260101.01.00";
+
+/// The grid behind the View All of a channel carousel, asked for as one visitor.
+///
+/// A "Release - Topic" channel hands out a View All token made for the visitor
+/// its page was served to. The `ytmusicapi` client sends no visitor id when
+/// signed out, so the token came back as "no public content" and the page
+/// stayed empty. Here the channel page is fetched for its visitor id and its
+/// fresh token, and the grid is asked for with both.
+pub async fn channel_grid_as_visitor(http: &reqwest::Client, channel_id: &str, section: &str) -> Result<Vec<MediaItem>, NetError> {
+    async fn browse(http: &reqwest::Client, mut body: Value, visitor: Option<&str>) -> Result<Value, NetError> {
+        let mut client = json!({ "clientName": "WEB_REMIX", "clientVersion": VISITOR_CLIENT_VERSION, "hl": "en" });
+        if let Some(visitor) = visitor {
+            client["visitorData"] = json!(visitor);
+        }
+        body["context"] = json!({ "client": client, "user": {} });
+        let response = http.post("https://music.youtube.com/youtubei/v1/browse?alt=json").header("Origin", "https://music.youtube.com").json(&body).send().await?.error_for_status()?;
+        Ok(response.json().await?)
+    }
+    let page = browse(http, json!({ "browseId": channel_id }), None).await?;
+    let visitor = owned_at(&page, "/responseContext/visitorData").ok_or_else(|| message("no visitor id on the channel page"))?;
+    let wanted = section.trim().to_lowercase();
+    let headers = array_at(&page, SINGLE_SECTIONS).iter().filter_map(|s| s.pointer("/musicCarouselShelfRenderer/header/musicCarouselShelfBasicHeaderRenderer"));
+    let endpoint = headers
+        .filter(|h| str_at(h, "/title/runs/0/text").is_some_and(|t| t.to_lowercase() == wanted))
+        .find_map(|h| h.pointer("/title/runs/0/navigationEndpoint/browseEndpoint").or_else(|| h.pointer("/moreContentButton/buttonRenderer/navigationEndpoint/browseEndpoint")))
+        .ok_or_else(|| message(format!("the channel has no \"{section}\" list")))?;
+    let body = json!({ "browseId": endpoint.get("browseId").cloned().unwrap_or(json!(channel_id)), "params": endpoint.get("params").cloned().unwrap_or_default() });
+    let grid = browse(http, body, Some(&visitor)).await?;
+    let mut items = Vec::new();
+    for section in array_at(&grid, SINGLE_SECTIONS) {
+        for key in ["gridRenderer", "musicShelfRenderer", "musicCarouselShelfRenderer"] {
+            let Some(renderer) = section.get(key) else { continue };
+            let entries = if renderer.get("items").is_some() { array_at(renderer, "/items") } else { array_at(renderer, "/contents") };
+            items.extend(entries.iter().filter_map(parse_channel_item));
+        }
+    }
+    Ok(items)
 }
 
 /// Title, artist and album text of a track lowercased, what the filters match on.

@@ -15,7 +15,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use crate::model::{LikeStatus, Named, Person, Track};
+use crate::model::{LikeStatus, MediaItem, Named, Person, Track};
 use crate::net::cache::{CachedMeta, CachedPlaylist, SortMetric};
 use crate::net::covers::save_playlist_cover;
 use crate::net::playlists::{self, PlaylistDetails};
@@ -86,6 +86,7 @@ pub struct PlaylistPage {
     stats_label: gtk::Label,
     actions_box: gtk::Box,
     more_btn: gtk::MenuButton,
+    library_btn: gtk::Button,
     more_menu: gio::Menu,
     sort_dropdown: gtk::DropDown,
     sort_dir_btn: gtk::Button,
@@ -126,6 +127,14 @@ pub struct PlaylistPage {
     is_owned: Cell<bool>,
     is_editable: Cell<bool>,
     is_saved_to_library: Cell<bool>,
+    /// What the album's own header says: saved to the account's library. The id
+    /// lookup misses an album the library lists under its other id.
+    header_says_saved: Cell<bool>,
+    /// What the listener last chose with the star on this page. It outranks the
+    /// library listing, which YouTube updates a moment after the change.
+    library_choice: Cell<Option<bool>>,
+    /// The card this page makes in a library kept on this device. None for lists that cannot be saved.
+    library_item: RefCell<Option<MediaItem>>,
     is_album_view: Cell<bool>,
     is_previewing_cover: Cell<bool>,
     more_menu_dirty: Cell<bool>,
@@ -176,6 +185,10 @@ impl PlaylistPage {
         let shuffle_btn = gtk::Button::builder().icon_name("media-playlist-shuffle-symbolic").css_classes(["circular"]).valign(gtk::Align::Center).halign(gtk::Align::Center).build();
         shuffle_btn.set_size_request(48, 48);
         actions_box.append(&shuffle_btn);
+        // Add to Library, a button of its own beside shuffle like in YouTube Music. Shown once the page knows it can be saved.
+        let library_btn = gtk::Button::builder().icon_name("non-starred-symbolic").css_classes(["circular"]).valign(gtk::Align::Center).halign(gtk::Align::Center).tooltip_text("Add to Library").visible(false).build();
+        library_btn.set_size_request(48, 48);
+        actions_box.append(&library_btn);
         let more_btn = gtk::MenuButton::builder().icon_name("view-more-symbolic").css_classes(["circular"]).tooltip_text("More Options").build();
         more_btn.set_size_request(48, 48);
         let more_menu = gio::Menu::new();
@@ -285,6 +298,7 @@ impl PlaylistPage {
             stats_label,
             actions_box,
             more_btn,
+            library_btn,
             more_menu,
             sort_dropdown,
             sort_dir_btn,
@@ -323,6 +337,9 @@ impl PlaylistPage {
             is_owned: Cell::new(false),
             is_editable: Cell::new(false),
             is_saved_to_library: Cell::new(false),
+            header_says_saved: Cell::new(false),
+            library_choice: Cell::new(None),
+            library_item: RefCell::new(None),
             is_album_view: Cell::new(false),
             is_previewing_cover: Cell::new(false),
             more_menu_dirty: Cell::new(true),
@@ -513,6 +530,12 @@ impl PlaylistPage {
             }
         });
         let weak = Rc::downgrade(self);
+        self.library_btn.connect_clicked(move |_| {
+            if let Some(p) = weak.upgrade() {
+                p.rate_library(if p.is_saved_to_library.get() { LikeStatus::Indifferent } else { LikeStatus::Like });
+            }
+        });
+        let weak = Rc::downgrade(self);
         self.more_btn.connect_active_notify(move |btn| {
             if let Some(p) = weak.upgrade() {
                 if btn.is_active() && p.more_menu_dirty.get() {
@@ -550,7 +573,7 @@ impl PlaylistPage {
             if let Some(p) = weak.upgrade() {
                 let tracks = p.selected_tracks();
                 if !tracks.is_empty() {
-                    p.ctx.player.play_tracks(tracks, 0, false, None, false);
+                    p.ctx.player.play_tracks(tracks, 0, false, QueueSource::shelf(&p.title_text.borrow()), false);
                 }
             }
         });
@@ -834,7 +857,8 @@ impl PlaylistPage {
         }
         let total = cached.meta.duration_seconds.filter(|s| *s > 0).unwrap_or_else(|| cached.tracks.iter().filter_map(|t| t.duration_seconds).sum());
         let count = count_text(n, playlists::is_podcast(&pid));
-        let meta2 = if total > 0 { format!("{count} • {}", short_duration(total)) } else { count };
+        // The format the live header uses, so the line does not change when the fetch lands.
+        let meta2 = if total > 0 { format!("{count} • {}", long_duration(total)) } else { count };
         let mut thumbnails = cached.meta.thumbnails.clone();
         if thumbnails.is_empty() {
             if let Some(thumb) = initial.and_then(|i| i.thumb.clone()) {
@@ -859,6 +883,8 @@ impl PlaylistPage {
         let owned = playlists::owns_playlist(&cached.playlist_id, cached.meta.author_raw.first().map(|a| a.name.as_str()), cached.meta.collaborators.as_deref(), self.account_name().as_deref());
         self.is_owned.set(owned);
         self.is_editable.set(self.ctx.net.client().is_authenticated() && !is_album && owned);
+        // The star too: the page from disk is on screen seconds before the live one.
+        self.is_saved_to_library.set(self.saved_in_library(&pid, owned));
         self.refresh_more_menu(owned);
         self.set_description(&cached.meta.description);
         if let Some(url) = thumbnails.last() {
@@ -1162,6 +1188,15 @@ impl PlaylistPage {
         if !incremental && !is_album && track_count.is_some_and(|count| (track_len as u32) < count) {
             self.start_background_full_fetch();
         }
+        // Signed out, the library keeps the card on this device. Each visit brings it up to date.
+        self.header_says_saved.set(is_album && details.like_status == LikeStatus::Like);
+        let savable = !is_podcast && playlists::is_savable(playlist_id);
+        self.library_item.replace(savable.then(|| MediaItem { title: title.clone(), ..details.library_card(playlist_id) }));
+        if let Some(item) = self.library_item.borrow().as_ref() {
+            if !self.ctx.net.client().is_authenticated() && self.ctx.local.refresh_saved(item) {
+                self.ctx.nav.refresh_library();
+            }
+        }
         if !incremental && !is_local {
             let mut for_cache = details.clone();
             for_cache.title = title.clone();
@@ -1201,8 +1236,7 @@ impl PlaylistPage {
         let local = crate::local_library::is_local(&pid);
         let editable = (self.ctx.net.client().is_authenticated() || local) && !is_album && is_owned;
         self.is_editable.set(editable);
-        let check_id = self.audio_playlist_id.borrow().clone().unwrap_or_else(|| pid.clone());
-        self.is_saved_to_library.set(is_owned || self.is_in_library(&check_id));
+        self.is_saved_to_library.set(self.saved_in_library(&pid, is_owned));
         self.refresh_more_menu(editable);
 
         if let Some(url) = thumbnails.last().filter(|_| !append) {
@@ -1675,6 +1709,25 @@ impl PlaylistPage {
     fn refresh_more_menu(&self, is_owned: bool) {
         self.more_menu_pending_owned.set(is_owned);
         self.more_menu_dirty.set(true);
+        self.sync_library_button(is_owned);
+    }
+
+    /// The library button: an empty star on a list that can be saved, a full one once it is, like Subscribe on an artist.
+    /// Hidden on your own lists, on lists made here and where there is nothing to save to.
+    fn sync_library_button(&self, is_owned: bool) {
+        let pid = self.playlist_id.borrow().clone().unwrap_or_default();
+        // The account takes any list YouTube serves. Without one, the card kept on this device is what gets saved.
+        let savable = if self.ctx.net.client().is_authenticated() { !pid.is_empty() && !Self::is_virtual(&pid) && pid != "LM" } else { self.library_item.borrow().is_some() };
+        let saved = self.is_saved_to_library.get();
+        self.library_btn.set_visible(!is_owned && !crate::local_library::is_local(&pid) && savable);
+        self.library_btn.set_icon_name(if saved { "starred-symbolic" } else { "non-starred-symbolic" });
+        self.library_btn.set_tooltip_text(Some(if saved { "Remove from Library" } else { "Add to Library" }));
+        // The accent the artist page's star takes once subscribed.
+        if saved {
+            self.library_btn.add_css_class("liked-button");
+        } else {
+            self.library_btn.remove_css_class("liked-button");
+        }
     }
 
     fn rebuild_more_menu(&self, is_owned: bool) {
@@ -1683,7 +1736,6 @@ impl PlaylistPage {
         queue_section.append(Some("Play Next"), Some("page.play_all_next"));
         queue_section.append(Some("Add to Queue"), Some("page.add_all_to_queue"));
         self.more_menu.append_section(None, &queue_section);
-        let authed = self.ctx.net.client().is_authenticated();
         let local = self.playlist_id.borrow().as_deref().is_some_and(crate::local_library::is_local);
         self.more_menu.append(Some("Add all to Playlist…"), Some("page.show_add_all_to_playlist"));
         if self.ctx.online.is_online() && (self.audio_playlist_id.borrow().is_some() || self.playlist_id.borrow().is_some()) {
@@ -1691,13 +1743,6 @@ impl PlaylistPage {
         }
         if !local {
             self.more_menu.append(Some("Copy Link"), Some("page.copy_link"));
-        }
-        if !is_owned && authed && !local {
-            if self.is_saved_to_library.get() {
-                self.more_menu.append(Some("Remove from Library"), Some("page.remove_from_library"));
-            } else {
-                self.more_menu.append(Some("Add to Library"), Some("page.save_to_library"));
-            }
         }
         self.more_menu.append(Some("Download All"), Some("page.download_all"));
         if is_owned {
@@ -1778,6 +1823,16 @@ impl PlaylistPage {
 
     // -- library membership -----------------------------------------------
 
+    /// Whether the star is full: the list is yours, or saved to the account, or saved on this device.
+    fn saved_in_library(self: &Rc<Self>, pid: &str, is_owned: bool) -> bool {
+        let check_id = self.audio_playlist_id.borrow().clone().unwrap_or_else(|| pid.to_owned());
+        // Without an account the library is on this device, and it knows the page by its own id.
+        let saved_here = !self.ctx.net.client().is_authenticated() && self.ctx.local.is_saved(playlists::saved_id(pid));
+        // Both ids: the library lists an album under its browse id, and not always with the audio playlist beside it.
+        let in_account = self.header_says_saved.get() || self.is_in_library(&check_id) || self.is_in_library(pid);
+        is_owned || self.library_choice.get().unwrap_or(saved_here || in_account)
+    }
+
     /// Port of is_in_library: never blocks. A cold cache answers false and
     /// warms in the background, then the menu is corrected.
     fn is_in_library(self: &Rc<Self>, check_id: &str) -> bool {
@@ -1810,7 +1865,9 @@ impl PlaylistPage {
     fn recheck_library_status(self: &Rc<Self>) {
         let check_id = self.audio_playlist_id.borrow().clone().or_else(|| self.playlist_id());
         let Some(check_id) = check_id else { return };
-        let saved = self.is_owned.get() || self.ctx.net.caches().library_ids().is_some_and(|ids| ids.contains(&check_id));
+        let page_id = self.playlist_id().unwrap_or_default();
+        let listed = self.header_says_saved.get() || self.ctx.net.caches().library_ids().is_some_and(|ids| ids.contains(&check_id) || ids.contains(&page_id));
+        let saved = self.is_owned.get() || self.library_choice.get().unwrap_or(listed);
         self.is_saved_to_library.set(saved);
         self.refresh_more_menu(self.is_editable.get());
     }
@@ -1821,22 +1878,43 @@ impl PlaylistPage {
         if crate::local_library::is_local(&pid) {
             return;
         }
+        let saving = rating == LikeStatus::Like;
+        // Without an account the card is kept on this device.
+        if !self.ctx.net.client().is_authenticated() {
+            let Some(item) = self.library_item.borrow().clone() else { return };
+            self.ctx.local.set_saved(&item, saving);
+            self.is_saved_to_library.set(saving);
+            toast(&self.stack, if saving { "Saved to library" } else { "Removed from library" });
+            self.refresh_more_menu(self.is_owned.get());
+            self.ctx.nav.refresh_library();
+            return;
+        }
+        // The star answers the click at once and goes back if YouTube says no.
+        let was = (self.is_saved_to_library.get(), self.header_says_saved.get());
+        let known_as: Vec<String> = [Some(pid.clone()), self.playlist_id()].into_iter().flatten().collect();
+        let is_album = self.is_album_view();
+        let chosen_before = self.library_choice.replace(Some(saving));
+        self.is_saved_to_library.set(saving);
+        self.header_says_saved.set(saving);
+        self.ctx.net.caches().mark_library(&known_as, is_album, saving);
+        self.refresh_more_menu(self.is_owned.get());
         let api = self.ctx.net.client().api();
         let handle = self.ctx.net.spawn(async move { playlists::rate_playlist(&api, &pid, rating).await });
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let Some(page) = weak.upgrade() else { return };
-            let saving = rating == LikeStatus::Like;
             match handle.await {
                 Ok(Ok(())) => {
-                    page.is_saved_to_library.set(saving);
-                    page.ctx.net.caches().clear_library_ids();
                     toast(&page.stack, if saving { "Saved to library" } else { "Removed from library" });
-                    page.refresh_more_menu(page.is_owned.get());
                     page.ctx.nav.refresh_library();
                 }
                 Ok(Err(err)) => {
                     tracing::warn!(%err, "rate playlist failed");
+                    page.library_choice.set(chosen_before);
+                    page.is_saved_to_library.set(was.0);
+                    page.header_says_saved.set(was.1);
+                    page.ctx.net.caches().mark_library(&known_as, is_album, was.0);
+                    page.refresh_more_menu(page.is_owned.get());
                     toast(&page.stack, if saving { "Failed to save" } else { "Failed to remove" });
                 }
                 Err(_) => {}

@@ -9,7 +9,7 @@ use std::rc::{Rc, Weak};
 use adw::prelude::*;
 use gtk::{gdk, glib};
 
-use crate::model::{Track, VideoId};
+use crate::model::Track;
 use crate::ui::context::UiContext;
 use crate::ui::cover::CoverImage;
 use crate::ui::like_button::LikeButton;
@@ -411,8 +411,7 @@ impl TrackRow {
         }
 
         if has_id {
-            self.like
-                .set_data(Some(VideoId(video_id.clone())), Some(track.like_status));
+            self.like.set_track(track, Some(track.like_status));
             self.like.widget().set_visible(!multi);
         } else {
             self.like.set_data(None, Some(track.like_status));

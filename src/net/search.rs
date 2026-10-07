@@ -53,7 +53,19 @@ pub struct SearchResults {
     /// The "Top result" card, when the unfiltered search offered one.
     pub top_result: Option<MediaItem>,
     pub items: Vec<MediaItem>,
+    /// The token for the next page of each filtered call that has one.
+    pub more: Vec<(SearchFilter, String)>,
 }
+
+impl SearchResults {
+    /// The token for the next page of this filter's results, when YouTube has more.
+    pub fn more_for(&self, filter: SearchFilter) -> Option<String> {
+        self.more.iter().find(|(f, _)| *f == filter).map(|(_, token)| token.clone())
+    }
+}
+
+/// Where a filtered shelf and each of its continuation pages keep the next token.
+const NEXT_PAGE: &str = "/continuations/0/nextContinuationData/continuation";
 
 /// One search call. `filter` narrows the results to a kind.
 pub async fn search(client: &dyn Browse, query: &str, filter: Option<SearchFilter>) -> Result<SearchResults, NetError> {
@@ -62,7 +74,40 @@ pub async fn search(client: &dyn Browse, query: &str, filter: Option<SearchFilte
         body["params"] = json!(filter.params());
     }
     let response = client.post("search", body).await?;
-    Ok(parse_search_response(&response, filter.map(SearchFilter::kind)))
+    let mut results = parse_search_response(&response, filter.map(SearchFilter::kind));
+    if let Some(filter) = filter {
+        let token = shelves(&response).iter().filter_map(|s| s.get("musicShelfRenderer")).find_map(|shelf| shelf.pointer(NEXT_PAGE)).and_then(Value::as_str);
+        results.more.extend(token.map(|token| (filter, token.to_owned())));
+    }
+    Ok(results)
+}
+
+/// The next page of a filtered search, about twenty rows, and the token for the one after.
+///
+/// Like the watch panel, this endpoint takes the token in the query string and
+/// wants the original body again. The crate appends its own "?alt=json" to the
+/// endpoint, so the token goes in front of a throwaway parameter that swallows it.
+pub async fn search_more(client: &dyn Browse, query: &str, filter: SearchFilter, token: &str) -> Result<SearchResults, NetError> {
+    let body = json!({ "query": query, "params": filter.params() });
+    let response = client.post(&format!("search?ctoken={token}&continuation={token}&_="), body).await?;
+    let mut results = SearchResults::default();
+    let Some(shelf) = response.pointer("/continuationContents/musicShelfContinuation") else { return Ok(results) };
+    for entry in shelf.get("contents").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(item) = entry.get("musicResponsiveListItemRenderer").and_then(|renderer| parse_list_item(renderer, Some(filter.kind()))) {
+            results.items.push(item);
+        }
+    }
+    results.more.extend(shelf.pointer(NEXT_PAGE).and_then(Value::as_str).map(|token| (filter, token.to_owned())));
+    Ok(results)
+}
+
+/// The sections of a search response's first tab.
+fn shelves(response: &Value) -> &[Value] {
+    response
+        .pointer("/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
 }
 
 /// Unfiltered plus songs, artists, playlists and albums in parallel, merged in that order.
@@ -82,6 +127,7 @@ pub async fn search_all(client: Arc<dyn Browse>, query: String) -> Result<Search
     for outcome in outcomes {
         match outcome {
             Ok(results) => {
+                merged.more.extend(results.more);
                 if merged.top_result.is_none() {
                     merged.top_result = results.top_result;
                 }
@@ -130,13 +176,7 @@ where
 /// kind a filtered call asked for, since those shelves carry no type run.
 pub fn parse_search_response(response: &Value, filter_kind: Option<ItemKind>) -> SearchResults {
     let mut results = SearchResults::default();
-    let Some(sections) = response
-        .pointer("/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
-        .and_then(Value::as_array)
-    else {
-        return results;
-    };
-    for section in sections {
+    for section in shelves(response) {
         if let Some(card) = section.get("musicCardShelfRenderer") {
             let top = parse_card_shelf(card);
             // Songs listed under an artist card carry no artist of their own.

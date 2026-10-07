@@ -38,6 +38,8 @@ pub struct QueuePanel {
     following: Cell<bool>,
     /// The eased scroll to the playing row, while it runs.
     centring: RefCell<Option<adw::TimedAnimation>>,
+    /// A scroll to the playing row waiting for the list's next layout, and whether it eases.
+    pending_centre: Cell<Option<bool>>,
 }
 
 impl QueuePanel {
@@ -230,6 +232,7 @@ impl QueuePanel {
             jump_icon,
             following: Cell::new(true),
             centring: RefCell::new(None),
+            pending_centre: Cell::new(None),
         });
         {
             let weak = Rc::downgrade(&panel);
@@ -322,6 +325,10 @@ impl QueuePanel {
             });
             let weak = Rc::downgrade(&panel);
             panel.root.connect_unmap(move |_| {
+                // The frame callback goes with the mapping. The next map asks again.
+                if let Some(panel) = weak.upgrade() {
+                    panel.pending_centre.take();
+                }
                 let weak = weak.clone();
                 glib::idle_add_local_once(move || {
                     if let Some(panel) = weak.upgrade().filter(|p| !p.root.is_mapped()) {
@@ -338,12 +345,31 @@ impl QueuePanel {
         &self.root
     }
 
+    /// Centre the playing row once the list has been laid out again.
+    ///
+    /// Not from an idle: that can run before the first layout of a window
+    /// coming back from the background, and while a hidden or suspended window
+    /// draws no frames at all. A scroll position written then belongs to a
+    /// layout the list no longer has, and the rows stayed blank until the next
+    /// scroll. Frame callbacks wait for the window, and many track changes in
+    /// the background end as one scroll.
     fn scroll_to_current_later(self: &Rc<Self>, animate: bool) {
+        if self.pending_centre.replace(Some(animate)).is_some() {
+            return;
+        }
         let weak = Rc::downgrade(self);
-        glib::idle_add_local_once(move || {
-            if let Some(panel) = weak.upgrade().filter(|p| p.root.is_mapped()) {
+        // The first frame lays the list out, the second finds it measured.
+        let frames = Cell::new(0);
+        self.list.add_tick_callback(move |_, _| {
+            let Some(panel) = weak.upgrade() else { return glib::ControlFlow::Break };
+            frames.set(frames.get() + 1);
+            if frames.get() < 2 {
+                return glib::ControlFlow::Continue;
+            }
+            if let Some(animate) = panel.pending_centre.take().filter(|_| panel.root.is_mapped()) {
                 panel.centre_current(animate);
             }
+            glib::ControlFlow::Break
         });
     }
 

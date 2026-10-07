@@ -12,7 +12,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 use crate::queue::QueueSource;
-use crate::model::{ItemKind, MediaItem, Person, Track, VideoId};
+use crate::model::{ItemKind, MediaItem, Person, Track};
 use crate::net::artist::{self, ArtistData, CardSection, SongSection};
 use crate::net::playlists;
 use crate::ui::context::{NavRequest, UiContext};
@@ -22,6 +22,7 @@ use crate::ui::context_menu::{
 use crate::ui::copy_to_clipboard;
 use crate::ui::cover::CoverImage;
 use crate::ui::like_button::LikeButton;
+use crate::ui::pages::section_header;
 use crate::ui::widgets::cover_picture::CoverPicture;
 use crate::ui::widgets::fade_bottom_bin::FadeBottomBin;
 use crate::ui::widgets::media_card::{
@@ -765,7 +766,7 @@ impl ArtistPage {
         if !vid.is_empty() {
             let like = LikeButton::new(self.ctx.player.clone());
             like.widget().set_valign(gtk::Align::Center);
-            like.set_data(Some(VideoId(vid.clone())), Some(track.like_status));
+            like.set_track(track, Some(track.like_status));
             inner.append(like.widget());
             self.likes.borrow_mut().push(like);
         }
@@ -930,13 +931,17 @@ impl ArtistPage {
             return;
         }
         let container = self.section_container(title, false);
-        container.append(
-            &gtk::Label::builder()
-                .label(title)
-                .css_classes(["heading"])
-                .halign(gtk::Align::Start)
-                .build(),
-        );
+        let limit = self.limit_for(title, 10);
+        let on_view_all = (section.results.len() > limit || section.params.is_some()).then(|| {
+            let weak = Rc::downgrade(self);
+            let (title, section) = (title.to_owned(), section.clone());
+            Box::new(move || {
+                if let Some(p) = weak.upgrade() {
+                    p.on_view_all(&title, &section);
+                }
+            }) as Box<dyn Fn()>
+        });
+        container.append(&section_header(title, on_view_all));
         let scroll_box = HorizontalScrollBox::new();
         let compact = self.ctx.compact.get();
         let strip = gtk::Box::builder()
@@ -952,34 +957,10 @@ impl ArtistPage {
         container.append(scroll_box.widget());
         self.scrollers.borrow_mut().push(scroll_box);
 
-        let limit = self.limit_for(title, 10);
         for item in section.results.iter().take(limit) {
             let card = self.make_grid_card(item);
             strip.append(card.widget());
             self.cards.borrow_mut().push(card);
-        }
-        if section.results.len() > limit || section.params.is_some() {
-            let cell = gtk::Box::builder()
-                .orientation(gtk::Orientation::Vertical)
-                .valign(gtk::Align::Center)
-                .halign(gtk::Align::Center)
-                .margin_start(16)
-                .margin_end(16)
-                .build();
-            let more = gtk::Button::builder()
-                .label("View All")
-                .css_classes(["pill"])
-                .build();
-            more.set_cursor_from_name(Some("pointer"));
-            let weak = Rc::downgrade(self);
-            let (title_c, section_c) = (title.to_owned(), section.clone());
-            more.connect_clicked(move |_| {
-                if let Some(p) = weak.upgrade() {
-                    p.on_view_all(&title_c, &section_c);
-                }
-            });
-            cell.append(&more);
-            strip.append(&cell);
         }
     }
 
@@ -1058,7 +1039,7 @@ impl ArtistPage {
                 if let Some(track) = item.to_track() {
                     self.ctx
                         .player
-                        .play_tracks(vec![track], 0, false, None, false);
+                        .play_tracks(vec![track], 0, false, self.queue_source(), false);
                 }
             }
             ItemKind::Artist => self.ctx.nav.go(NavRequest::Artist {

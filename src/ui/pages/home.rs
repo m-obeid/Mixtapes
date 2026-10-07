@@ -287,7 +287,7 @@ impl HomePage {
             return false;
         };
         tracing::info!(title = %item.title, id = %item.id, pool = pool.len(), "activating the first home row");
-        activate_item_with_radio(&self.ctx, &item, &pool);
+        activate_item_with_radio(&self.ctx, &item, &pool, "Home");
         true
     }
 
@@ -319,9 +319,9 @@ impl HomePage {
             section_box.append(&self.section_header(&section.title, section.strapline.as_deref(), section.strapline_thumb.as_deref()));
             // A shelf that is mostly songs reads better as a list than as cards.
             if songs >= 3.max((section.items.len() as f64 * 0.66) as usize) {
-                self.add_song_list(&section_box, &section.items);
+                self.add_song_list(&section_box, &section.title, &section.items);
             } else {
-                self.add_card_strip(&section_box, &section.items);
+                self.add_card_strip(&section_box, &section.title, &section.items);
             }
             self.feed_box.append(&section_box);
         }
@@ -374,7 +374,7 @@ impl HomePage {
 
         let mut tiles = Vec::with_capacity(items.len());
         for item in items {
-            let tile = self.build_speed_tile(item, &pool);
+            let tile = self.build_speed_tile(item, &pool, title);
             heights.add_widget(&tile.tile);
             wrap.append(&tile.tile);
             tiles.push(tile);
@@ -401,7 +401,7 @@ impl HomePage {
         self.sync_speed_dial_height(self.ctx.compact.get());
     }
 
-    fn build_speed_tile(self: &Rc<Self>, item: &MediaItem, pool: &[MediaItem]) -> SpeedTile {
+    fn build_speed_tile(self: &Rc<Self>, item: &MediaItem, pool: &[MediaItem], shelf: &str) -> SpeedTile {
         let tile = gtk::Button::builder().css_classes(["home-speed-tile", "card"]).build();
         let inner = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(10).build();
         tile.set_child(Some(&inner));
@@ -431,8 +431,8 @@ impl HomePage {
         inner.append(&text_col);
 
         let ctx = self.ctx.clone();
-        let (item_c, pool_c) = (item.clone(), pool.to_vec());
-        tile.connect_clicked(move |_| activate_item_with_radio(&ctx, &item_c, &pool_c));
+        let (item_c, pool_c, shelf) = (item.clone(), pool.to_vec(), shelf.to_owned());
+        tile.connect_clicked(move |_| activate_item_with_radio(&ctx, &item_c, &pool_c, &shelf));
         attach_item_menu(&self.ctx, &tile, item.clone());
         if item.kind.is_playable() {
             self.playing.track_styled(&tile, &item.id);
@@ -477,7 +477,7 @@ impl HomePage {
 
     // -- sections ---------------------------------------------------------
 
-    fn add_song_list(self: &Rc<Self>, section_box: &gtk::Box, items: &[MediaItem]) {
+    fn add_song_list(self: &Rc<Self>, section_box: &gtk::Box, shelf: &str, items: &[MediaItem]) {
         let list = gtk::ListBox::builder().css_classes(["boxed-list", "songs-list"]).selection_mode(gtk::SelectionMode::None).build();
         let pool: Vec<MediaItem> = items.iter().filter(|i| i.kind.is_playable()).cloned().collect();
         for item in items {
@@ -489,10 +489,10 @@ impl HomePage {
             list.append(&row);
         }
         let ctx = self.ctx.clone();
-        let (items_c, pool_c) = (items.to_vec(), pool);
+        let (items_c, pool_c, shelf) = (items.to_vec(), pool, shelf.to_owned());
         list.connect_row_activated(move |_, row| {
             if let Some(item) = items_c.get(row.index().max(0) as usize) {
-                activate_item_with_radio(&ctx, item, &pool_c);
+                activate_item_with_radio(&ctx, item, &pool_c, &shelf);
             }
         });
         self.add_compact_scope(list.upcast_ref());
@@ -504,7 +504,7 @@ impl HomePage {
         self.compact_scopes.borrow_mut().push(widget.clone());
     }
 
-    fn add_card_strip(self: &Rc<Self>, section_box: &gtk::Box, items: &[MediaItem]) {
+    fn add_card_strip(self: &Rc<Self>, section_box: &gtk::Box, shelf: &str, items: &[MediaItem]) {
         let scroll_box = HorizontalScrollBox::new();
         scroll_box.widget().set_margin_bottom(16);
         let compact = self.ctx.compact.get();
@@ -514,8 +514,8 @@ impl HomePage {
         for item in items {
             let card = MediaCard::new(&self.ctx, item.clone(), CardOptions { title_lines: 2, ..CardOptions::default() });
             let ctx = self.ctx.clone();
-            let pool_c = pool.clone();
-            card.connect_clicked(move |item| activate_item_with_radio(&ctx, item, &pool_c));
+            let (pool_c, shelf) = (pool.clone(), shelf.to_owned());
+            card.connect_clicked(move |item| activate_item_with_radio(&ctx, item, &pool_c, &shelf));
             attach_item_menu(&self.ctx, card.widget(), item.clone());
             if item.kind.is_playable() {
                 self.playing.track(card.widget(), &item.id);

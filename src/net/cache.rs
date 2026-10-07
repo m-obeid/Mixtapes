@@ -141,6 +141,22 @@ impl Caches {
         self.library_ids.lock().unwrap().replace(ids);
     }
 
+    /// Note a list saved to or dropped from the library, under every id it goes by.
+    /// YouTube's own listing takes a moment to follow, so the set is corrected here.
+    pub fn mark_library(&self, ids: &[String], album: bool, saved: bool) {
+        let mut guard = self.library_ids.lock().unwrap();
+        let Some(known) = guard.as_mut() else { return };
+        for id in ids.iter().map(|id| id.strip_prefix("VL").unwrap_or(id)).filter(|id| !id.is_empty()) {
+            let set = if album { &mut known.albums } else { &mut known.playlists };
+            if saved {
+                set.insert(id.to_owned());
+            } else {
+                known.albums.remove(id);
+                known.playlists.remove(id);
+            }
+        }
+    }
+
     /// Forget the saved ids so the next check refetches, as after a rating change.
     pub fn clear_library_ids(&self) {
         self.library_ids.lock().unwrap().take();
