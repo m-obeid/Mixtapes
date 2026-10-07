@@ -199,7 +199,8 @@ pub fn variants_or_title(title: &str) -> Vec<String> {
 
 /// A match browser label. Catalogs do send nameless rows.
 pub fn label_or_unknown(name: &str) -> String {
-    if name.is_empty() { "Unknown".to_owned() } else { name.to_owned() }
+    // Translators: a lyrics search result whose catalog entry has no title.
+    if name.is_empty() { tr!("Unknown") } else { name.to_owned() }
 }
 
 /// The providers, live.

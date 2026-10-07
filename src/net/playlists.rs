@@ -82,8 +82,9 @@ pub async fn get_playlist(api: &dyn Browse, playlist_id: &str, limit: Option<usi
     details.tracks = playlist_rows(api, &response, limit, collaborative).await?;
     details.sum_duration();
     if playlist_id == "LM" {
-        details.title = "Your Likes".to_owned();
-        details.description = "Your liked songs from YouTube Music.".to_owned();
+        // English here, since the page caches these. The page passes them to i18n::gettext where they are shown.
+        details.title = tr_noop!("Your Likes").to_owned();
+        details.description = tr_noop!("Your liked songs from YouTube Music.").to_owned();
     }
     Ok(details)
 }

@@ -20,8 +20,8 @@ use crate::downloads::store::Store;
 use crate::model::{HttpAuth, LikeStatus, Named, Person, Track, VideoId};
 use crate::net::ytmusic::NetError;
 
-/// The heading a play with no `played` value is filed under.
-const UNDATED: &str = "Recently";
+/// The heading a play with no `played` value is filed under. English, since the cache keeps it beside YouTube's own headings.
+const UNDATED: &str = tr_noop!("Recently");
 /// What YouTube's playback tracker wants alongside the ping.
 const CLIENT_NAME: &str = "WEB_REMIX";
 /// Character set of the playback id ytmusicapi makes up per ping.
@@ -267,7 +267,7 @@ pub fn forget_cached(store: &Store, video_id: &str) {
 pub fn prepend_cached(store: &Store, track: &Track) {
     let mut entries = cached_history(store);
     entries.retain(|entry| entry.track.video_id != track.video_id);
-    entries.insert(0, HistoryEntry { track: track.clone(), played: "Today".to_owned(), feedback_token: None });
+    entries.insert(0, HistoryEntry { track: track.clone(), played: tr_noop!("Today").to_owned(), feedback_token: None });
     cache_history(store, &entries);
 }
 

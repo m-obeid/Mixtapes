@@ -50,6 +50,7 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 - [Opening Links](#opening-links)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
+- [Translating](#translating)
 - [Star History](#star-history)
 - [Contributors](#contributors)
 - [License](#license)
@@ -278,6 +279,7 @@ Your desktop sends every `https://` link to the browser and has no way to hand o
 |   ✅️   | **Background Playback**      | Music keeps playing when the window is closed                                                                                                                                                                                                                                                |
 |   ✅️   | **Setup & Release Notes**    | First-run setup wizard and a What's New dialog after updates                                                                                                                                                                                                                                 |
 |   ✅️   | **Settings**                 | General, Appearance, Lyrics, Services and Advanced pages                                                                                                                                                                                                                                     |
+|   ☑️   | **Translations**             | Translatable through gettext PO files in `po/`, with a Language setting<br>🔜 First languages, contributions welcome |
 |   ✅️   | **Cover Art Tint**           | Tint Libadwaita to match cover art, kinda like Material You, with an optional blurred cover background                                                                                                                                                                                       |
 |   ✅️   | **Scrobbling**               | Submit plays to Last.fm and ListenBrainz<br>✅️ Now Playing<br>✅️ Offline backlog with retries                                                                                                                                                                                                |
 |   ✅️   | **Discord RPC**              | Show your current track on Discord<br>✅️ Linux<br>✅️ Windows                                                                                                                                                                                                                                 |
@@ -295,6 +297,28 @@ Have an idea or found a bug? [Open an issue!](https://github.com/m-obeid/Mixtape
 ## Contributing
 
 Contributions are welcome! Feel free to open issues for bug reports or feature requests, and submit pull requests.
+
+## Translating
+
+Mixtapes follows your system language when a translation for it exists. Preferences has a Language row to pick another one.
+
+Translations are gettext PO files in [`po/`](po/), one per language. Any PO editor works, for example [Poedit](https://poedit.net/) or GNOME's Translation Editor.
+
+To add a language:
+
+1. Add its code (`de`, `pt_BR`, `zh_CN`) on a new line in `po/LINGUAS`.
+2. Run `po/update.sh`. It creates `po/<code>.po` from the template. It needs GNU gettext 0.24 or newer.
+3. Translate `po/<code>.po`. Keep `{placeholders}` as they are; you are free to move them within the sentence.
+4. Try it: `LANGUAGE=<code> cargo run`.
+5. Open a pull request.
+
+Without gettext installed, copy `po/mixtapes.pot` to `po/<code>.po`, fill in the `Language` and `Plural-Forms` header lines, and add the code to `po/LINGUAS`.
+
+To improve a language already there, edit its `.po` file and open a pull request.
+
+Some text stays in English for now: shelf and section titles YouTube Music sends, and the release notes.
+
+For developers: wrap user-visible text in `tr!`, `trn!` or `trc!` (see [`src/i18n/mod.rs`](src/i18n/mod.rs)), then run `po/update.sh` to refresh the template and every translation. The build compiles the PO files into the binary, so no gettext tools are needed to build.
 
 ## Star History
 

@@ -18,11 +18,12 @@ use crate::paths::Paths;
 pub const PREFIX: &str = "LOCAL_";
 /// The likes list. It is a playlist to the pages, never edited or deleted.
 pub const LIKED_ID: &str = "LOCAL_LIKED";
-pub const LIKED_TITLE: &str = "Liked Songs";
+/// English, as the id of the text. `liked_title` is what the pages show.
+pub const LIKED_TITLE: &str = tr_noop!("Liked Songs");
 /// YouTube's own art for its likes list, so both lists wear the same cover.
 pub const LIKED_ART: &str = "https://www.gstatic.com/youtube/media/ytm/images/pbg/liked-songs-delhi-576.png";
-/// What cards and headers say instead of an author.
-pub const HERE: &str = "On this device";
+/// What cards and headers say instead of an author. English, pass it to `i18n::gettext` where it is shown.
+pub const HERE: &str = tr_noop!("On this device");
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS playlists (
@@ -148,12 +149,12 @@ impl LocalLibrary {
 
     fn liked_item(&self) -> MediaItem {
         let count = self.with_db(|db| db.query_row("SELECT COUNT(*) FROM liked", [], |r| r.get::<_, i64>(0)));
-        item(LIKED_ID.to_owned(), LIKED_TITLE.to_owned(), count as usize, Some(LIKED_ART.to_owned()))
+        item(LIKED_ID.to_owned(), liked_title(), count as usize, Some(LIKED_ART.to_owned()))
     }
 
     pub fn title_of(&self, id: &str) -> Option<String> {
         if id == LIKED_ID {
-            return Some(LIKED_TITLE.to_owned());
+            return Some(liked_title());
         }
         self.with_db(|db| db.query_row("SELECT title FROM playlists WHERE id = ?1", params![id], |r| r.get(0)).optional())
     }
@@ -174,7 +175,7 @@ impl LocalLibrary {
     /// What the playlist page renders, in the shape the network gives it.
     pub fn details(&self, id: &str) -> Option<PlaylistDetails> {
         let (title, description) = if id == LIKED_ID {
-            (LIKED_TITLE.to_owned(), String::new())
+            (liked_title(), String::new())
         } else {
             self.with_db(|db| db.query_row("SELECT title, description FROM playlists WHERE id = ?1", params![id], |r| Ok((r.get(0)?, r.get(1)?))).optional())?
         };
@@ -186,7 +187,7 @@ impl LocalLibrary {
             description,
             privacy: None,
             thumbnails: if id == LIKED_ID { vec![LIKED_ART.to_owned()] } else { tracks.iter().filter_map(|t| t.thumb.clone()).take(1).collect() },
-            author: vec![Person { name: HERE.to_owned(), id: None }],
+            author: vec![Person { name: crate::i18n::gettext(HERE), id: None }],
             collaborators: None,
             year: None,
             duration: None,
@@ -427,14 +428,21 @@ fn thumb_of(track_json: &str) -> Option<String> {
     serde_json::from_str::<Track>(track_json).ok().and_then(|t| t.thumb)
 }
 
+/// The likes list's name in the app's language. Never stored, so a language switch renames it.
+fn liked_title() -> String {
+    crate::i18n::gettext(LIKED_TITLE)
+}
+
 fn item(id: String, title: String, count: usize, thumb: Option<String>) -> MediaItem {
+    let here = crate::i18n::gettext(HERE);
     MediaItem {
         kind: ItemKind::Playlist,
         id,
         title,
         thumb,
-        description: Some(format!("{count} songs • {HERE}")),
-        artists: vec![Person { name: HERE.to_owned(), id: None }],
+        // The count leads, before the dot: MediaItem::playlist_detail reads it from there.
+        description: Some(format!("{} • {here}", trn!("{n} song", "{n} songs", count))),
+        artists: vec![Person { name: here.clone(), id: None }],
         ..MediaItem::default()
     }
 }
@@ -484,7 +492,7 @@ mod tests {
         lib.set_liked(&track("a"), false);
         assert!(!lib.is_liked("a"));
         assert_eq!(lib.items()[0].id, LIKED_ID);
-        assert_eq!(lib.items()[0].description.as_deref(), Some("1 songs • On this device"));
+        assert_eq!(lib.items()[0].description.as_deref(), Some("1 song • On this device"));
         assert_eq!(lib.details(LIKED_ID).unwrap().tracks.len(), 1);
     }
 

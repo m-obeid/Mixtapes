@@ -88,8 +88,10 @@ pub fn build_activity(snap: &Snapshot, options: &Options, now_ms: i64) -> Option
     if snap.status == PlaybackStatus::Stopped || (options.hide_on_pause && paused) || !snap.has_track {
         return None;
     }
-    let title = if snap.title.is_empty() { "Unknown" } else { &snap.title };
-    let artist = if snap.artist.is_empty() { "Unknown artist" } else { &snap.artist };
+    // Translators: stands in for a missing track title in the Discord status.
+    let title = if snap.title.is_empty() { tr!("Unknown") } else { snap.title.clone() };
+    let artist = if snap.artist.is_empty() { tr!("Unknown artist") } else { snap.artist.clone() };
+    let (title, artist) = (title.as_str(), artist.as_str());
 
     let mut assets = if snap.thumb.starts_with("http") {
         let text = [snap.album.as_str(), title].into_iter().find(|t| !t.is_empty()).unwrap_or("Mixtapes");
@@ -100,7 +102,7 @@ pub fn build_activity(snap: &Snapshot, options: &Options, now_ms: i64) -> Option
     if options.small_icon {
         // The icon mirrors the transport button, like the Python app.
         assets["small_image"] = json!(if playing { "pause" } else { "play" });
-        assets["small_text"] = json!(if playing { "Playing" } else { "Paused" });
+        assets["small_text"] = json!(if playing { tr!("Playing") } else { tr!("Paused") });
     }
 
     let mut activity = json!({
@@ -217,7 +219,7 @@ impl Discord {
     pub fn new(enabled: bool) -> Self {
         let this = Self {
             worker: Mutex::new(None),
-            status: Arc::new(Mutex::new("Disabled".to_owned())),
+            status: Arc::new(Mutex::new(tr_noop!("Disabled").to_owned())),
         };
         if enabled {
             this.set_enabled(true);
@@ -225,9 +227,9 @@ impl Discord {
         this
     }
 
-    /// "Connected", "Disconnected" or "Disabled", for the settings row.
+    /// "Connected", "Disconnected" or "Disabled", for the settings row, in the app's language.
     pub fn status(&self) -> String {
-        self.status.lock().map(|s| s.clone()).unwrap_or_default()
+        self.status.lock().map(|s| crate::i18n::gettext(&s)).unwrap_or_default()
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -239,7 +241,7 @@ impl Discord {
         match (enabled, worker.is_some()) {
             (true, false) => {
                 let (tx, rx) = channel();
-                set_status(&self.status, "Disconnected");
+                set_status(&self.status, tr_noop!("Disconnected"));
                 let status = self.status.clone();
                 let spawned = std::thread::Builder::new().name("discord-rpc".into()).spawn(move || Connection::new(status).run(rx));
                 match spawned {
@@ -254,7 +256,7 @@ impl Discord {
                 if let Some(w) = worker.take() {
                     let _ = w.tx.send(Op::Stop);
                 }
-                set_status(&self.status, "Disabled");
+                set_status(&self.status, tr_noop!("Disabled"));
             }
             _ => {}
         }
@@ -362,7 +364,7 @@ impl Connection {
                     tracing::info!(?path, "discord connected");
                     self.stream = Some(stream);
                     self.attempt = 0;
-                    set_status(&self.status, "Connected");
+                    set_status(&self.status, tr_noop!("Connected"));
                     self.send_activity();
                     return;
                 }
@@ -370,7 +372,7 @@ impl Connection {
             }
         }
         tracing::debug!("no discord ipc endpoint reachable");
-        set_status(&self.status, "Disconnected");
+        set_status(&self.status, tr_noop!("Disconnected"));
         self.schedule_reconnect();
     }
 
@@ -436,7 +438,7 @@ impl Connection {
 
     fn teardown(&mut self) {
         self.stream = None;
-        set_status(&self.status, "Disconnected");
+        set_status(&self.status, tr_noop!("Disconnected"));
     }
 }
 

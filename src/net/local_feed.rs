@@ -32,7 +32,8 @@ const NEW_RELEASES: usize = 12;
 const LIKE_WEIGHT: usize = 2;
 
 pub const QUICK_PICKS_TITLE: &str = "Quick picks";
-pub const LISTEN_AGAIN_TITLE: &str = "Listen again";
+/// English, because `home::classify_section` reads it. Home passes it to `i18n::gettext` where it is shown.
+pub const LISTEN_AGAIN_TITLE: &str = tr_noop!("Listen again");
 
 /// What the device knows about the listener, read on the GTK thread.
 #[derive(Clone, Debug, Default)]
@@ -124,7 +125,7 @@ pub async fn build(api: Arc<dyn Browse>, signals: Signals) -> Vec<HomeSection> {
     // Artists take turns, so the one with the busiest year fills no more than its share.
     let releases = interleave(per_artist, NEW_RELEASES, |item| item.id.clone());
     if !releases.is_empty() {
-        sections.push(HomeSection { title: "New from artists you like".to_owned(), items: releases, strapline_thumb: None, strapline: None });
+        sections.push(HomeSection { title: tr!("New from artists you like"), items: releases, strapline_thumb: None, strapline: None });
     }
     for artist in artists.iter().take(SIMILAR_SHELVES) {
         let Some(related) = &artist.related else { continue };
@@ -132,7 +133,8 @@ pub async fn build(api: Arc<dyn Browse>, signals: Signals) -> Vec<HomeSection> {
         if items.is_empty() {
             continue;
         }
-        sections.push(HomeSection { title: artist.name.clone(), items, strapline_thumb: artist.thumbnails.first().cloned(), strapline: Some("Similar to".to_owned()) });
+        // Translators: a small line above an artist's name, which is the shelf title below it.
+        sections.push(HomeSection { title: artist.name.clone(), items, strapline_thumb: artist.thumbnails.first().cloned(), strapline: Some(tr!("Similar to")) });
     }
     sections
 }

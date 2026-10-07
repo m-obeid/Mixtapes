@@ -255,7 +255,7 @@ impl CategoryPage {
         section.append(&list);
 
         if items.len() > limit {
-            let button = gtk::Button::builder().label("View All").css_classes(["pill"]).halign(gtk::Align::Center).margin_top(12).build();
+            let button = gtk::Button::builder().label(tr!("View All")).css_classes(["pill"]).halign(gtk::Align::Center).margin_top(12).build();
             let weak = Rc::downgrade(self);
             let title = title.to_owned();
             button.connect_clicked(move |_| {
@@ -278,7 +278,7 @@ impl CategoryPage {
         let item = item.clone();
         let open = Rc::new(move |x: f64, y: f64| {
             let data = item.clone();
-            let extras = vec![MenuAction::new("Copy JSON (Debug)", Section::Clipboard, move || {
+            let extras = vec![MenuAction::new(&tr!("Copy JSON (Debug)"), Section::Clipboard, move || {
                 if let Ok(text) = serde_json::to_string_pretty(&data) {
                     copy_to_clipboard(&text);
                 }

@@ -53,7 +53,7 @@ struct Wizard {
 pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>, start: Option<&str>) -> adw::Dialog {
     let nav = adw::NavigationView::new();
     // Sized to its content: a taller dialog left the status pages floating in empty space.
-    let dialog = adw::Dialog::builder().title("Welcome").content_width(460).content_height(540).child(&nav).build();
+    let dialog = adw::Dialog::builder().title(tr!("Welcome")).content_width(460).content_height(540).child(&nav).build();
     let wizard = Rc::new(Wizard { dialog: dialog.clone(), nav, win: win.clone(), ctx: ctx.clone() });
     wizard.nav.add(&wizard.welcome_page());
     wizard.nav.add(&wizard.account_page());
@@ -107,9 +107,9 @@ impl Wizard {
     }
 
     fn welcome_page(self: &Rc<Self>) -> adw::NavigationPage {
-        let status = self.status(crate::APP_ID, "Welcome to Mixtapes", "");
+        let status = self.status(crate::APP_ID, &tr!("Welcome to Mixtapes"), "");
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
-        let start = self.pill("Get Started", true);
+        let start = self.pill(&tr!("Get Started"), true);
         let weak = Rc::downgrade(self);
         start.connect_clicked(move |_| {
             if let Some(w) = weak.upgrade() {
@@ -117,21 +117,21 @@ impl Wizard {
             }
         });
         column.append(&start);
-        let skip = gtk::Button::builder().label("Skip Setup").halign(gtk::Align::Center).css_classes(["flat"]).build();
+        let skip = gtk::Button::builder().label(tr!("Skip Setup")).halign(gtk::Align::Center).css_classes(["flat"]).build();
         let dialog = self.dialog.clone();
         skip.connect_clicked(move |_| {
             dialog.close();
         });
         column.append(&skip);
         status.set_child(Some(&column));
-        self.page("welcome", "Welcome", &status)
+        self.page("welcome", &tr!("Welcome"), &status)
     }
 
     fn account_page(self: &Rc<Self>) -> adw::NavigationPage {
-        let status = self.status("avatar-default-symbolic", "Your YouTube Music Account", "Sign in for your library, likes, playlists and uploads. Without an account you still get search, radio, downloads, and playlists and likes kept on this device.");
+        let status = self.status("avatar-default-symbolic", &tr!("Your YouTube Music Account"), &tr!("Sign in for your library, likes, playlists and uploads. Without an account you still get search, radio, downloads, and playlists and likes kept on this device."));
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
 
-        let google = self.pill("Sign in with Google", true);
+        let google = self.pill(&tr!("Sign in with Google"), true);
         let weak = Rc::downgrade(self);
         google.connect_clicked(move |_| {
             if let Some(w) = weak.upgrade() {
@@ -140,7 +140,7 @@ impl Wizard {
         });
         column.append(&google);
 
-        let skip = gtk::Button::builder().label("Continue Without an Account").halign(gtk::Align::Center).css_classes(["flat"]).margin_top(12).build();
+        let skip = gtk::Button::builder().label(tr!("Continue Without an Account")).halign(gtk::Align::Center).css_classes(["flat"]).margin_top(12).build();
         let weak = Rc::downgrade(self);
         skip.connect_clicked(move |_| {
             if let Some(w) = weak.upgrade() {
@@ -149,7 +149,7 @@ impl Wizard {
         });
         column.append(&skip);
         status.set_child(Some(&column));
-        self.page("account", "Account", &status)
+        self.page("account", &tr!("Account"), &status)
     }
 
     /// The login window opens over the wizard. A success moves on to the settings step.
@@ -160,7 +160,7 @@ impl Wizard {
         login.set_on_success(move || {
             library.load_library(false);
             if let Some(w) = weak.upgrade() {
-                w.win.add_toast("Signed in");
+                w.win.add_toast(&tr!("Signed in"));
                 w.after_sign_in();
             }
         });
@@ -192,7 +192,7 @@ impl Wizard {
     }
 
     fn channel_page(self: &Rc<Self>, accounts: Vec<crate::net::ytmusic::Account>) -> adw::NavigationPage {
-        let status = self.status("avatar-default-symbolic", "Which Channel?", "Your Google account has more than one channel. Pick the one whose library Mixtapes should show. You can change this under Preferences.");
+        let status = self.status("avatar-default-symbolic", &tr!("Which Channel?"), &tr!("Your Google account has more than one channel. Pick the one whose library Mixtapes should show. You can change this under Preferences."));
         let group = adw::PreferencesGroup::new();
         let current = self.ctx.net.client().channel();
         for account in accounts {
@@ -223,7 +223,7 @@ impl Wizard {
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).build();
         column.append(&group);
         status.set_child(Some(&column));
-        self.page("channel", "Channel", &status)
+        self.page("channel", &tr!("Channel"), &status)
     }
 
     fn choose_channel(self: &Rc<Self>, page_id: Option<String>) {
@@ -246,7 +246,7 @@ impl Wizard {
                 }
                 other => {
                     tracing::warn!(?other, "channel switch failed in the wizard");
-                    w.win.add_toast("Could not switch the channel");
+                    w.win.add_toast(&tr!("Could not switch the channel"));
                 }
             }
             w.push("extras");
@@ -257,12 +257,12 @@ impl Wizard {
         let ctx = &self.ctx;
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).margin_top(12).margin_bottom(24).margin_start(24).margin_end(24).build();
         let heading = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_bottom(6).build();
-        heading.append(&gtk::Label::builder().label("A Few Settings").css_classes(["title-1"]).build());
-        heading.append(&gtk::Label::builder().label("Each of these lives under Preferences too.").css_classes(["dim-label"]).wrap(true).justify(gtk::Justification::Center).build());
+        heading.append(&gtk::Label::builder().label(tr!("A Few Settings")).css_classes(["title-1"]).build());
+        heading.append(&gtk::Label::builder().label(tr!("Each of these lives under Preferences too.")).css_classes(["dim-label"]).wrap(true).justify(gtk::Justification::Center).build());
         column.append(&heading);
 
         let group = adw::PreferencesGroup::new();
-        let discord = switch_row("Discord Rich Presence", "Show what you're listening to on your Discord profile", pref_bool(ctx, "discord_rpc_enabled", true));
+        let discord = switch_row(&tr!("Discord Rich Presence"), &tr!("Show what you're listening to on your Discord profile"), pref_bool(ctx, "discord_rpc_enabled", true));
         {
             let ctx = ctx.clone();
             discord.connect_active_notify(move |row| {
@@ -276,7 +276,7 @@ impl Wizard {
         }
         group.add(&discord);
 
-        let scrobble = switch_row("Scrobbling", "Submit your plays to Last.fm or ListenBrainz. Connect an account under Preferences.", ctx.scrobbler.enabled());
+        let scrobble = switch_row(&tr!("Scrobbling"), &tr!("Submit your plays to Last.fm or ListenBrainz. Connect an account under Preferences."), ctx.scrobbler.enabled());
         {
             let ctx = ctx.clone();
             scrobble.connect_active_notify(move |row| {
@@ -286,7 +286,7 @@ impl Wizard {
         }
         group.add(&scrobble);
 
-        let accent = switch_row("Dynamic Cover Color", "Match the accent color to the cover of the playing song", pref_bool(ctx, "dynamic_accent", false));
+        let accent = switch_row(&tr!("Dynamic Cover Color"), &tr!("Match the accent color to the cover of the playing song"), pref_bool(ctx, "dynamic_accent", false));
         {
             let ctx = ctx.clone();
             let win = Rc::downgrade(&self.win);
@@ -299,7 +299,7 @@ impl Wizard {
         }
         group.add(&accent);
 
-        let blur = switch_row("Blurred Cover Background", "Use the cover as a blurred window background", pref_bool(ctx, "blurred_background", false));
+        let blur = switch_row(&tr!("Blurred Cover Background"), &tr!("Use the cover as a blurred window background"), pref_bool(ctx, "blurred_background", false));
         {
             let ctx = ctx.clone();
             let win = Rc::downgrade(&self.win);
@@ -312,7 +312,7 @@ impl Wizard {
         }
         group.add(&blur);
 
-        let notes = switch_row("Release Notes After Updates", "Open what's new once for each new version", pref_bool(ctx, release_notes::SHOW_PREF, true));
+        let notes = switch_row(&tr!("Release Notes After Updates"), &tr!("Open what's new once for each new version"), pref_bool(ctx, release_notes::SHOW_PREF, true));
         {
             let ctx = ctx.clone();
             notes.connect_active_notify(move |row| save(&ctx, release_notes::SHOW_PREF, row.is_active()));
@@ -320,7 +320,7 @@ impl Wizard {
         group.add(&notes);
         column.append(&group);
 
-        let next = self.pill("Continue", true);
+        let next = self.pill(&tr!("Continue"), true);
         let weak = Rc::downgrade(self);
         next.connect_clicked(move |_| {
             if let Some(w) = weak.upgrade() {
@@ -331,22 +331,23 @@ impl Wizard {
 
         let clamp = adw::Clamp::builder().maximum_size(500).child(&column).build();
         let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&clamp).build();
-        self.page("extras", "Settings", &scroller)
+        self.page("extras", &tr!("Settings"), &scroller)
     }
 
     fn done_page(self: &Rc<Self>) -> adw::NavigationPage {
-        let status = self.status("object-select-symbolic", "You're All Set", "Preferences, keyboard shortcuts and the release notes are in the main menu.");
+        let status = self.status("object-select-symbolic", &tr!("You're All Set"), &tr!("Preferences, keyboard shortcuts and the release notes are in the main menu."));
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
-        let start = self.pill("Start Listening", true);
+        let start = self.pill(&tr!("Start Listening"), true);
         let dialog = self.dialog.clone();
         start.connect_clicked(move |_| {
             dialog.close();
         });
         column.append(&start);
         // Mixtapes and my other projects are free. A quiet line and two links, no panel.
-        column.append(&gtk::Label::builder().label("Mixtapes is free. If you like it, you can support my work.").css_classes(["dim-label"]).wrap(true).justify(gtk::Justification::Center).margin_top(18).build());
+        column.append(&gtk::Label::builder().label(tr!("Mixtapes is free. If you like it, you can support my work.")).css_classes(["dim-label"]).wrap(true).justify(gtk::Justification::Center).margin_top(18).build());
         column.append(&release_notes::donate_buttons());
         status.set_child(Some(&column));
-        self.page("done", "Done", &status)
+        // Translators: title of the last setup step, the setup is finished.
+        self.page("done", &tr!("Done"), &status)
     }
 }

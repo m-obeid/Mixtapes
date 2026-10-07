@@ -38,6 +38,8 @@ const SPEED_DIAL_SPACING: i32 = 8;
 /// Room around the tiles for their shadow and focus ring, which the scroller would clip.
 const SPEED_DIAL_BLEED: i32 = 8;
 const LABEL_NATURAL_MAX_CHARS: i32 = 12;
+/// The row the app names itself. Kept in English as the key the icon rules match.
+const QUICK_PICKS: &str = tr_noop!("Quick picks");
 
 /// A grid of tiles that scrolls sideways, `rows` high.
 struct Dial {
@@ -78,14 +80,14 @@ pub struct HomePage {
 impl HomePage {
     pub fn new(ctx: Rc<UiContext>) -> Rc<Self> {
         let stack = gtk::Stack::builder().vexpand(true).build();
-        stack.add_named(&loading_box("Loading…"), Some("loading"));
+        stack.add_named(&loading_box(&tr!("Loading…")), Some("loading"));
 
         let feed_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(28).margin_top(24).margin_bottom(24).margin_start(12).margin_end(12).build();
         let clamp = adw::Clamp::builder().maximum_size(1024).tightening_threshold(600).child(&feed_box).build();
         let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vscrollbar_policy(gtk::PolicyType::Automatic).child(&clamp).build();
         crate::ui::suppress_hover_while_scrolling(&scroll);
         stack.add_named(&scroll, Some("feed"));
-        let status = adw::StatusPage::builder().icon_name("user-home-symbolic").title("Home").description("Your music feed will appear here.").build();
+        let status = adw::StatusPage::builder().icon_name("user-home-symbolic").title(tr!("Home")).description(tr!("Your music feed will appear here.")).build();
         stack.add_named(&status, Some("status"));
         stack.set_visible_child_name("loading");
 
@@ -186,7 +188,7 @@ impl HomePage {
                 self.populate(sections);
                 self.stack.set_visible_child_name("feed");
             }
-            Err("offline") => self.show_status("network-offline-symbolic", "You're offline", "Home requires an internet connection.\nYour downloaded songs are still available.", false),
+            Err("offline") => self.show_status("network-offline-symbolic", &tr!("You're offline"), &tr!("Home requires an internet connection.\nYour downloaded songs are still available."), false),
             Err(_) => {
                 let attempt = self.retry_count.get();
                 if attempt < 2 {
@@ -199,7 +201,7 @@ impl HomePage {
                     });
                     return;
                 }
-                self.show_status("dialog-warning-symbolic", "Couldn't load Home", "Try refreshing in a moment.", true);
+                self.show_status("dialog-warning-symbolic", &tr!("Couldn't load Home"), &tr!("Try refreshing in a moment."), true);
             }
         }
     }
@@ -210,7 +212,7 @@ impl HomePage {
         self.status.set_description(Some(description));
         self.status.set_child(None::<&gtk::Widget>);
         if show_retry {
-            let retry = gtk::Button::builder().label("Retry").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
+            let retry = gtk::Button::builder().label(tr!("Retry")).css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
             let weak = Rc::downgrade(self);
             retry.connect_clicked(move |_| {
                 if let Some(p) = weak.upgrade() {
@@ -305,7 +307,7 @@ impl HomePage {
         let (dial, ordered) = home::arrange(sections);
         if !dial.is_empty() {
             self.shelves.borrow_mut().push(dial.clone());
-            self.add_speed_dial("Quick picks", None, None, &dial, SPEED_DIAL_ROWS, SPEED_DIAL_ROWS_COMPACT);
+            self.add_speed_dial(QUICK_PICKS, None, None, &dial, SPEED_DIAL_ROWS, SPEED_DIAL_ROWS_COMPACT);
         }
         for section in ordered {
             self.shelves.borrow_mut().push(section.items.clone());
@@ -347,7 +349,9 @@ impl HomePage {
                 }
             }
         }
-        let title_label = gtk::Label::builder().label(title).css_classes(["title-2", "home-section-title"]).halign(gtk::Align::Start).valign(gtk::Align::Center).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        // The icon rules read the English name, so only the label is translated. A title YouTube sent has no entry and stays as it came.
+        let shown = crate::i18n::gettext(title);
+        let title_label = gtk::Label::builder().label(shown).css_classes(["title-2", "home-section-title"]).halign(gtk::Align::Start).valign(gtk::Align::Center).ellipsize(gtk::pango::EllipsizeMode::End).build();
         match strapline {
             // The web feed's small line above the title, in capitals like there.
             Some(strapline) => {

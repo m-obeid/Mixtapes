@@ -30,7 +30,8 @@ const SIZE_LIMIT: u64 = 314_572_800;
 pub async fn upload_song(http: &reqwest::Client, headers: &BTreeMap<String, String>, file: &Path) -> Result<(), NetError> {
     let extension = file.extension().and_then(|e| e.to_str()).unwrap_or_default().to_lowercase();
     if !SUPPORTED.contains(&extension.as_str()) {
-        return Err(NetError::Message(format!("YouTube Music does not take {extension} files. It takes {}.", SUPPORTED.join(", "))));
+        // Translators: {extension} is a file type such as "wav", {formats} a list such as "mp3, m4a, flac".
+        return Err(NetError::Message(tr!("YouTube Music does not take {extension} files. It takes {formats}.", extension, formats = SUPPORTED.join(", "))));
     }
     let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("upload").to_owned();
     let size = tokio::fs::metadata(file).await?.len();

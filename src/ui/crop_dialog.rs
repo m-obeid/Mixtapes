@@ -45,16 +45,16 @@ pub fn show(parent: &impl IsA<gtk::Window>, pixbuf: Pixbuf, on_result: impl Fn(P
         orig_offset_y: 0.0,
     }));
 
-    let window = adw::Window::builder().title("Edit Playlist Cover").transient_for(parent).modal(true).default_width(540).default_height(680).build();
+    let window = adw::Window::builder().title(tr!("Edit Playlist Cover")).transient_for(parent).modal(true).default_width(540).default_height(680).build();
     let toolbar = adw::ToolbarView::new();
     window.set_content(Some(&toolbar));
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new("Crop Playlist Cover", "")));
+    header.set_title_widget(Some(&adw::WindowTitle::new(&tr!("Crop Playlist Cover"), "")));
     toolbar.add_top_bar(&header);
 
     let main_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).margin_top(24).margin_bottom(24).margin_start(24).margin_end(24).valign(gtk::Align::Center).build();
     toolbar.set_content(Some(&main_box));
-    main_box.append(&gtk::Label::builder().label("Select the square area you want to use.").css_classes(["title-3"]).build());
+    main_box.append(&gtk::Label::builder().label(tr!("Select the square area you want to use.")).css_classes(["title-3"]).build());
     let frame = gtk::Frame::builder().halign(gtk::Align::Center).valign(gtk::Align::Center).build();
     main_box.append(&frame);
     let area = gtk::DrawingArea::builder().width_request(MAX_DISPLAY).height_request(MAX_DISPLAY).build();
@@ -143,13 +143,13 @@ pub fn show(parent: &impl IsA<gtk::Window>, pixbuf: Pixbuf, on_result: impl Fn(P
 
     let footer = gtk::ActionBar::new();
     toolbar.add_bottom_bar(&footer);
-    let cancel = gtk::Button::with_label("Cancel");
+    let cancel = gtk::Button::with_label(&tr!("Cancel"));
     {
         let window = window.clone();
         cancel.connect_clicked(move |_| window.close());
     }
     footer.pack_start(&cancel);
-    let apply = gtk::Button::builder().label("Save & Use PNG").css_classes(["suggested-action"]).build();
+    let apply = gtk::Button::builder().label(tr!("Save & Use PNG")).css_classes(["suggested-action"]).build();
     {
         let window = window.clone();
         let on_result = Rc::new(on_result);

@@ -248,7 +248,7 @@ impl DiscographyPage {
 
     fn on_grid_right_click(&self, widget: &gtk::Button, x: f64, y: f64, item: &MediaItem) {
         let data = item.clone();
-        let extras = vec![MenuAction::new("Copy JSON (Debug)", Section::Clipboard, move || {
+        let extras = vec![MenuAction::new(&tr!("Copy JSON (Debug)"), Section::Clipboard, move || {
             if let Ok(text) = serde_json::to_string_pretty(&data) {
                 copy_to_clipboard(&text);
             }
