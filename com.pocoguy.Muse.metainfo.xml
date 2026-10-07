@@ -89,6 +89,31 @@
 
   <releases>
 
+    <release version="2026-10-07.1" date="2026-10-08">
+      <description>
+        <p>A hotfix release for your reports on the last one, most of them from listening without an account. Liked songs keep their names, playlists play from the library, search shows more than twenty results, and YouTube playlists and albums can be kept in the library without signing in.</p>
+        <ul>
+          <li>Add to Library is a star button of its own on playlist and album pages, and it works without an account: the list stays in your library on this device and follows its changes on YouTube</li>
+          <li>Show More under the songs, artists, playlists and albums of a search loads the next results</li>
+          <li>View All sits beside the heading of a section on artist pages and on Explore, instead of at the end of the carousel</li>
+          <li>The queue can open by itself when you start a song, an album or a playlist: Preferences, Playback</li>
+          <li>The queue is named after the shelf, the search or the page it was started from</li>
+          <li>On desktop, a click on an empty part of the player view closes it</li>
+        </ul>
+        <ul>
+          <li>Recording a play "after 30 seconds" counts the time you listened. Skipping ahead in a song no longer counts</li>
+          <li>The cover under the position and the play state in the queue is less dark</li>
+          <li>Fix: songs liked without an account showed up as "Unknown". Likes saved that way get their title and cover back</li>
+          <li>Fix: Play, Play Next and Add to Queue on a library playlist answered "Nothing to play" without an account</li>
+          <li>Fix: an album queued from its menu showed no covers in the queue</li>
+          <li>Fix: the library stayed filtered, or empty, after searching in it and leaving the tab with the search still open</li>
+          <li>Fix: View All on a "Release - Topic" channel opened an empty page</li>
+          <li>Fix: a message naming a title with an ampersand came up blank</li>
+          <li>Fix: a saved album showed as not saved for a few seconds after its page opened</li>
+        </ul>
+      </description>
+    </release>
+
     <release version="2026-10-07.0" date="2026-10-07">
       <description>
         <p>A release about the queue and the player. The queue comes back after a restart, shows covers, names where it came from and keeps the playing song in the middle, the desktop player follows your pointer like the drawer on phones, and a round of fixes from your reports makes lyrics and the listening history smoother.</p>
