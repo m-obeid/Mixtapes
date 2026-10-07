@@ -595,12 +595,12 @@ impl Scrobbler {
     /// Start the desktop auth flow. Returns (token, url) for the caller to open in a browser.
     pub async fn lastfm_request_token(&self) -> Result<(String, String), ScrobbleError> {
         if !self.lastfm_configured() {
-            return Err(Permanent("This build has no Last.fm API credentials".into()));
+            return Err(Permanent(tr!("This build has no Last.fm API credentials")));
         }
         let data = self.lastfm_call("auth.getToken", BTreeMap::new(), false, None).await?;
         let token = data.get("token").and_then(Value::as_str).unwrap_or_default().to_owned();
         if token.is_empty() {
-            return Err(Permanent("Last.fm returned no token".into()));
+            return Err(Permanent(tr!("Last.fm returned no token")));
         }
         let url = reqwest::Url::parse_with_params(LASTFM_AUTH_URL, [("api_key", self.api_key.as_str()), ("token", token.as_str())])
             .map(String::from)
@@ -639,7 +639,8 @@ impl Scrobbler {
         let status = response.status().as_u16();
         match status {
             200 => Ok(()),
-            401 | 403 => Err(Auth("user token rejected".into())),
+            // Translators: follows the service name and a colon, as in "ListenBrainz: user token rejected".
+            401 | 403 => Err(Auth(tr!("user token rejected"))),
             429 => Err(Transient(format!("HTTP {status}"))),
             s if s >= 500 => Err(Transient(format!("HTTP {status}"))),
             _ => {
@@ -665,7 +666,7 @@ impl Scrobbler {
     pub async fn listenbrainz_connect(&self, token: &str) -> Result<String, ScrobbleError> {
         let token = token.trim();
         if token.is_empty() {
-            return Err(Permanent("Enter your ListenBrainz user token".into()));
+            return Err(Permanent(tr!("Enter your ListenBrainz user token")));
         }
         let response = self
             .http
@@ -676,15 +677,16 @@ impl Scrobbler {
             .map_err(|e| Transient(e.to_string()))?;
         let status = response.status().as_u16();
         if status == 401 || status == 403 {
-            return Err(Auth("that token is not valid".into()));
+            // Translators: follows the service name and a colon, as in "ListenBrainz: that token is not valid".
+            return Err(Auth(tr!("that token is not valid")));
         }
         if status == 429 || status >= 500 {
             return Err(Transient(format!("HTTP {status}")));
         }
         let data: Value = response.json().await.map_err(|e| Transient(e.to_string()))?;
         if !data.get("valid").and_then(Value::as_bool).unwrap_or(false) {
-            let message = data.get("message").and_then(Value::as_str).unwrap_or("that token is not valid");
-            return Err(Auth(message.to_owned()));
+            let message = data.get("message").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| tr!("that token is not valid"));
+            return Err(Auth(message));
         }
         let name = data.get("user_name").and_then(Value::as_str).unwrap_or_default().to_owned();
         self.store_credentials(Service::ListenBrainz, json!({"token": token, "username": name}));
@@ -775,7 +777,8 @@ fn classify_lastfm(data: Value) -> Result<Value, ScrobbleError> {
     if code == 0 {
         return Ok(data);
     }
-    let message = data.get("message").and_then(Value::as_str).unwrap_or("unknown error").to_owned();
+    // Translators: follows the service name and a colon, as in "Last.fm: unknown error".
+    let message = data.get("message").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| tr!("unknown error"));
     match code {
         // All four mean "this credential is no longer good".
         4 | 9 | 14 | 15 => Err(Auth(message)),

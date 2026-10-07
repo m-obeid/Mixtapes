@@ -63,14 +63,14 @@ impl DesktopCoverView {
         toggle_nav.add(
             adw::Toggle::builder()
                 .name("player")
-                .label("Player")
+                .label(tr!("Player"))
                 .icon_name("folder-music-symbolic")
                 .build(),
         );
         toggle_nav.add(
             adw::Toggle::builder()
                 .name("lyrics")
-                .label("Lyrics")
+                .label(tr!("Lyrics"))
                 .icon_name("format-justify-fill-symbolic")
                 .build(),
         );
@@ -107,7 +107,7 @@ impl DesktopCoverView {
             .valign(gtk::Align::Center)
             .build();
         let title = MarqueeLabel::new();
-        title.set_label("Not Playing");
+        title.set_label(&tr!("Not Playing"));
         title.add_css_class("title-3");
         let artists_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -237,14 +237,14 @@ impl DesktopCoverView {
             .icon_name("go-down-symbolic")
             .css_classes(["flat"])
             .valign(gtk::Align::Center)
-            .tooltip_text("Collapse player")
+            .tooltip_text(tr!("Collapse player"))
             .build();
         // A toggle, so it lights up while the queue is open, as the player bar's does.
         let queue_btn = gtk::ToggleButton::builder()
             .icon_name("music-queue-symbolic")
             .css_classes(["flat"])
             .valign(gtk::Align::Center)
-            .tooltip_text("Queue")
+            .tooltip_text(tr!("Queue"))
             .build();
         let end_buttons = gtk::Box::builder().spacing(6).build();
         end_buttons.append(&queue_btn);
@@ -496,10 +496,10 @@ impl DesktopCoverView {
     fn refresh_metadata(&self) {
         let state = self.ctx.player.state();
         let title = state.title();
-        self.title.set_label(if title.is_empty() {
-            "Not Playing"
+        self.title.set_label(&if title.is_empty() {
+            tr!("Not Playing")
         } else {
-            &title
+            title.clone()
         });
         self.cover.load_track(&state.video_id(), &state.thumbnail_url());
         while let Some(child) = self.artists_box.first_child() {
@@ -574,7 +574,7 @@ impl DesktopCoverView {
             return;
         };
         let this = self.clone();
-        let extras = vec![crate::ui::context_menu::MenuAction::new("Stream Info (Debug)", crate::ui::context_menu::Section::Debug, move || this.show_stream_info())];
+        let extras = vec![crate::ui::context_menu::MenuAction::new(&tr!("Stream Info (Debug)"), crate::ui::context_menu::Section::Debug, move || this.show_stream_info())];
         let opts = crate::ui::context_menu::SongMenuOptions {
             prefix: "cv",
             hide: ["play_next", "add_to_queue", "goto_artist", "goto_album"].as_slice(),

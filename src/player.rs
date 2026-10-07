@@ -51,7 +51,7 @@ fn summarize_error(message: &str) -> String {
     let message = message.split_once("ERROR:").map_or(message, |(_, rest)| rest).trim();
     let sentence = [". ", "; "].iter().find_map(|sep| message.split_once(sep)).map_or(message, |(first, _)| first);
     let trimmed = sentence.trim_matches([' ', '.']);
-    if trimmed.is_empty() { "Could not load this track".to_owned() } else { trimmed.chars().take(140).collect() }
+    if trimmed.is_empty() { tr!("Could not load this track") } else { trimmed.chars().take(140).collect() }
 }
 
 /// A play as the scrobbler sees it: a fresh one, or the same one under better metadata.
@@ -434,7 +434,7 @@ impl Player {
             tracing::warn!(%err, %video_id, "rating failed");
             if let Some(player) = weak.upgrade() {
                 player.apply_like_locally(&video_id, previous);
-                player.state.emit_notice("Couldn't update rating");
+                player.state.emit_notice(&tr!("Couldn't update rating"));
             }
         });
     }
@@ -1549,7 +1549,7 @@ fn session_allowed() -> bool {
 
 /// What the queue header calls a radio grown from `seed_name`.
 fn radio_title(seed_name: &str) -> String {
-    if seed_name.is_empty() { "Radio".to_owned() } else { format!("Radio of {seed_name}") }
+    if seed_name.is_empty() { tr!("Radio") } else { tr!("Radio of {seed_name}", seed_name) }
 }
 
 // -- infinite radio -------------------------------------------------------

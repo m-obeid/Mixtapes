@@ -99,16 +99,16 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
 
     // Notes, laid out like Bazaar's: title, date, the changes, a closing line, one link.
     let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(6).margin_bottom(24).margin_start(18).margin_end(18).build();
-    let title = gtk::Label::builder().label(format!("What's New in {}?", release.version)).css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build();
+    let title = gtk::Label::builder().label(tr!("What's New in {version}?", version = release.version)).css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build();
     column.append(&title);
     if !release.date.is_empty() {
-        column.append(&gtk::Label::builder().label(format!("Released on {}", release.date)).css_classes(["dim-label"]).margin_bottom(12).build());
+        column.append(&gtk::Label::builder().label(tr!("Released on {date}", date = release.date)).css_classes(["dim-label"]).margin_bottom(12).build());
     }
     if !release.summary.is_empty() {
         column.append(&gtk::Label::builder().label(&release.summary).wrap(true).xalign(0.0).build());
     }
     if !release.items.is_empty() {
-        column.append(&gtk::Label::builder().label("Changes").xalign(0.0).css_classes(["heading"]).build());
+        column.append(&gtk::Label::builder().label(tr!("Changes")).xalign(0.0).css_classes(["heading"]).build());
         let list = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).margin_start(12).build();
         for item in &release.items {
             let line = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
@@ -117,13 +117,13 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
             list.append(&line);
         }
         if release.more > 0 {
-            list.append(&gtk::Label::builder().label(format!("…and {} more changes and fixes, in the full release notes.", release.more)).wrap(true).xalign(0.0).css_classes(["dim-label"]).margin_top(4).build());
+            list.append(&gtk::Label::builder().label(trn!("…and {n} more change or fix, in the full release notes.", "…and {n} more changes and fixes, in the full release notes.", release.more)).wrap(true).xalign(0.0).css_classes(["dim-label"]).margin_top(4).build());
         }
         column.append(&list);
     }
-    column.append(&gtk::Label::builder().label("Thanks for reading, and have a great day!").wrap(true).xalign(0.0).margin_top(8).build());
+    column.append(&gtk::Label::builder().label(tr!("Thanks for reading, and have a great day!")).wrap(true).xalign(0.0).margin_top(8).build());
     let full = gtk::Button::builder().halign(gtk::Align::Center).margin_top(12).css_classes(["pill"]).build();
-    let content = adw::ButtonContent::builder().label("Full Release Notes").icon_name("external-link-symbolic").build();
+    let content = adw::ButtonContent::builder().label(tr!("Full Release Notes")).icon_name("external-link-symbolic").build();
     full.set_child(Some(&content));
     full.connect_clicked(|b| open_url(b, RELEASES_URL));
     column.append(&full);
@@ -138,7 +138,7 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
     toolbar.add_top_bar(&adw::HeaderBar::builder().show_title(false).css_classes(["flat"]).build());
     toolbar.set_content(Some(&scroller));
     // Breakpoints want a minimum size on the dialog.
-    let dialog = adw::Dialog::builder().title("What's New").content_width(560).content_height(720).width_request(300).height_request(400).child(&toolbar).build();
+    let dialog = adw::Dialog::builder().title(tr!("What's New")).content_width(560).content_height(720).width_request(300).height_request(400).child(&toolbar).build();
     if pref_bool(ctx, DONATION_PREF, true) {
         // Pinned under the notes on a desktop. Narrow, it took half the sheet, so there it
         // scrolls with the notes. The dialog's own width decides, so a live resize moves it.
@@ -169,8 +169,8 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
 /// The banner under the notes. Off with the `show_donation_prompt` pref.
 fn donation_banner() -> gtk::Box {
     let banner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).css_classes(["donation-banner"]).build();
-    banner.append(&gtk::Label::builder().label("This version of Mixtapes was made possible by users like you!").css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build());
-    banner.append(&gtk::Label::builder().label("I love making Mixtapes and my other projects, but I can't do it without help. Support my work with a donation:").wrap(true).justify(gtk::Justification::Center).build());
+    banner.append(&gtk::Label::builder().label(tr!("This version of Mixtapes was made possible by users like you!")).css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build());
+    banner.append(&gtk::Label::builder().label(tr!("I love making Mixtapes and my other projects, but I can't do it without help. Support my work with a donation:")).wrap(true).justify(gtk::Justification::Center).build());
     let buttons = donate_buttons();
     buttons.set_margin_top(6);
     banner.append(&buttons);

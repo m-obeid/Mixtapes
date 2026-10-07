@@ -28,7 +28,7 @@ impl LikeButton {
         let menu_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).margin_top(4).margin_bottom(4).margin_start(4).margin_end(4).build();
         let dislike_content = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
         dislike_content.append(&gtk::Image::from_icon_name("heart-broken-symbolic"));
-        let dislike_label = gtk::Label::new(Some("Dislike"));
+        let dislike_label = gtk::Label::new(Some(&tr!("Dislike")));
         dislike_content.append(&dislike_label);
         let dislike_btn = gtk::Button::builder().css_classes(["flat"]).child(&dislike_content).build();
         menu_box.append(&dislike_btn);
@@ -150,7 +150,7 @@ impl LikeButton {
         if self.video_id.borrow().is_none() {
             return;
         }
-        self.dislike_label.set_label(if self.status.get() == LikeStatus::Dislike { "Remove Dislike" } else { "Dislike" });
+        self.dislike_label.set_label(&if self.status.get() == LikeStatus::Dislike { tr!("Remove Dislike") } else { tr!("Dislike") });
         self.popover.set_pointing_to(Some(&gdk::Rectangle::new(0, 0, self.button.width(), self.button.height())));
         self.popover.popup();
     }
@@ -164,9 +164,9 @@ impl LikeButton {
 
     fn update_icon(&self) {
         let (icon, add, remove, tip) = match self.status.get() {
-            LikeStatus::Like => ("heart-filled-symbolic", "liked-button", "disliked-button", "Unlike (Hold or right-click for Dislike)"),
-            LikeStatus::Dislike => ("heart-broken-symbolic", "disliked-button", "liked-button", "Disliked (Hold or right-click to remove)"),
-            LikeStatus::Indifferent => ("heart-outline-thick-symbolic", "", "", "Like (Hold or right-click for Dislike)"),
+            LikeStatus::Like => ("heart-filled-symbolic", "liked-button", "disliked-button", tr!("Unlike (Hold or right-click for Dislike)")),
+            LikeStatus::Dislike => ("heart-broken-symbolic", "disliked-button", "liked-button", tr!("Disliked (Hold or right-click to remove)")),
+            LikeStatus::Indifferent => ("heart-outline-thick-symbolic", "", "", tr!("Like (Hold or right-click for Dislike)")),
         };
         self.button.set_icon_name(icon);
         self.button.remove_css_class("liked-button");
@@ -175,7 +175,7 @@ impl LikeButton {
             self.button.add_css_class(add);
         }
         let _ = remove;
-        self.button.set_tooltip_text(Some(tip));
+        self.button.set_tooltip_text(Some(&tip));
     }
 }
 

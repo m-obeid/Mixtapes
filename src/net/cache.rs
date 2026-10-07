@@ -79,11 +79,12 @@ impl Caches {
     }
 
     /// "Single", "EP" or "Album" by track count, the rule the album page uses.
+    /// English, since cards compare it with YouTube's label. Pass it to `i18n::gettext` where it is shown.
     pub fn release_kind(track_count: u32) -> &'static str {
         match track_count {
-            1 => "Single",
-            2..=6 => "EP",
-            _ => "Album",
+            1 => tr_noop!("Single"),
+            2..=6 => tr_noop!("EP"),
+            _ => tr_noop!("Album"),
         }
     }
 

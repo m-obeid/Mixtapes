@@ -278,17 +278,20 @@ impl MediaItem {
 
     pub fn kind_word(&self) -> String {
         if self.is_live {
-            return "Live".to_owned();
+            // Translators: the kind word of a live stream, beside "Song" and "Video".
+            return tr!("Live");
         }
         match self.kind {
-            ItemKind::Album => self.item_type.clone().unwrap_or_else(|| "Album".to_owned()),
-            ItemKind::Song => "Song".to_owned(),
-            ItemKind::Video if self.item_type.as_deref() == Some("Episode") => "Episode".to_owned(),
-            ItemKind::Video => "Video".to_owned(),
-            ItemKind::Playlist if self.item_type.as_deref() == Some("Podcast") => "Podcast".to_owned(),
-            ItemKind::Playlist => "Playlist".to_owned(),
-            ItemKind::Artist if self.item_type.as_deref() == Some("Profile") => "Profile".to_owned(),
-            ItemKind::Artist => "Artist".to_owned(),
+            // The release type is YouTube's own word when it sent one.
+            ItemKind::Album => self.item_type.clone().unwrap_or_else(|| tr!("Album")),
+            ItemKind::Song => tr!("Song"),
+            ItemKind::Video if self.item_type.as_deref() == Some("Episode") => tr!("Episode"),
+            ItemKind::Video => tr!("Video"),
+            ItemKind::Playlist if self.item_type.as_deref() == Some("Podcast") => tr!("Podcast"),
+            ItemKind::Playlist => tr!("Playlist"),
+            // Translators: a user channel, as opposed to an artist.
+            ItemKind::Artist if self.item_type.as_deref() == Some("Profile") => tr!("Profile"),
+            ItemKind::Artist => tr!("Artist"),
         }
     }
 
@@ -310,7 +313,8 @@ impl MediaItem {
             ItemKind::Artist => match self.subscribers.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
                 // "12M" alone is a count; "12M monthly listeners" says so itself.
                 Some(subs) if subs.chars().any(char::is_alphabetic) => subs.to_owned(),
-                Some(subs) => format!("{subs} subscribers"),
+                // Translators: {subs} is a short count as YouTube words it, for example "12M".
+                Some(subs) => tr!("{subs} subscribers", subs),
                 None => String::new(),
             },
             // An album named after its only song says nothing twice.
@@ -325,6 +329,10 @@ impl MediaItem {
     /// description, whatever the rest of it says.
     fn playlist_detail(&self) -> String {
         if let Some(description) = self.description.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+            // A list on this device words its count in the app's language, which the pattern below does not read.
+            if crate::local_library::is_local(&self.id) {
+                return description.split('\u{2022}').next().unwrap_or(description).trim().to_owned();
+            }
             if let Some(unit) = PLAYLIST_UNIT_RE.find(description) {
                 return unit.as_str().to_owned();
             }
@@ -333,7 +341,8 @@ impl MediaItem {
             }
         }
         match self.count.as_deref().filter(|c| !c.is_empty()) {
-            Some(count) => format!("{count} songs"),
+            // Translators: {count} is the number as YouTube words it, for example "1,234".
+            Some(count) => tr!("{count} songs", count),
             None => self.artists_text(),
         }
     }

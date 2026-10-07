@@ -114,19 +114,19 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
     if !tracks.is_empty() && queueable && !hidden("play_next") {
         let (player, tracks) = (player.clone(), tracks.clone());
         let anchor = anchor.clone();
-        let label = if multi { format!("Play {count} Next") } else { "Play Next".to_owned() };
+        let label = if multi { trn!("Play {n} Next", "Play {n} Next", count) } else { tr!("Play Next") };
         builder.add(Section::Queue, &label, "play-next", false, Rc::new(move || {
             player.add_to_queue(tracks.clone(), true);
-            toast(&anchor, &if multi { format!("Playing {count} tracks next") } else { "Playing next".to_owned() });
+            toast(&anchor, &if multi { trn!("Playing {n} track next", "Playing {n} tracks next", count) } else { tr!("Playing next") });
         }));
     }
     if !tracks.is_empty() && queueable && !hidden("add_to_queue") {
         let (player, tracks) = (player.clone(), tracks.clone());
         let anchor = anchor.clone();
-        let label = if multi { format!("Add {count} to Queue") } else { "Add to Queue".to_owned() };
+        let label = if multi { trn!("Add {n} to Queue", "Add {n} to Queue", count) } else { tr!("Add to Queue") };
         builder.add(Section::Queue, &label, "add-to-queue", false, Rc::new(move || {
             player.add_to_queue(tracks.clone(), false);
-            toast(&anchor, &if multi { format!("Added {count} tracks to queue") } else { "Added to queue".to_owned() });
+            toast(&anchor, &if multi { trn!("Added {n} track to queue", "Added {n} tracks to queue", count) } else { tr!("Added to queue") });
         }));
     }
 
@@ -135,9 +135,9 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
             let anchor = anchor.clone();
             let (id, name) = (artist.id.clone(), artist.name.clone());
             let nav = opts.nav.clone();
-            builder.add(Section::Nav, "Go to Artist", "goto-artist", false, Rc::new(move || match &nav {
+            builder.add(Section::Nav, &tr!("Go to Artist"), "goto-artist", false, Rc::new(move || match &nav {
                 Some(nav) => nav.go(NavRequest::Artist { id: id.clone(), name: name.clone() }),
-                None => toast(&anchor, &format!("Artist pages not ported yet ({name})")),
+                None => toast(&anchor, &tr!("Artist pages not ported yet ({name})", name)),
             }));
         }
     }
@@ -146,9 +146,9 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
             let anchor = anchor.clone();
             let (id, name) = (album.id.clone().unwrap_or_default(), album.name.clone());
             let nav = opts.nav.clone();
-            builder.add(Section::Nav, "Go to Album", "goto-album", false, Rc::new(move || match &nav {
+            builder.add(Section::Nav, &tr!("Go to Album"), "goto-album", false, Rc::new(move || match &nav {
                 Some(nav) => nav.go(NavRequest::Album { id: id.clone(), title: name.clone(), thumb: None }),
-                None => toast(&anchor, &format!("Album pages not ported yet ({name})")),
+                None => toast(&anchor, &tr!("Album pages not ported yet ({name})", name)),
             }));
         }
     }
@@ -157,16 +157,16 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
         if !vid.is_empty() && online && !multi && !hidden("start_radio") {
             let anchor = anchor.clone();
             let (player, vid_c, title) = (player.clone(), vid.clone(), track.title.clone());
-            builder.add(Section::Actions, "Start Radio", "start-radio", false, Rc::new(move || {
+            builder.add(Section::Actions, &tr!("Start Radio"), "start-radio", false, Rc::new(move || {
                 player.start_radio(Some(vid_c.clone()), None, &title);
-                toast(&anchor, "Starting radio...");
+                toast(&anchor, &tr!("Starting radio..."));
             }));
         }
         let to_add: Vec<Track> = if tracks.is_empty() { if vid.is_empty() { Vec::new() } else { vec![track.clone()] } } else { tracks.clone() };
         // A local playlist takes tracks offline and signed out.
         if !to_add.is_empty() && !hidden("add_to_playlist") {
             let anchor = anchor.clone();
-            let label = if multi { format!("Add {} to Playlist…", to_add.len()) } else { "Add to Playlist…".to_owned() };
+            let label = if multi { trn!("Add {n} to Playlist…", "Add {n} to Playlist…", to_add.len()) } else { tr!("Add to Playlist…") };
             builder.add(Section::Actions, &label, "add-to-playlist", false, Rc::new(move || {
                 add_to_playlist_via_popover(&ctx, &anchor, to_add.clone());
             }));
@@ -181,25 +181,25 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
             // A selection can hold both kinds: the rest to fetch and files to remove.
             let downloaded: Vec<String> = if multi { tracks.iter().map(|t| t.video_id.0.clone()).filter(|id| ctx.downloads.is_downloaded(id)).collect() } else { Vec::new() };
             if !downloaded.is_empty() {
-                let label = format!("Remove {} Downloads", downloaded.len());
+                let label = trn!("Remove {n} Download", "Remove {n} Downloads", downloaded.len());
                 let (ctx, anchor) = (ctx.clone(), anchor.clone());
                 builder.add(Section::Actions, &label, "remove-downloads", false, Rc::new(move || confirm_remove_downloads(&ctx, &anchor, downloaded.clone())));
             }
             if multi && !pending.is_empty() && online {
-                let label = format!("Download {} Songs", pending.len());
+                let label = trn!("Download {n} Song", "Download {n} Songs", pending.len());
                 let ctx = ctx.clone();
                 builder.add(Section::Actions, &label, "download", false, Rc::new(move || ctx.download(pending.clone(), &album_title, &album_id)));
             } else if downloaded_single {
                 let anchor = anchor.clone();
                 let (ctx, vid_c) = (ctx.clone(), vid.clone());
-                builder.add(Section::Actions, "Remove Download", "remove-download", false, Rc::new(move || {
+                builder.add(Section::Actions, &tr!("Remove Download"), "remove-download", false, Rc::new(move || {
                     ctx.downloads.delete(&vid_c);
-                    toast(&anchor, "Download removed");
+                    toast(&anchor, &tr!("Download removed"));
                 }));
             } else if !multi && !vid.is_empty() && online {
                 let ctx = ctx.clone();
                 let tracks = tracks.clone();
-                builder.add(Section::Actions, "Download", "download", false, Rc::new(move || ctx.download(tracks.clone(), &album_title, &album_id)));
+                builder.add(Section::Actions, &tr!("Download"), "download", false, Rc::new(move || ctx.download(tracks.clone(), &album_title, &album_id)));
             }
         }
     }
@@ -208,7 +208,7 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
         if !vid.is_empty() && online && !multi && !hidden("refresh_metadata") {
             let anchor = anchor.clone();
             let vid_c = vid.clone();
-            builder.add(Section::Actions, "Refresh Metadata", "refresh-metadata", false, Rc::new(move || refresh_metadata(&ctx, &anchor, &vid_c)));
+            builder.add(Section::Actions, &tr!("Refresh Metadata"), "refresh-metadata", false, Rc::new(move || refresh_metadata(&ctx, &anchor, &vid_c)));
         }
     }
 
@@ -219,9 +219,9 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
     if !vid.is_empty() && !hidden("copy_link") {
         let url = format!("https://music.youtube.com/watch?v={vid}");
         let anchor = anchor.clone();
-        builder.add(Section::Clipboard, "Copy Link", "copy-link", false, Rc::new(move || {
+        builder.add(Section::Clipboard, &tr!("Copy Link"), "copy-link", false, Rc::new(move || {
             copy_to_clipboard(&url);
-            toast(&anchor, "Link copied");
+            toast(&anchor, &tr!("Link copied"));
         }));
     }
 
@@ -232,9 +232,9 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
 /// Ask, then delete the files of these songs. One song goes without asking, a selection is easy to misjudge.
 fn confirm_remove_downloads(ctx: &Rc<UiContext>, anchor: &gtk::Widget, ids: Vec<String>) {
     let count = ids.len();
-    let dialog = adw::AlertDialog::builder().heading(format!("Remove {count} Downloads?")).body("The files are deleted from this device. The songs stay in your library and playlists.").build();
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("remove", "Remove");
+    let dialog = adw::AlertDialog::builder().heading(trn!("Remove {n} Download?", "Remove {n} Downloads?", count)).body(tr!("The files are deleted from this device. The songs stay in your library and playlists.")).build();
+    dialog.add_response("cancel", &tr!("Cancel"));
+    dialog.add_response("remove", &tr!("Remove"));
     dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");
@@ -246,7 +246,7 @@ fn confirm_remove_downloads(ctx: &Rc<UiContext>, anchor: &gtk::Widget, ids: Vec<
         for id in &ids {
             ctx.downloads.delete(id);
         }
-        toast(&toast_anchor, &format!("Removed {count} downloads"));
+        toast(&toast_anchor, &trn!("Removed {n} download", "Removed {n} downloads", count));
     });
     dialog.present(Some(anchor));
 }
@@ -300,9 +300,9 @@ pub fn show_item_menu_with(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, item:
 
     // Port of build_collection_menu's queue section: the tracks are fetched when asked for.
     if !is_artist && online && !item.id.is_empty() {
-        for (label, name, mode) in [("Play", "play", CollectionMode::Play), ("Play Next", "play-next", CollectionMode::Next), ("Add to Queue", "add-to-queue", CollectionMode::Queue)] {
+        for (label, name, mode) in [(tr!("Play"), "play", CollectionMode::Play), (tr!("Play Next"), "play-next", CollectionMode::Next), (tr!("Add to Queue"), "add-to-queue", CollectionMode::Queue)] {
             let (ctx, item, anchor) = (ctx.clone(), item.clone(), anchor_w.clone());
-            builder.add(Section::Queue, label, name, false, Rc::new(move || load_collection(&ctx, &anchor, &item, mode)));
+            builder.add(Section::Queue, &label, name, false, Rc::new(move || load_collection(&ctx, &anchor, &item, mode)));
         }
     }
 
@@ -312,21 +312,21 @@ pub fn show_item_menu_with(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, item:
         _ => NavRequest::Artist { id: Some(item.id.clone()), name: item.title.clone() },
     };
     let label = match item.kind {
-        ItemKind::Album => "Open Album",
-        ItemKind::Playlist => "Open Playlist",
-        _ => "Go to Artist",
+        ItemKind::Album => tr!("Open Album"),
+        ItemKind::Playlist => tr!("Open Playlist"),
+        _ => tr!("Go to Artist"),
     };
     let nav = ctx.nav.clone();
-    builder.add(Section::Nav, label, "open", false, Rc::new(move || nav.go(request.clone())));
+    builder.add(Section::Nav, &label, "open", false, Rc::new(move || nav.go(request.clone())));
     if let Some(artist) = item.artists.iter().find(|a| a.id.is_some()).filter(|_| !is_artist) {
         let nav = ctx.nav.clone();
         let (id, name) = (artist.id.clone(), artist.name.clone());
-        builder.add(Section::Nav, "Go to Artist", "goto-artist", false, Rc::new(move || nav.go(NavRequest::Artist { id: id.clone(), name: name.clone() })));
+        builder.add(Section::Nav, &tr!("Go to Artist"), "goto-artist", false, Rc::new(move || nav.go(NavRequest::Artist { id: id.clone(), name: name.clone() })));
     }
 
     if online && !item.id.is_empty() {
         let (ctx, item, anchor) = (ctx.clone(), item.clone(), anchor_w.clone());
-        builder.add(Section::Actions, "Start Radio", "start-radio", false, Rc::new(move || match is_artist {
+        builder.add(Section::Actions, &tr!("Start Radio"), "start-radio", false, Rc::new(move || match is_artist {
             true => artist_radio(&ctx, &anchor, &item.id),
             false => collection_radio(&ctx, &anchor, &item),
         }));
@@ -338,9 +338,9 @@ pub fn show_item_menu_with(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, item:
         _ => format!("https://music.youtube.com/channel/{}", item.id),
     };
     let anchor_c = anchor_w.clone();
-    builder.add(Section::Clipboard, "Copy Link", "copy-link", false, Rc::new(move || {
+    builder.add(Section::Clipboard, &tr!("Copy Link"), "copy-link", false, Rc::new(move || {
         copy_to_clipboard(&url);
-        toast(&anchor_c, "Link copied");
+        toast(&anchor_c, &tr!("Link copied"));
     }));
     for (i, extra) in extras.into_iter().enumerate() {
         builder.add(extra.section, &extra.label, &format!("extra-{i}"), extra.first, extra.callback);
@@ -375,7 +375,7 @@ async fn collection_tracks(api: &dyn crate::net::browse::Browse, item: &MediaIte
 
 /// Port of build_collection_menu's _load: fetch, then play or queue.
 fn load_collection(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem, mode: CollectionMode) {
-    toast(anchor, "Loading...");
+    toast(anchor, &tr!("Loading..."));
     let api = ctx.net.client().api();
     let wanted = item.clone();
     let handle = ctx.net.spawn(async move { collection_tracks(&*api, &wanted).await.0 });
@@ -383,7 +383,7 @@ fn load_collection(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem, 
     glib::spawn_future_local(async move {
         let tracks: Vec<Track> = handle.await.unwrap_or_default().into_iter().filter(|t| !t.video_id.0.is_empty() && t.is_available).collect();
         if tracks.is_empty() {
-            toast(&anchor, "Nothing to play");
+            toast(&anchor, &tr!("Nothing to play"));
             return;
         }
         let count = tracks.len();
@@ -391,11 +391,11 @@ fn load_collection(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem, 
             CollectionMode::Play => ctx.player.play_tracks(tracks, 0, false, Some(source), false),
             CollectionMode::Next => {
                 ctx.player.add_to_queue(tracks, true);
-                toast(&anchor, &format!("Playing {count} tracks next"));
+                toast(&anchor, &trn!("Playing {n} track next", "Playing {n} tracks next", count));
             }
             CollectionMode::Queue => {
                 ctx.player.add_to_queue(tracks, false);
-                toast(&anchor, &format!("Added {count} tracks to queue"));
+                toast(&anchor, &trn!("Added {n} track to queue", "Added {n} tracks to queue", count));
             }
         }
     });
@@ -404,7 +404,7 @@ fn load_collection(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem, 
 /// A radio seeded from the collection: `RDAMPL` plus its playlist id. An album
 /// card only knows its browse id, so its audio playlist id is looked up first.
 fn collection_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) {
-    toast(anchor, "Starting radio...");
+    toast(anchor, &tr!("Starting radio..."));
     let known = item.playlist_id.clone().or_else(|| (!item.id.starts_with("MPRE")).then(|| item.id.trim_start_matches("VL").to_owned()));
     let seed = |playlist_id: &str| if playlist_id.starts_with("RD") { playlist_id.to_owned() } else { format!("RDAMPL{playlist_id}") };
     if let Some(playlist_id) = known {
@@ -418,14 +418,14 @@ fn collection_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem)
     glib::spawn_future_local(async move {
         match handle.await.ok().flatten() {
             Some(playlist_id) => ctx.player.start_radio(None, Some(seed(&playlist_id)), &title),
-            None => toast(&anchor, "Radio unavailable"),
+            None => toast(&anchor, &tr!("Radio unavailable")),
         }
     });
 }
 
 /// Port of _artist_radio: the artist's own radio, else one seeded from their top song.
 fn artist_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, channel_id: &str) {
-    toast(anchor, "Starting radio...");
+    toast(anchor, &tr!("Starting radio..."));
     let api = ctx.net.client().api();
     let channel_id = channel_id.to_owned();
     let handle = ctx.net.spawn(async move { crate::net::artist::get_artist(api, &channel_id).await });
@@ -433,20 +433,20 @@ fn artist_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, channel_id: &str) {
     glib::spawn_future_local(async move {
         let artist = match handle.await {
             Ok(Ok(artist)) => artist,
-            _ => return toast(&anchor, "Radio unavailable"),
+            _ => return toast(&anchor, &tr!("Radio unavailable")),
         };
         let top_song = artist.songs.as_ref().and_then(|s| s.results.first()).map(|t| t.video_id.0.clone()).filter(|id| !id.is_empty());
         match (artist.radio_id, top_song) {
             (Some(radio), _) => ctx.player.start_radio(None, Some(radio), &artist.name),
             (None, Some(seed)) => ctx.player.start_radio(Some(seed), None, &artist.name),
-            (None, None) => toast(&anchor, "Radio unavailable"),
+            (None, None) => toast(&anchor, &tr!("Radio unavailable")),
         }
     });
 }
 
 /// Port of _refresh_metadata: what the watch panel says about the track, written back into the queue.
 fn refresh_metadata(ctx: &Rc<UiContext>, anchor: &gtk::Widget, video_id: &str) {
-    toast(anchor, "Refreshing metadata...");
+    toast(anchor, &tr!("Refreshing metadata..."));
     let api = ctx.net.client().api();
     let wanted = video_id.to_owned();
     let handle = ctx.net.spawn(async move { crate::net::playlists::get_watch_playlist(&*api, Some(&wanted), None, 1, false).await });
@@ -456,13 +456,13 @@ fn refresh_metadata(ctx: &Rc<UiContext>, anchor: &gtk::Widget, video_id: &str) {
             Ok(Ok(watch)) => match watch.tracks.into_iter().map(|w| w.track).find(|t| t.video_id.0 == video_id) {
                 Some(fresh) => {
                     ctx.player.refresh_track_metadata(&fresh);
-                    toast(&anchor, "Metadata refreshed");
+                    toast(&anchor, &tr!("Metadata refreshed"));
                 }
-                None => toast(&anchor, "No metadata found"),
+                None => toast(&anchor, &tr!("No metadata found")),
             },
             Ok(Err(err)) => {
                 tracing::warn!(%err, video_id, "metadata refresh failed");
-                toast(&anchor, "Failed to refresh metadata");
+                toast(&anchor, &tr!("Failed to refresh metadata"));
             }
             Err(_) => {}
         }

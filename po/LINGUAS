@@ -1,0 +1,1 @@
+# One language code per line, matching po/<code>.po. build.rs compiles these into the app.

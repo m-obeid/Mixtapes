@@ -121,7 +121,7 @@ impl PlayerBar {
             .hexpand(true)
             .build();
         let title = MarqueeLabel::new();
-        title.set_label("Not Playing");
+        title.set_label(&tr!("Not Playing"));
         title.add_css_class("heading");
         let artists_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -146,7 +146,7 @@ impl PlayerBar {
             .build();
         controls_box.append(&timings);
 
-        let prev_btn = flat_button("media-skip-backward-symbolic", "Previous");
+        let prev_btn = flat_button("media-skip-backward-symbolic", &tr!("Previous"));
         controls_box.append(&prev_btn);
 
         let play_stack = gtk::Stack::builder()
@@ -162,15 +162,15 @@ impl PlayerBar {
             .css_classes(["circular"])
             .valign(gtk::Align::Center)
             .child(&play_stack)
-            .tooltip_text("Play")
+            .tooltip_text(tr!("Play"))
             .build();
         controls_box.append(&play_btn);
 
-        let next_btn = flat_button("media-skip-forward-symbolic", "Next");
+        let next_btn = flat_button("media-skip-forward-symbolic", &tr!("Next"));
         controls_box.append(&next_btn);
 
         // Volume: button plus a slider that slides out on hover.
-        let volume_btn = flat_button("audio-volume-high-symbolic", "Mute");
+        let volume_btn = flat_button("audio-volume-high-symbolic", &tr!("Mute"));
         let volume_scale = gtk::Scale::builder()
             .orientation(gtk::Orientation::Horizontal)
             .width_request(80)
@@ -212,7 +212,7 @@ impl PlayerBar {
             .icon_name("music-queue-symbolic")
             .css_classes(["flat"])
             .valign(gtk::Align::Center)
-            .tooltip_text("Toggle Queue")
+            .tooltip_text(tr!("Toggle Queue"))
             .build();
         controls_box.append(&queue_btn);
 
@@ -230,13 +230,13 @@ impl PlayerBar {
             .icon_name("view-more-symbolic")
             .css_classes(["flat"])
             .valign(gtk::Align::Center)
-            .tooltip_text("More")
+            .tooltip_text(tr!("More"))
             .visible(false)
             .build();
         overflow_btn.set_popover(Some(&overflow_popover));
         controls_box.append(&overflow_btn);
 
-        let expand_btn = flat_button("go-up-symbolic", "Expand player");
+        let expand_btn = flat_button("go-up-symbolic", &tr!("Expand player"));
         controls_box.append(&expand_btn);
 
         content_box.append(&controls_box);
@@ -338,10 +338,10 @@ impl PlayerBar {
     pub fn set_expanded(&self, expanded: bool) {
         if expanded {
             self.expand_btn.set_icon_name("go-down-symbolic");
-            self.expand_btn.set_tooltip_text(Some("Collapse player"));
+            self.expand_btn.set_tooltip_text(Some(&tr!("Collapse player")));
         } else {
             self.expand_btn.set_icon_name("go-up-symbolic");
-            self.expand_btn.set_tooltip_text(Some("Expand player"));
+            self.expand_btn.set_tooltip_text(Some(&tr!("Expand player")));
         }
     }
 
@@ -444,10 +444,10 @@ impl PlayerBar {
     fn refresh_metadata(&self) {
         let state = self.state();
         let title = state.title();
-        self.title.set_label(if title.is_empty() {
-            "Not Playing"
+        self.title.set_label(&if title.is_empty() {
+            tr!("Not Playing")
         } else {
-            &title
+            title.clone()
         });
 
         while let Some(child) = self.artists_box.first_child() {
@@ -469,7 +469,7 @@ impl PlayerBar {
                         vec![(
                             None,
                             if artist.is_empty() {
-                                "Unknown Artist".to_owned()
+                                tr!("Unknown Artist")
                             } else {
                                 artist
                             },
@@ -549,10 +549,10 @@ impl PlayerBar {
         self.play_stack.set_visible_child_name(child);
         self.play_btn.set_sensitive(sensitive);
         self.play_btn
-            .set_tooltip_text(Some(if status == PlaybackStatus::Playing {
-                "Pause"
+            .set_tooltip_text(Some(&if status == PlaybackStatus::Playing {
+                tr!("Pause")
             } else {
-                "Play"
+                tr!("Play")
             }));
         self.scale.set_sensitive(scale_sensitive);
         if status == PlaybackStatus::Loading {
@@ -577,7 +577,8 @@ impl PlayerBar {
         if state.live() {
             self.scale.set_range(0.0, 1.0);
             self.scale.set_value(0.0);
-            self.timings.set_label("LIVE");
+            // Translators: shown in place of the time while a live stream plays.
+            self.timings.set_label(&tr!("LIVE"));
             return;
         }
         self.scale.set_range(0.0, duration.max(1.0));

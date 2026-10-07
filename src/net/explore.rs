@@ -363,23 +363,23 @@ fn parse_chart_artist(data: &Value) -> ChartArtist {
 /// The country names search.py spells out for the chart menu. A code with no
 /// name here shows as the code itself.
 const COUNTRY_NAMES: &[(&str, &str)] = &[
-    ("ZZ", "Global"), ("AR", "Argentina"), ("AU", "Australia"), ("AT", "Austria"),
-    ("BE", "Belgium"), ("BO", "Bolivia"), ("BR", "Brazil"), ("CA", "Canada"),
-    ("CL", "Chile"), ("CO", "Colombia"), ("CR", "Costa Rica"), ("CZ", "Czechia"),
-    ("DK", "Denmark"), ("DO", "Dominican Republic"), ("EC", "Ecuador"),
-    ("EG", "Egypt"), ("SV", "El Salvador"), ("EE", "Estonia"), ("FI", "Finland"),
-    ("FR", "France"), ("DE", "Germany"), ("GT", "Guatemala"), ("HN", "Honduras"),
-    ("HU", "Hungary"), ("IS", "Iceland"), ("IN", "India"), ("ID", "Indonesia"),
-    ("IE", "Ireland"), ("IL", "Israel"), ("IT", "Italy"), ("JP", "Japan"),
-    ("KE", "Kenya"), ("LU", "Luxembourg"), ("MX", "Mexico"), ("NL", "Netherlands"),
-    ("NZ", "New Zealand"), ("NI", "Nicaragua"), ("NG", "Nigeria"), ("NO", "Norway"),
-    ("PA", "Panama"), ("PY", "Paraguay"), ("PE", "Peru"), ("PH", "Philippines"),
-    ("PL", "Poland"), ("PT", "Portugal"), ("RO", "Romania"), ("RU", "Russia"),
-    ("SA", "Saudi Arabia"), ("RS", "Serbia"), ("ZA", "South Africa"),
-    ("KR", "South Korea"), ("ES", "Spain"), ("SE", "Sweden"), ("CH", "Switzerland"),
-    ("TZ", "Tanzania"), ("TR", "Turkey"), ("UG", "Uganda"), ("UA", "Ukraine"),
-    ("AE", "UAE"), ("GB", "United Kingdom"), ("US", "United States"),
-    ("UY", "Uruguay"), ("VE", "Venezuela"), ("VN", "Vietnam"), ("ZW", "Zimbabwe"),
+    ("ZZ", tr_noop!("Global")), ("AR", tr_noop!("Argentina")), ("AU", tr_noop!("Australia")), ("AT", tr_noop!("Austria")),
+    ("BE", tr_noop!("Belgium")), ("BO", tr_noop!("Bolivia")), ("BR", tr_noop!("Brazil")), ("CA", tr_noop!("Canada")),
+    ("CL", tr_noop!("Chile")), ("CO", tr_noop!("Colombia")), ("CR", tr_noop!("Costa Rica")), ("CZ", tr_noop!("Czechia")),
+    ("DK", tr_noop!("Denmark")), ("DO", tr_noop!("Dominican Republic")), ("EC", tr_noop!("Ecuador")),
+    ("EG", tr_noop!("Egypt")), ("SV", tr_noop!("El Salvador")), ("EE", tr_noop!("Estonia")), ("FI", tr_noop!("Finland")),
+    ("FR", tr_noop!("France")), ("DE", tr_noop!("Germany")), ("GT", tr_noop!("Guatemala")), ("HN", tr_noop!("Honduras")),
+    ("HU", tr_noop!("Hungary")), ("IS", tr_noop!("Iceland")), ("IN", tr_noop!("India")), ("ID", tr_noop!("Indonesia")),
+    ("IE", tr_noop!("Ireland")), ("IL", tr_noop!("Israel")), ("IT", tr_noop!("Italy")), ("JP", tr_noop!("Japan")),
+    ("KE", tr_noop!("Kenya")), ("LU", tr_noop!("Luxembourg")), ("MX", tr_noop!("Mexico")), ("NL", tr_noop!("Netherlands")),
+    ("NZ", tr_noop!("New Zealand")), ("NI", tr_noop!("Nicaragua")), ("NG", tr_noop!("Nigeria")), ("NO", tr_noop!("Norway")),
+    ("PA", tr_noop!("Panama")), ("PY", tr_noop!("Paraguay")), ("PE", tr_noop!("Peru")), ("PH", tr_noop!("Philippines")),
+    ("PL", tr_noop!("Poland")), ("PT", tr_noop!("Portugal")), ("RO", tr_noop!("Romania")), ("RU", tr_noop!("Russia")),
+    ("SA", tr_noop!("Saudi Arabia")), ("RS", tr_noop!("Serbia")), ("ZA", tr_noop!("South Africa")),
+    ("KR", tr_noop!("South Korea")), ("ES", tr_noop!("Spain")), ("SE", tr_noop!("Sweden")), ("CH", tr_noop!("Switzerland")),
+    ("TZ", tr_noop!("Tanzania")), ("TR", tr_noop!("Turkey")), ("UG", tr_noop!("Uganda")), ("UA", tr_noop!("Ukraine")),
+    ("AE", tr_noop!("UAE")), ("GB", tr_noop!("United Kingdom")), ("US", tr_noop!("United States")),
+    ("UY", tr_noop!("Uruguay")), ("VE", tr_noop!("Venezuela")), ("VN", tr_noop!("Vietnam")), ("ZW", tr_noop!("Zimbabwe")),
 ];
 
 /// Chart countries as (code, name), Global first and the rest by name.
@@ -387,7 +387,7 @@ pub fn country_options(codes: &[String]) -> Vec<(String, String)> {
     let mut options: Vec<(String, String)> = codes
         .iter()
         .map(|code| {
-            let name = COUNTRY_NAMES.iter().find(|(c, _)| c == code).map(|(_, n)| (*n).to_owned()).unwrap_or_else(|| code.clone());
+            let name = COUNTRY_NAMES.iter().find(|(c, _)| c == code).map(|(_, n)| crate::i18n::gettext(n)).unwrap_or_else(|| code.clone());
             (code.clone(), name)
         })
         .collect();

@@ -119,7 +119,7 @@ impl AddToPlaylistPopover {
             .width_request(320)
             .build();
         let search_entry = gtk::SearchEntry::builder()
-            .placeholder_text("Search playlists…")
+            .placeholder_text(tr!("Search playlists…"))
             .build();
         outer.append(&search_entry);
 
@@ -138,7 +138,7 @@ impl AddToPlaylistPopover {
         outer.append(&scrolled);
 
         let empty_label = gtk::Label::builder()
-            .label("No playlists")
+            .label(tr!("No playlists"))
             .css_classes(["dim-label"])
             .margin_top(12)
             .margin_bottom(12)
@@ -147,7 +147,7 @@ impl AddToPlaylistPopover {
         outer.append(&empty_label);
         // Always there, so a listener with no playlist yet, or signed out, can still add.
         let new_button = gtk::Button::builder()
-            .child(&adw::ButtonContent::builder().icon_name("list-add-symbolic").label("New Playlist…").build())
+            .child(&adw::ButtonContent::builder().icon_name("list-add-symbolic").label(tr!("New Playlist…")).build())
             .css_classes(["flat"])
             .build();
         outer.append(&new_button);

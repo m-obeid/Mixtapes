@@ -41,12 +41,12 @@ impl LoginDialog {
             .transient_for(parent)
             .default_width(520)
             .default_height(640)
-            .title("Sign in to YouTube Music")
+            .title(tr!("Sign in to YouTube Music"))
             .build();
         let toolbar = adw::ToolbarView::new();
         window.set_content(Some(&toolbar));
         let header = adw::HeaderBar::builder().show_title(true).build();
-        let skip = gtk::Button::builder().label("Skip").build();
+        let skip = gtk::Button::builder().label(tr!("Skip")).build();
         header.pack_end(&skip);
         toolbar.add_top_bar(&header);
 
@@ -171,13 +171,13 @@ impl LoginDialog {
             let mut cookies = match cookies {
                 Ok(cookies) => cookies,
                 Err(err) => {
-                    d.set_status("red", &format!("Could not read cookies: {err}"));
+                    d.set_status("red", &tr!("Could not read cookies: {err}", err));
                     return;
                 }
             };
             let cookie = cookies.iter_mut().filter_map(|c| Some(format!("{}={}", c.name()?, c.value()?))).collect::<Vec<_>>().join("; ");
             if !cookie.contains("SAPISID") {
-                d.set_status("orange", "Not signed in yet, the session has no SAPISID cookie.");
+                d.set_status("orange", &tr!("Not signed in yet, the session has no SAPISID cookie."));
                 return;
             }
             let mut captured = d.captured.borrow().clone();
@@ -190,16 +190,16 @@ impl LoginDialog {
     }
 
     fn finish_login(self: &Rc<Self>) {
-        self.set_status("blue", "Signing in...");
+        self.set_status("blue", &tr!("Signing in..."));
         let json = serde_json::to_string(&*self.captured.borrow()).unwrap_or_default();
         self.login_with(json, move |d, ok| {
             if ok {
-                d.set_status("green", "Signed in.");
+                d.set_status("green", &tr!("Signed in."));
                 d.clear_webkit_cookies();
                 d.window.close();
             } else {
                 d.finished.set(false);
-                d.set_status("red", "The server did not accept the session. Try again.");
+                d.set_status("red", &tr!("The server did not accept the session. Try again."));
             }
         });
     }
@@ -270,12 +270,12 @@ impl LoginDialog {
             .transient_for(parent)
             .default_width(520)
             .default_height(640)
-            .title("Sign in to YouTube Music")
+            .title(tr!("Sign in to YouTube Music"))
             .build();
         let toolbar = adw::ToolbarView::new();
         window.set_content(Some(&toolbar));
         let header = adw::HeaderBar::builder().show_title(true).build();
-        let skip = gtk::Button::builder().label("Skip").build();
+        let skip = gtk::Button::builder().label(tr!("Skip")).build();
         header.pack_end(&skip);
         toolbar.add_top_bar(&header);
 
@@ -361,7 +361,7 @@ impl LoginDialog {
             return;
         }
         let Some(parent) = native_parent(&self.window) else {
-            self.set_status("red", "The sign-in page could not be shown.");
+            self.set_status("red", &tr!("The sign-in page could not be shown."));
             return;
         };
         // WebView2 keeps its profile beside the exe unless told otherwise, and
@@ -392,7 +392,7 @@ impl LoginDialog {
             }
             Err(err) => {
                 tracing::warn!(%err, "webview2 did not start");
-                self.set_status("red", "The sign-in page could not be shown. Is the WebView2 runtime installed?");
+                self.set_status("red", &tr!("The sign-in page could not be shown. Is the WebView2 runtime installed?"));
             }
         }
     }
@@ -421,7 +421,7 @@ impl LoginDialog {
         let cookies = match self.webview.borrow().as_ref().map(|w| w.cookies_for_url("https://music.youtube.com")) {
             Some(Ok(cookies)) => cookies,
             Some(Err(err)) => {
-                self.set_status("red", &format!("Could not read cookies: {err}"));
+                self.set_status("red", &tr!("Could not read cookies: {err}", err));
                 return;
             }
             None => return,
@@ -431,12 +431,12 @@ impl LoginDialog {
             return;
         }
         self.finished.set(true);
-        self.set_status("blue", "Signing in...");
+        self.set_status("blue", &tr!("Signing in..."));
         let captured = std::collections::BTreeMap::from([("Cookie".to_owned(), cookie), ("User-Agent".to_owned(), WINDOWS_BROWSER_UA.to_owned())]);
         let json = serde_json::to_string(&captured).unwrap_or_default();
         self.login_with(json, move |d, ok| {
             if ok {
-                d.set_status("green", "Signed in.");
+                d.set_status("green", &tr!("Signed in."));
                 // The app keeps its own copy of the session.
                 if let Some(webview) = d.webview.borrow().as_ref() {
                     let _ = webview.clear_all_browsing_data();
@@ -444,7 +444,7 @@ impl LoginDialog {
                 d.window.close();
             } else {
                 d.finished.set(false);
-                d.set_status("red", "The server did not accept the session. Try again.");
+                d.set_status("red", &tr!("The server did not accept the session. Try again."));
             }
         });
     }

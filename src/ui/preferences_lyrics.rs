@@ -8,25 +8,27 @@ use adw::prelude::*;
 use crate::App;
 use crate::lyrics::prefs;
 use crate::lyrics::Lyrics;
-use crate::ui::preferences::{combo_row, scale_row, switch_row};
+use crate::ui::preferences::{combo_row, scale_row, switch_row, translated};
 use crate::ui::window::MainWindow;
 
 /// What each provider is good at, so ordering the queue is an informed choice.
-fn provider_blurb(name: &str) -> &'static str {
+fn provider_blurb(name: &str) -> String {
     match name {
-        "Apple Music" => "Word-level timing. Best coverage for Western pop",
-        "BetterLyrics" => "Word-level timing. Mirrors Apple's database",
-        "BiniLyrics" => "Word-level timing. Strong on Japanese tracks",
-        "NetEase" => "Line-synced. Romanization and translation for CJK",
-        "LRCLIB" => "Line-synced. Large community LRC database",
-        "YouTube Music" => "Plain text, no timing. Always available when signed in",
-        _ => "",
+        "Apple Music" => tr!("Word-level timing. Best coverage for Western pop"),
+        "BetterLyrics" => tr!("Word-level timing. Mirrors Apple's database"),
+        "BiniLyrics" => tr!("Word-level timing. Strong on Japanese tracks"),
+        "NetEase" => tr!("Line-synced. Romanization and translation for CJK"),
+        "LRCLIB" => tr!("Line-synced. Large community LRC database"),
+        "YouTube Music" => tr!("Plain text, no timing. Always available when signed in"),
+        _ => String::new(),
     }
 }
 
-const MATCH_LABELS: [&str; 2] = ["Quality-aware", "Strict"];
-const SECOND_LINE_LABELS: [&str; 5] = ["Off", "Auto", "Romanization", "Translation", "Background"];
-const EFFECT_LABELS: [&str; 3] = ["Off", "Subtle", "Full"];
+// Translated where the rows show them.
+const MATCH_LABELS: [&str; 2] = [tr_noop!("Quality-aware"), tr_noop!("Strict")];
+// Translators: the choices for the second lyric line. "Background" is the background vocals of a song.
+const SECOND_LINE_LABELS: [&str; 5] = [tr_noop!("Off"), tr_noop!("Auto"), tr_noop!("Romanization"), tr_noop!("Translation"), tr_noop!("Background")];
+const EFFECT_LABELS: [&str; 3] = [tr_noop!("Off"), tr_noop!("Subtle"), tr_noop!("Full")];
 
 /// The provider queue: numbered rows with move buttons and a switch each.
 struct ProviderQueue {
@@ -45,7 +47,7 @@ impl ProviderQueue {
         let disabled = self.lyrics.prefs().disabled_providers();
         for (i, name) in order.iter().enumerate() {
             let row = adw::ActionRow::builder().title(format!("{}. {name}", i + 1)).subtitle(provider_blurb(name)).build();
-            for (icon, tooltip, delta, sensitive) in [("go-up-symbolic", "Move up", -1i32, i > 0), ("go-down-symbolic", "Move down", 1, i + 1 < order.len())] {
+            for (icon, tooltip, delta, sensitive) in [("go-up-symbolic", tr!("Move up"), -1i32, i > 0), ("go-down-symbolic", tr!("Move down"), 1, i + 1 < order.len())] {
                 let button = gtk::Button::builder().icon_name(icon).tooltip_text(tooltip).valign(gtk::Align::Center).sensitive(sensitive).build();
                 // The builder would replace the image-button class the icon brings.
                 button.add_css_class("flat");
@@ -91,7 +93,7 @@ impl ProviderQueue {
         // An empty queue silently means no lyrics, ever, with nothing on screen to say why.
         if !enabled && self.lyrics.prefs().provider_order().len() <= 1 {
             if let Some(win) = self.win.upgrade() {
-                win.add_toast("Keep at least one lyrics provider enabled");
+                win.add_toast(&tr!("Keep at least one lyrics provider enabled"));
             }
         } else {
             self.lyrics.prefs().set_provider_enabled(name, enabled);
@@ -111,7 +113,7 @@ impl ProviderQueue {
 }
 
 pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder().name("lyrics").title("Lyrics").icon_name("format-justify-fill-symbolic").build();
+    let page = adw::PreferencesPage::builder().name("lyrics").title(tr!("Lyrics")).icon_name("format-justify-fill-symbolic").build();
     let lyrics = ctx.lyrics.clone();
     let apply = {
         let win = Rc::downgrade(win);
@@ -125,7 +127,7 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
     };
 
     // -- search queue ---------------------------------------------------
-    let queue_group = adw::PreferencesGroup::builder().title("Search Queue").description("Tried from the top down. Switch one off to skip it.").build();
+    let queue_group = adw::PreferencesGroup::builder().title(tr!("Search Queue")).description(tr!("Tried from the top down. Switch one off to skip it.")).build();
     page.add(&queue_group);
     let queue = Rc::new(ProviderQueue { group: queue_group.clone(), rows: RefCell::new(Vec::new()), lyrics: ctx.lyrics.clone(), win: Rc::downgrade(win) });
     queue.rebuild();
@@ -134,13 +136,13 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
 
     // -- matching ---------------------------------------------------------
     let match_group = adw::PreferencesGroup::builder()
-        .title("Matching")
-        .description("Quality-aware keeps looking for synced lyrics before settling for plain text. Strict takes the first hit of any kind.")
+        .title(tr!("Matching"))
+        .description(tr!("Quality-aware keeps looking for synced lyrics before settling for plain text. Strict takes the first hit of any kind."))
         .build();
     page.add(&match_group);
     let match_keys = [prefs::MATCH_QUALITY, prefs::MATCH_STRICT];
     let selected = match_keys.iter().position(|k| *k == lyrics.prefs().match_mode()).unwrap_or(0);
-    let match_row = combo_row("When to Stop Searching", "", &MATCH_LABELS, selected);
+    let match_row = combo_row(&tr!("When to Stop Searching"), "", &translated(&MATCH_LABELS), selected);
     {
         let lyrics = lyrics.clone();
         match_row.connect_selected_notify(move |row| {
@@ -154,12 +156,13 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
 
     // -- second line ----------------------------------------------------------
     let display_group = adw::PreferencesGroup::builder()
-        .title("Second Line")
-        .description("An extra line under each lyric. Auto picks a romanization for non-Latin scripts and background vocals otherwise. What's available depends on the provider.")
+        .title(tr!("Second Line"))
+        .description(tr!("An extra line under each lyric. Auto picks a romanization for non-Latin scripts and background vocals otherwise. What's available depends on the provider."))
         .build();
     page.add(&display_group);
     let selected = prefs::SECOND_LINE_MODES.iter().position(|k| *k == lyrics.prefs().second_line_mode()).unwrap_or(1);
-    let second_row = combo_row("Show", "", &SECOND_LINE_LABELS, selected);
+    // Translators: row title, followed by what the second lyric line shows: Off, Auto, Romanization, Translation or Background.
+    let second_row = combo_row(&tr!("Show"), "", &translated(&SECOND_LINE_LABELS), selected);
     {
         let lyrics = lyrics.clone();
         let apply = apply.clone();
@@ -174,15 +177,16 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
 
     // -- effects -----------------------------------------------------------------
     let effects_group = adw::PreferencesGroup::builder()
-        .title("Effects")
-        .description("Subtle fades each word in over the time it's actually held and grows the active line. Full adds a glow on the active line and blurs the lines furthest from it.")
+        .title(tr!("Effects"))
+        .description(tr!("Subtle fades each word in over the time it's actually held and grows the active line. Full adds a glow on the active line and blurs the lines furthest from it."))
         .build();
     page.add(&effects_group);
     let selected = prefs::EFFECTS_LEVELS.iter().position(|k| *k == lyrics.prefs().effects_level()).unwrap_or(2);
-    let effect_row = combo_row("Level", "", &EFFECT_LABELS, selected);
+    // Translators: how strong the lyric effects are: Off, Subtle or Full.
+    let effect_row = combo_row(&tr!("Level"), "", &translated(&EFFECT_LABELS), selected);
     effects_group.add(&effect_row);
 
-    let sweep_row = switch_row("Emulate Word Timing", "On sources with no word timing, move the highlight across the line instead of lighting the whole line at once", lyrics.prefs().line_sweep());
+    let sweep_row = switch_row(&tr!("Emulate Word Timing"), &tr!("On sources with no word timing, move the highlight across the line instead of lighting the whole line at once"), lyrics.prefs().line_sweep());
     {
         let lyrics = lyrics.clone();
         let apply = apply.clone();
@@ -195,12 +199,12 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
 
     // -- text size -------------------------------------------------------------------
     let size_group = adw::PreferencesGroup::builder()
-        .title("Text Size")
-        .description("Resting size of the lyric column, and how much bigger the line being sung is drawn. The active line is scaled when it is painted, so growing it never changes the row's height or disturbs the scrolling.")
+        .title(tr!("Text Size"))
+        .description(tr!("Resting size of the lyric column, and how much bigger the line being sung is drawn. The active line is scaled when it is painted, so growing it never changes the row's height or disturbs the scrolling."))
         .build();
     page.add(&size_group);
 
-    let (base_row, base_scale) = scale_row("Lyrics Size", "", (prefs::FONT_SCALE_MIN, prefs::FONT_SCALE_MAX, 0.05), lyrics.prefs().font_scale(), 2);
+    let (base_row, base_scale) = scale_row(&tr!("Lyrics Size"), "", (prefs::FONT_SCALE_MIN, prefs::FONT_SCALE_MAX, 0.05), lyrics.prefs().font_scale(), 2);
     base_scale.add_mark(prefs::FONT_SCALE_DEFAULT, gtk::PositionType::Bottom, None);
     {
         let lyrics = lyrics.clone();
@@ -212,7 +216,7 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
     }
     size_group.add(&base_row);
 
-    let (grown_row, grown_scale) = scale_row("Active Line Size", "", (prefs::ACTIVE_SCALE_MIN, prefs::ACTIVE_SCALE_MAX, 0.01), lyrics.prefs().active_scale(), 2);
+    let (grown_row, grown_scale) = scale_row(&tr!("Active Line Size"), "", (prefs::ACTIVE_SCALE_MIN, prefs::ACTIVE_SCALE_MAX, 0.01), lyrics.prefs().active_scale(), 2);
     grown_scale.add_mark(prefs::ACTIVE_SCALE_DEFAULT, gtk::PositionType::Bottom, None);
     {
         let lyrics = lyrics.clone();
@@ -237,8 +241,8 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
     }
     // -- cache -------------------------------------------------------------
     // Styled like Reset Mixtapes: its own group, a destructive button row.
-    let cache_group = adw::PreferencesGroup::builder().description("Queue changes only apply to tracks that aren't cached yet").build();
-    let clear_row = adw::ButtonRow::builder().title("Clear Cached Lyrics").end_icon_name("user-trash-symbolic").build();
+    let cache_group = adw::PreferencesGroup::builder().description(tr!("Queue changes only apply to tracks that aren't cached yet")).build();
+    let clear_row = adw::ButtonRow::builder().title(tr!("Clear Cached Lyrics")).end_icon_name("user-trash-symbolic").build();
     // The builder would replace the button class the row styles itself with.
     clear_row.add_css_class("destructive-action");
     {
@@ -247,7 +251,7 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
         clear_row.connect_activated(move |_| {
             let removed = ctx.lyrics.cache().clear_all();
             let Some(win) = win.upgrade() else { return };
-            win.add_toast(&if removed > 0 { format!("Cleared {removed} cached track(s)") } else { "No cached lyrics to clear".to_owned() });
+            win.add_toast(&if removed > 0 { trn!("Cleared {n} cached track(s)", "Cleared {n} cached track(s)", removed) } else { tr!("No cached lyrics to clear") });
             for view in win.lyrics_views() {
                 view.refresh();
             }

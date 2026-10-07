@@ -77,9 +77,9 @@ impl ExpandedPlayer {
             .margin_bottom(8)
             .build();
         for (name, label, icon) in [
-            ("player", "Player", "folder-music-symbolic"),
-            ("queue", "Queue", "music-queue-symbolic"),
-            ("lyrics", "Lyrics", "format-justify-fill-symbolic"),
+            ("player", tr!("Player"), "folder-music-symbolic"),
+            ("queue", tr!("Queue"), "music-queue-symbolic"),
+            ("lyrics", tr!("Lyrics"), "format-justify-fill-symbolic"),
         ] {
             toggle_nav.add(
                 adw::Toggle::builder()
@@ -132,7 +132,7 @@ impl ExpandedPlayer {
             .valign(gtk::Align::Center)
             .build();
         let title = MarqueeLabel::new();
-        title.set_label("Not Playing");
+        title.set_label(&tr!("Not Playing"));
         title.add_css_class("title-3");
         let artists_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -223,7 +223,7 @@ impl ExpandedPlayer {
         view_stack.add_titled_with_icon(
             &player_scroll,
             Some("player"),
-            "Player",
+            &tr!("Player"),
             "folder-music-symbolic",
         );
 
@@ -234,13 +234,13 @@ impl ExpandedPlayer {
         view_stack.add_titled_with_icon(
             queue_panel.widget(),
             Some("queue"),
-            "Queue",
+            &tr!("Queue"),
             "music-queue-symbolic",
         );
         view_stack.add_titled_with_icon(
             lyrics_view.widget(),
             Some("lyrics"),
-            "Lyrics",
+            &tr!("Lyrics"),
             "format-justify-fill-symbolic",
         );
 
@@ -472,10 +472,10 @@ impl ExpandedPlayer {
     fn refresh_metadata(&self) {
         let state = self.ctx.player.state();
         let title = state.title();
-        self.title.set_label(if title.is_empty() {
-            "Not Playing"
+        self.title.set_label(&if title.is_empty() {
+            tr!("Not Playing")
         } else {
-            &title
+            title.clone()
         });
         while let Some(child) = self.artists_box.first_child() {
             self.artists_box.remove(&child);
@@ -546,7 +546,7 @@ impl ExpandedPlayer {
             return;
         };
         let this = self.clone();
-        let extras = vec![crate::ui::context_menu::MenuAction::new("Stream Info (Debug)", crate::ui::context_menu::Section::Debug, move || this.show_stream_info())];
+        let extras = vec![crate::ui::context_menu::MenuAction::new(&tr!("Stream Info (Debug)"), crate::ui::context_menu::Section::Debug, move || this.show_stream_info())];
         let opts = crate::ui::context_menu::SongMenuOptions {
             prefix: "ep",
             // The view already shows the artist as a link and the cover for
@@ -727,9 +727,9 @@ pub fn present_stream_info(ctx: &Rc<UiContext>, anchor: &gtk::Widget) {
     glib::spawn_future_local(async move {
         let text = ctx.player.stream_debug(false).await;
         let label = gtk::Label::builder().label(&text).selectable(true).wrap(true).xalign(0.0).margin_top(4).css_classes(["monospace"]).build();
-        let dialog = adw::AlertDialog::builder().heading("Stream Info").extra_child(&label).build();
-        dialog.add_response("close", "Close");
-        dialog.add_response("copy", "Copy");
+        let dialog = adw::AlertDialog::builder().heading(tr!("Stream Info")).extra_child(&label).build();
+        dialog.add_response("close", &tr!("Close"));
+        dialog.add_response("copy", &tr!("Copy"));
         dialog.set_default_response(Some("close"));
         dialog.set_close_response("close");
         let copy_ctx = ctx.clone();
@@ -745,7 +745,7 @@ pub fn present_stream_info(ctx: &Rc<UiContext>, anchor: &gtk::Widget) {
                 if let Some(display) = gtk::gdk::Display::default() {
                     display.clipboard().set_text(&full);
                 }
-                crate::ui::toast(&anchor, "Stream info copied");
+                crate::ui::toast(&anchor, &tr!("Stream info copied"));
             });
         });
         dialog.present(Some(&anchor));

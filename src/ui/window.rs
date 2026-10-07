@@ -135,13 +135,13 @@ impl MainWindow {
         header_bar.pack_start(&back_btn);
         let search_btn = gtk::ToggleButton::builder()
             .icon_name("system-search-symbolic")
-            .tooltip_text("Search")
+            .tooltip_text(tr!("Search"))
             .build();
         header_bar.pack_start(&search_btn);
         header_bar.set_title_widget(Some(&title_bin));
 
-        let upload_progress = ProgressButton::new("Upload Progress");
-        let download_progress = ProgressButton::new("Download Progress");
+        let upload_progress = ProgressButton::new(&tr!("Upload Progress"));
+        let download_progress = ProgressButton::new(&tr!("Download Progress"));
         let (avatar_btn, avatar_profile) = build_avatar_menu();
         let primary_btn = build_primary_menu(&window);
         header_bar.pack_end(&primary_btn);
@@ -156,32 +156,32 @@ impl MainWindow {
         for (name, title, icon, child) in [
             (
                 "home",
-                "Home",
+                tr!("Home"),
                 "user-home-symbolic",
                 home.widget().clone().upcast::<gtk::Widget>(),
             ),
             (
                 "library",
-                "Library",
+                tr!("Library"),
                 "media-optical-symbolic",
                 library.widget().clone().upcast(),
             ),
             (
                 "search",
-                "Explore",
+                tr!("Explore"),
                 "compass2-symbolic",
                 explore.widget().clone().upcast(),
             ),
         ] {
-            let nav = create_tab_nav(&child, title);
-            view_stack.add_titled_with_icon(&nav, Some(name), title, icon);
+            let nav = create_tab_nav(&child, &title);
+            view_stack.add_titled_with_icon(&nav, Some(name), &title, icon);
         }
         let lib_refresh = build_library_refresh();
         header_bar.pack_end(&lib_refresh.root);
 
         // -- search bar --------------------------------------------------
         let search_entry = gtk::SearchEntry::builder()
-            .placeholder_text("Search...")
+            .placeholder_text(tr!("Search..."))
             .hexpand(true)
             .build();
         let search_clamp = adw::Clamp::builder()
@@ -277,7 +277,7 @@ impl MainWindow {
                                 Some(album) => ui.nav.go(NavRequest::Album { id: album.id.unwrap_or_default(), title: album.name, thumb: None }),
                                 None => {
                                     if let Some(o) = overlay.upgrade() {
-                                        o.add_toast(adw::Toast::new("No album for this track"));
+                                        o.add_toast(adw::Toast::new(&tr!("No album for this track")));
                                     }
                                 }
                             }
@@ -364,7 +364,7 @@ impl MainWindow {
                 if let Some(window) = weak.upgrade() {
                     window.upload_progress.set_fraction(fraction);
                     if fraction.is_none() {
-                        window.add_toast("Uploads complete");
+                        window.add_toast(&tr!("Uploads complete"));
                     }
                 }
             });
@@ -550,7 +550,7 @@ impl MainWindow {
         let overlay = self.toast_overlay.downgrade();
         dialog.set_on_success(move || {
             if let Some(o) = overlay.upgrade() {
-                o.add_toast(adw::Toast::new("Signed in"));
+                o.add_toast(adw::Toast::new(&tr!("Signed in")));
             }
             library.load_library(false);
         });
@@ -620,7 +620,7 @@ impl MainWindow {
     fn apply_network_state(self: &Rc<Self>, online: bool) {
         if online {
             tracing::info!("back online, refreshing library");
-            self.add_toast("Back online");
+            self.add_toast(&tr!("Back online"));
             // Covers that failed while offline stay placeholders until asked again.
             crate::ui::cover::retry_failed();
             // The list keeps its rows across a reload, so the offline grey is lifted here.
@@ -639,7 +639,7 @@ impl MainWindow {
             }
         } else {
             tracing::info!("went offline");
-            self.add_toast("Offline - downloaded songs still available");
+            self.add_toast(&tr!("Offline - downloaded songs still available"));
             self.library.apply_offline_state();
             self.explore.load_explore_data(true);
             self.home.refresh();
@@ -674,7 +674,7 @@ impl MainWindow {
                                 }
                             });
                         } else {
-                            w.add_toast("No internet - running in offline mode");
+                            w.add_toast(&tr!("No internet - running in offline mode"));
                         }
                         break;
                     }
@@ -700,7 +700,7 @@ impl MainWindow {
     pub fn download_tracks(&self, tracks: Vec<Track>, album_title: &str, album_id: &str) {
         let queued = self.download_queue.start(tracks, album_title, album_id);
         if queued == 0 {
-            self.add_toast("Already downloaded");
+            self.add_toast(&tr!("Already downloaded"));
             return;
         }
         self.download_progress.set_fraction(Some(0.0));
@@ -722,7 +722,7 @@ impl MainWindow {
                 }
                 crate::downloads::Event::Idle { downloaded } => {
                     if *downloaded > 0 {
-                        this.add_toast("Downloads complete");
+                        this.add_toast(&tr!("Downloads complete"));
                     }
                     this.download_queue.clear_later();
                     this.download_progress.set_fraction(None);
@@ -1069,7 +1069,7 @@ impl MainWindow {
     /// belong to the uploads page, which is not ported yet.
     pub fn open_artist(self: &Rc<Self>, channel_id: &str, initial_name: Option<&str>) {
         if channel_id.starts_with("FEmusic_library_privately_owned") {
-            self.add_toast("Uploaded artists are not available yet");
+            self.add_toast(&tr!("Uploaded artists are not available yet"));
             return;
         }
         let page = ArtistPage::new(self.ui.clone());
@@ -1119,7 +1119,7 @@ impl MainWindow {
         page.prepare_virtual("DOWNLOADS");
         let nav_page = adw::NavigationPage::builder()
             .child(page.widget())
-            .title("Downloaded Songs")
+            .title(tr!("Downloaded Songs"))
             .build();
         let weak = Rc::downgrade(self);
         page.set_on_header_title(move |title| {
@@ -1144,7 +1144,7 @@ impl MainWindow {
     pub fn open_uploads(self: &Rc<Self>) {
         let page = PlaylistPage::new(self.ui.clone());
         page.prepare_virtual("UPLOADS");
-        let nav_page = adw::NavigationPage::builder().child(page.widget()).title("Uploaded Songs").build();
+        let nav_page = adw::NavigationPage::builder().child(page.widget()).title(tr!("Uploaded Songs")).build();
         let weak = Rc::downgrade(self);
         page.set_on_header_title(move |title| {
             if let Some(w) = weak.upgrade() {
@@ -1166,8 +1166,8 @@ impl MainWindow {
                     }
                     Err(_) => return,
                 };
-                let meta = format!("{} uploaded {}", tracks.len(), if tracks.len() == 1 { "song" } else { "songs" });
-                page.show_virtual("Uploaded Songs", tracks, &meta);
+                let meta = trn!("{n} uploaded song", "{n} uploaded songs", tracks.len());
+                page.show_virtual(&tr!("Uploaded Songs"), tracks, &meta);
             });
         });
         unsafe { nav_page.set_data("pushed", PushedPage::Playlist(page)) };
@@ -1203,7 +1203,7 @@ impl MainWindow {
                     }
                     Err(_) => return,
                 };
-                let meta = format!("{} uploaded {}", tracks.len(), if tracks.len() == 1 { "song" } else { "songs" });
+                let meta = trn!("{n} uploaded song", "{n} uploaded songs", tracks.len());
                 page.show_virtual(&name, tracks, &meta);
             });
         });
@@ -1258,7 +1258,7 @@ impl MainWindow {
                     w.own_channel.replace(Some(channel.clone()));
                     w.open_artist(&channel, Some(&name));
                 }
-                _ => w.add_toast("Couldn't open your channel"),
+                _ => w.add_toast(&tr!("Couldn't open your channel")),
             }
         });
     }
@@ -1283,10 +1283,10 @@ impl MainWindow {
                 Ok(Ok(Some(Link::Playlist(id)))) => w.navigate(NavRequest::Playlist { id, title: String::new(), thumb: None }),
                 Ok(Ok(Some(Link::Album(id)))) => w.navigate(NavRequest::Album { id, title: String::new(), thumb: None }),
                 Ok(Ok(Some(Link::Artist(id)))) => w.navigate(NavRequest::Artist { id: Some(id), name: String::new() }),
-                Ok(Ok(None)) => w.add_toast("Mixtapes cannot open this link"),
+                Ok(Ok(None)) => w.add_toast(&tr!("Mixtapes cannot open this link")),
                 Ok(Err(err)) => {
                     tracing::warn!(%err, text, "link did not resolve");
-                    w.add_toast("Could not open the link");
+                    w.add_toast(&tr!("Could not open the link"));
                 }
                 Err(_) => {}
             }
@@ -1300,7 +1300,7 @@ impl MainWindow {
         // Signed out, the page lists the plays kept on this device, which needs no network.
         let signed_in = matches!(self.ui.net.client().auth_state(), AuthState::Authenticated(_));
         if signed_in && !self.ui.online.is_online() {
-            self.add_toast("History requires an internet connection");
+            self.add_toast(&tr!("History requires an internet connection"));
             return;
         }
         let page = HistoryPage::new(self.ui.clone());
@@ -1313,7 +1313,7 @@ impl MainWindow {
         });
         let nav_page = adw::NavigationPage::builder()
             .child(page.widget())
-            .title("Listening History")
+            .title(tr!("Listening History"))
             .build();
         let page_c = page.clone();
         nav_page.connect_shown(move |_| page_c.load());
@@ -1857,9 +1857,9 @@ impl MainWindow {
                 .unwrap_or_default();
             if let Some(overlay) = overlay.upgrade() {
                 let text = if title.is_empty() {
-                    format!("Couldn't play track: {reason}")
+                    tr!("Couldn't play track: {reason}", reason)
                 } else {
-                    format!("Couldn't play '{title}': {reason}")
+                    tr!("Couldn't play '{title}': {reason}", title, reason)
                 };
                 overlay.add_toast(adw::Toast::new(&text));
             }
@@ -2092,7 +2092,7 @@ fn build_library_refresh() -> LibraryRefresh {
         .icon_name("view-refresh-symbolic")
         .css_classes(["flat"])
         .valign(gtk::Align::Center)
-        .tooltip_text("Refresh")
+        .tooltip_text(tr!("Refresh"))
         .build();
     let spinner = adw::Spinner::builder()
         .valign(gtk::Align::Center)
@@ -2181,12 +2181,12 @@ fn build_primary_menu(window: &adw::ApplicationWindow) -> gtk::MenuButton {
     menu.append_section(None, &theme_section);
 
     let app_section = gio::Menu::new();
-    app_section.append(Some("Downloaded Songs"), Some("win.open-downloads"));
-    app_section.append(Some("Keyboard Shortcuts"), Some("win.shortcuts"));
-    app_section.append(Some("Preferences"), Some("win.preferences"));
-    app_section.append(Some("What's New"), Some("win.whats-new"));
-    app_section.append(Some("About Mixtapes"), Some("win.about"));
-    app_section.append(Some("Quit"), Some("win.quit"));
+    app_section.append(Some(&tr!("Downloaded Songs")), Some("win.open-downloads"));
+    app_section.append(Some(&tr!("Keyboard Shortcuts")), Some("win.shortcuts"));
+    app_section.append(Some(&tr!("Preferences")), Some("win.preferences"));
+    app_section.append(Some(&tr!("What's New")), Some("win.whats-new"));
+    app_section.append(Some(&tr!("About Mixtapes")), Some("win.about"));
+    app_section.append(Some(&tr!("Quit")), Some("win.quit"));
     menu.append_section(None, &app_section);
 
     let popover = gtk::PopoverMenu::from_model(Some(&menu));
@@ -2195,7 +2195,7 @@ fn build_primary_menu(window: &adw::ApplicationWindow) -> gtk::MenuButton {
     let btn = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
         .css_classes(["flat"])
-        .tooltip_text("Main Menu")
+        .tooltip_text(tr!("Main Menu"))
         .build();
     btn.set_popover(Some(&popover));
     btn
@@ -2216,9 +2216,9 @@ fn build_theme_swatches(window: &adw::ApplicationWindow) -> gtk::Box {
     let mut buttons: Vec<(&'static str, gtk::CheckButton)> = Vec::new();
     let mut head: Option<gtk::CheckButton> = None;
     for (value, variant, tooltip) in [
-        ("default", "follow", "Follow System Style"),
-        ("light", "light", "Light Style"),
-        ("dark", "dark", "Dark Style"),
+        ("default", "follow", tr!("Follow System Style")),
+        ("light", "light", tr!("Light Style")),
+        ("dark", "dark", tr!("Dark Style")),
     ] {
         let cb = gtk::CheckButton::builder()
             .css_classes(["theme-selector", variant])
@@ -2296,7 +2296,7 @@ impl AvatarProfile {
             let display = if authed && !name.is_empty() {
                 name.clone()
             } else {
-                "Not signed in".to_owned()
+                tr!("Not signed in")
             };
             profile.name_label.set_label(&display);
             profile.small.set_text(Some(&name));
@@ -2356,7 +2356,7 @@ fn build_avatar_menu() -> (gtk::MenuButton, Rc<AvatarProfile>) {
     let small = adw::Avatar::new(28, None, false);
     let menu_btn = gtk::MenuButton::builder()
         .css_classes(["flat", "circular"])
-        .tooltip_text("Account")
+        .tooltip_text(tr!("Account"))
         .child(&small)
         .build();
 
@@ -2369,19 +2369,19 @@ fn build_avatar_menu() -> (gtk::MenuButton, Rc<AvatarProfile>) {
 
     let authed_section = gio::Menu::new();
     for (label, action) in [
-        ("Your Channel", "win.open-channel"),
-        ("Upload Songs", "win.open-upload"),
-        ("Listening History", "win.open-history"),
+        (tr!("Your Channel"), "win.open-channel"),
+        (tr!("Upload Songs"), "win.open-upload"),
+        (tr!("Listening History"), "win.open-history"),
     ] {
-        let item = gio::MenuItem::new(Some(label), Some(action));
+        let item = gio::MenuItem::new(Some(&label), Some(action));
         item.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
         authed_section.append_item(&item);
     }
     menu.append_section(None, &authed_section);
 
     let auth_section = gio::Menu::new();
-    for (label, action) in [("Sign In", "win.sign-in"), ("Log Out", "win.logout")] {
-        let item = gio::MenuItem::new(Some(label), Some(action));
+    for (label, action) in [(tr!("Sign In"), "win.sign-in"), (tr!("Log Out"), "win.logout")] {
+        let item = gio::MenuItem::new(Some(&label), Some(action));
         item.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
         auth_section.append_item(&item);
     }
@@ -2409,7 +2409,7 @@ fn build_avatar_menu() -> (gtk::MenuButton, Rc<AvatarProfile>) {
         .hexpand(true)
         .build();
     let name_label = gtk::Label::builder()
-        .label("Not signed in")
+        .label(tr!("Not signed in"))
         .css_classes(["heading"])
         .halign(gtk::Align::Start)
         .ellipsize(gtk::pango::EllipsizeMode::End)
@@ -2734,27 +2734,27 @@ fn build_shortcuts_dialog() -> adw::ShortcutsDialog {
     let dialog = adw::ShortcutsDialog::new();
     for (title, entries) in [
         (
-            "General",
+            tr!("General"),
             vec![
-                ("Preferences", "<Control>comma"),
-                ("Keyboard Shortcuts", "<Control>question"),
-                ("Refresh", "F5 <Control>r"),
-                ("Go Back / Close Search", "Escape"),
-                ("Quit", "<Control>q"),
+                (tr!("Preferences"), "<Control>comma"),
+                (tr!("Keyboard Shortcuts"), "<Control>question"),
+                (tr!("Refresh"), "F5 <Control>r"),
+                (tr!("Go Back / Close Search"), "Escape"),
+                (tr!("Quit"), "<Control>q"),
             ],
         ),
         (
-            "Playback",
+            tr!("Playback"),
             vec![
-                ("Play / Pause", "space"),
-                ("Open / Close Player", "<Control>e"),
+                (tr!("Play / Pause"), "space"),
+                (tr!("Open / Close Player"), "<Control>e"),
             ],
         ),
-        ("Search", vec![("Search", "<Control>f")]),
+        (tr!("Search"), vec![(tr!("Search"), "<Control>f")]),
     ] {
-        let section = adw::ShortcutsSection::new(Some(title));
+        let section = adw::ShortcutsSection::new(Some(&title));
         for (name, accel) in entries {
-            section.add(adw::ShortcutsItem::new(name, accel));
+            section.add(adw::ShortcutsItem::new(&name, accel));
         }
         dialog.add(section);
     }

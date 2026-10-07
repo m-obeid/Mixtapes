@@ -156,7 +156,8 @@ impl Transport {
         if state.live() {
             self.scale.set_range(0.0, 1.0);
             self.scale.set_value(0.0);
-            self.pos_label.set_label("LIVE");
+            // Translators: shown in place of the time while a live stream plays.
+            self.pos_label.set_label(&tr!("LIVE"));
             self.dur_label.set_label("");
             return;
         }

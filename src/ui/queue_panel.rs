@@ -98,7 +98,7 @@ impl QueuePanel {
 
         let shuffle_btn = gtk::ToggleButton::builder()
             .icon_name("media-playlist-shuffle-symbolic")
-            .tooltip_text("Shuffle Queue")
+            .tooltip_text(tr!("Shuffle Queue"))
             .build();
         state
             .bind_property("shuffle", &shuffle_btn, "active")
@@ -121,7 +121,7 @@ impl QueuePanel {
 
         let repeat_btn = gtk::Button::builder()
             .icon_name("media-playlist-consecutive-symbolic")
-            .tooltip_text("Repeat Mode")
+            .tooltip_text(tr!("Repeat Mode"))
             .build();
         state
             .bind_property("repeat", &repeat_btn, "icon-name")
@@ -149,11 +149,11 @@ impl QueuePanel {
 
         let add_btn = gtk::Button::builder()
             .icon_name("list-add-symbolic")
-            .tooltip_text("Add all to Playlist")
+            .tooltip_text(tr!("Add all to Playlist"))
             .build();
         let clear_btn = gtk::Button::builder()
             .icon_name("edit-clear-all-symbolic")
-            .tooltip_text("Clear Queue")
+            .tooltip_text(tr!("Clear Queue"))
             .build();
 
         // -- bottom bar --------------------------------------------------
@@ -199,7 +199,7 @@ impl QueuePanel {
         let jump_btn = gtk::Button::builder()
             // The size of the lyrics view's round button, 34px, on the dark overlay surface.
             .css_classes(["circular", "osd", "lyrics-osd-btn"])
-            .tooltip_text("Go to the Playing Song")
+            .tooltip_text(tr!("Go to the Playing Song"))
             .child(&jump_icon)
             .build();
         let jump_revealer = gtk::Revealer::builder()
@@ -493,7 +493,8 @@ impl QueuePanel {
             .chain_property::<QueueEntry>("artist")
             .chain_closure::<String>(glib::closure!(|_: Option<glib::Object>, artist: String| {
                 if artist.is_empty() {
-                    "Unknown".to_owned()
+                    // Translators: shown in place of the artist of a queued song that has none.
+                    tr!("Unknown")
                 } else {
                     artist
                 }
@@ -584,7 +585,7 @@ impl QueuePanel {
                     let index = entry.index() as usize;
                     let remove = {
                         let player = player.clone();
-                        MenuAction::new("Remove from Queue", Section::Remove, move || {
+                        MenuAction::new(&tr!("Remove from Queue"), Section::Remove, move || {
                             player.remove_from_queue(index)
                         })
                     };
@@ -663,12 +664,13 @@ impl QueuePanel {
 
 /// The header caption: "42 tracks · 2 h 31 min". Tracks of unknown length add nothing to the time.
 fn queue_summary(tracks: u32, seconds: u32) -> String {
-    let count = if tracks == 1 { "1 track".to_owned() } else { format!("{tracks} tracks") };
     let minutes = seconds / 60;
     match (minutes / 60, minutes % 60) {
-        (0, 0) => count,
-        (0, m) => format!("{count} · {m} min"),
-        (h, m) => format!("{count} · {h} h {m} min"),
+        (0, 0) => trn!("{n} track", "{n} tracks", tracks),
+        // Translators: the queue's track count and its length, {m} is minutes.
+        (0, m) => trn!("{n} track · {m} min", "{n} tracks · {m} min", tracks, m),
+        // Translators: the queue's track count and its length, {h} is hours and {m} is minutes.
+        (h, m) => trn!("{n} track · {h} h {m} min", "{n} tracks · {h} h {m} min", tracks, h, m),
     }
 }
 

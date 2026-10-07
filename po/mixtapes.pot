@@ -1,0 +1,2901 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the mixtapes package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: mixtapes\n"
+"Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
+"POT-Creation-Date: 2026-10-07 13:00+0200\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
+
+#. Translators: stands in for a missing track title in the Discord status.
+#. Translators: a lyrics search result whose catalog entry has no title.
+#. Translators: stands in for a missing artist name
+#: src/discord.rs:92 src/lyrics/providers/mod.rs:203
+#: src/ui/pages/playlist.rs:2740
+msgid "Unknown"
+msgstr ""
+
+#: src/discord.rs:93
+msgid "Unknown artist"
+msgstr ""
+
+#: src/discord.rs:105
+msgid "Playing"
+msgstr ""
+
+#: src/discord.rs:105
+msgid "Paused"
+msgstr ""
+
+#: src/discord.rs:222 src/discord.rs:259
+msgid "Disabled"
+msgstr ""
+
+#: src/discord.rs:244 src/discord.rs:375 src/discord.rs:441
+msgid "Disconnected"
+msgstr ""
+
+#: src/discord.rs:367 src/ui/preferences.rs:800
+msgid "Connected"
+msgstr ""
+
+#. Translators: the name of your language in your language, for example "Deutsch". Do not translate it as the word "English".
+#: src/i18n/mod.rs:177
+msgctxt "language-name"
+msgid "English"
+msgstr ""
+
+#: src/local_library.rs:22
+msgid "Liked Songs"
+msgstr ""
+
+#: src/local_library.rs:26
+msgid "On this device"
+msgstr ""
+
+#: src/local_library.rs:444 src/ui/pages/library.rs:756
+#: src/ui/pages/playlist.rs:2763
+#, rust-format
+msgid "{n} song"
+msgid_plural "{n} songs"
+msgstr[0] ""
+msgstr[1] ""
+
+#. Translators: the kind word of a live stream, beside "Song" and "Video".
+#: src/model.rs:282 src/ui/widgets/media_card.rs:97
+msgid "Live"
+msgstr ""
+
+#: src/model.rs:286 src/net/cache.rs:87 src/ui/pages/playlist.rs:1128
+msgid "Album"
+msgstr ""
+
+#: src/model.rs:287
+msgid "Song"
+msgstr ""
+
+#: src/model.rs:288
+msgid "Episode"
+msgstr ""
+
+#: src/model.rs:289
+msgid "Video"
+msgstr ""
+
+#: src/model.rs:290 src/ui/pages/playlist.rs:1138
+msgid "Podcast"
+msgstr ""
+
+#: src/model.rs:291 src/ui/pages/playlist.rs:771 src/ui/pages/playlist.rs:828
+#: src/ui/pages/playlist.rs:963 src/ui/pages/playlist.rs:982
+#: src/ui/pages/playlist.rs:1047 src/ui/pages/playlist.rs:1069
+#: src/ui/pages/playlist.rs:1133 src/ui/pages/playlist.rs:1141
+msgid "Playlist"
+msgstr ""
+
+#. Translators: a user channel, as opposed to an artist.
+#: src/model.rs:293
+msgid "Profile"
+msgstr ""
+
+#: src/model.rs:294 src/net/artist.rs:294 src/ui/pages/playlist.rs:577
+#: src/ui/preferences.rs:25
+msgid "Artist"
+msgstr ""
+
+#. Translators: {subs} is a short count as YouTube words it, for example "12M".
+#: src/model.rs:317
+#, rust-format
+msgid "{subs} subscribers"
+msgstr ""
+
+#. Translators: {count} is the number as YouTube words it, for example "1,234".
+#. Translators: {count} is a number YouTube sends as text, like 1,204
+#. Translators: {count} is the number as YouTube words it, for example "1,234".
+#: src/model.rs:345 src/ui/pages/library.rs:758 src/ui/widgets/song_list.rs:44
+#, rust-format
+msgid "{count} songs"
+msgstr ""
+
+#: src/net/cache.rs:85
+msgid "Single"
+msgstr ""
+
+#: src/net/cache.rs:86
+msgid "EP"
+msgstr ""
+
+#: src/net/explore.rs:366
+msgid "Global"
+msgstr ""
+
+#: src/net/explore.rs:366
+msgid "Argentina"
+msgstr ""
+
+#: src/net/explore.rs:366
+msgid "Australia"
+msgstr ""
+
+#: src/net/explore.rs:366
+msgid "Austria"
+msgstr ""
+
+#: src/net/explore.rs:367
+msgid "Belgium"
+msgstr ""
+
+#: src/net/explore.rs:367
+msgid "Bolivia"
+msgstr ""
+
+#: src/net/explore.rs:367
+msgid "Brazil"
+msgstr ""
+
+#: src/net/explore.rs:367
+msgid "Canada"
+msgstr ""
+
+#: src/net/explore.rs:368
+msgid "Chile"
+msgstr ""
+
+#: src/net/explore.rs:368
+msgid "Colombia"
+msgstr ""
+
+#: src/net/explore.rs:368
+msgid "Costa Rica"
+msgstr ""
+
+#: src/net/explore.rs:368
+msgid "Czechia"
+msgstr ""
+
+#: src/net/explore.rs:369
+msgid "Denmark"
+msgstr ""
+
+#: src/net/explore.rs:369
+msgid "Dominican Republic"
+msgstr ""
+
+#: src/net/explore.rs:369
+msgid "Ecuador"
+msgstr ""
+
+#: src/net/explore.rs:370
+msgid "Egypt"
+msgstr ""
+
+#: src/net/explore.rs:370
+msgid "El Salvador"
+msgstr ""
+
+#: src/net/explore.rs:370
+msgid "Estonia"
+msgstr ""
+
+#: src/net/explore.rs:370
+msgid "Finland"
+msgstr ""
+
+#: src/net/explore.rs:371
+msgid "France"
+msgstr ""
+
+#: src/net/explore.rs:371
+msgid "Germany"
+msgstr ""
+
+#: src/net/explore.rs:371
+msgid "Guatemala"
+msgstr ""
+
+#: src/net/explore.rs:371
+msgid "Honduras"
+msgstr ""
+
+#: src/net/explore.rs:372
+msgid "Hungary"
+msgstr ""
+
+#: src/net/explore.rs:372
+msgid "Iceland"
+msgstr ""
+
+#: src/net/explore.rs:372
+msgid "India"
+msgstr ""
+
+#: src/net/explore.rs:372
+msgid "Indonesia"
+msgstr ""
+
+#: src/net/explore.rs:373
+msgid "Ireland"
+msgstr ""
+
+#: src/net/explore.rs:373
+msgid "Israel"
+msgstr ""
+
+#: src/net/explore.rs:373
+msgid "Italy"
+msgstr ""
+
+#: src/net/explore.rs:373
+msgid "Japan"
+msgstr ""
+
+#: src/net/explore.rs:374
+msgid "Kenya"
+msgstr ""
+
+#: src/net/explore.rs:374
+msgid "Luxembourg"
+msgstr ""
+
+#: src/net/explore.rs:374
+msgid "Mexico"
+msgstr ""
+
+#: src/net/explore.rs:374
+msgid "Netherlands"
+msgstr ""
+
+#: src/net/explore.rs:375
+msgid "New Zealand"
+msgstr ""
+
+#: src/net/explore.rs:375
+msgid "Nicaragua"
+msgstr ""
+
+#: src/net/explore.rs:375
+msgid "Nigeria"
+msgstr ""
+
+#: src/net/explore.rs:375
+msgid "Norway"
+msgstr ""
+
+#: src/net/explore.rs:376
+msgid "Panama"
+msgstr ""
+
+#: src/net/explore.rs:376
+msgid "Paraguay"
+msgstr ""
+
+#: src/net/explore.rs:376
+msgid "Peru"
+msgstr ""
+
+#: src/net/explore.rs:376
+msgid "Philippines"
+msgstr ""
+
+#: src/net/explore.rs:377
+msgid "Poland"
+msgstr ""
+
+#: src/net/explore.rs:377
+msgid "Portugal"
+msgstr ""
+
+#: src/net/explore.rs:377
+msgid "Romania"
+msgstr ""
+
+#: src/net/explore.rs:377
+msgid "Russia"
+msgstr ""
+
+#: src/net/explore.rs:378
+msgid "Saudi Arabia"
+msgstr ""
+
+#: src/net/explore.rs:378
+msgid "Serbia"
+msgstr ""
+
+#: src/net/explore.rs:378
+msgid "South Africa"
+msgstr ""
+
+#: src/net/explore.rs:379
+msgid "South Korea"
+msgstr ""
+
+#: src/net/explore.rs:379
+msgid "Spain"
+msgstr ""
+
+#: src/net/explore.rs:379
+msgid "Sweden"
+msgstr ""
+
+#: src/net/explore.rs:379
+msgid "Switzerland"
+msgstr ""
+
+#: src/net/explore.rs:380
+msgid "Tanzania"
+msgstr ""
+
+#: src/net/explore.rs:380
+msgid "Turkey"
+msgstr ""
+
+#: src/net/explore.rs:380
+msgid "Uganda"
+msgstr ""
+
+#: src/net/explore.rs:380
+msgid "Ukraine"
+msgstr ""
+
+#: src/net/explore.rs:381
+msgid "UAE"
+msgstr ""
+
+#: src/net/explore.rs:381
+msgid "United Kingdom"
+msgstr ""
+
+#: src/net/explore.rs:381
+msgid "United States"
+msgstr ""
+
+#: src/net/explore.rs:382
+msgid "Uruguay"
+msgstr ""
+
+#: src/net/explore.rs:382
+msgid "Venezuela"
+msgstr ""
+
+#: src/net/explore.rs:382
+msgid "Vietnam"
+msgstr ""
+
+#: src/net/explore.rs:382
+msgid "Zimbabwe"
+msgstr ""
+
+#: src/net/history.rs:24
+msgid "Recently"
+msgstr ""
+
+#: src/net/history.rs:270 src/ui/pages/history.rs:421
+msgid "Today"
+msgstr ""
+
+#: src/net/local_feed.rs:36
+msgid "Listen again"
+msgstr ""
+
+#: src/net/local_feed.rs:128
+msgid "New from artists you like"
+msgstr ""
+
+#. Translators: a small line above an artist's name, which is the shelf title below it.
+#: src/net/local_feed.rs:137
+msgid "Similar to"
+msgstr ""
+
+#: src/net/playlists.rs:86
+msgid "Your Likes"
+msgstr ""
+
+#: src/net/playlists.rs:87
+msgid "Your liked songs from YouTube Music."
+msgstr ""
+
+#. Translators: {extension} is a file type such as "wav", {formats} a list such as "mp3, m4a, flac".
+#: src/net/uploads.rs:34
+#, rust-format
+msgid "YouTube Music does not take {extension} files. It takes {formats}."
+msgstr ""
+
+#: src/player.rs:54
+msgid "Could not load this track"
+msgstr ""
+
+#: src/player.rs:437
+msgid "Couldn't update rating"
+msgstr ""
+
+#: src/player.rs:1552
+msgid "Radio"
+msgstr ""
+
+#: src/player.rs:1552
+#, rust-format
+msgid "Radio of {seed_name}"
+msgstr ""
+
+#: src/scrobbler.rs:598
+msgid "This build has no Last.fm API credentials"
+msgstr ""
+
+#: src/scrobbler.rs:603
+msgid "Last.fm returned no token"
+msgstr ""
+
+#. Translators: follows the service name and a colon, as in "ListenBrainz: user token rejected".
+#: src/scrobbler.rs:643
+msgid "user token rejected"
+msgstr ""
+
+#: src/scrobbler.rs:669
+msgid "Enter your ListenBrainz user token"
+msgstr ""
+
+#. Translators: follows the service name and a colon, as in "ListenBrainz: that token is not valid".
+#: src/scrobbler.rs:681 src/scrobbler.rs:688
+msgid "that token is not valid"
+msgstr ""
+
+#. Translators: follows the service name and a colon, as in "Last.fm: unknown error".
+#: src/scrobbler.rs:781
+msgid "unknown error"
+msgstr ""
+
+#: src/tray.rs:191 src/ui/player_bar.rs:553
+msgid "Pause"
+msgstr ""
+
+#: src/tray.rs:191 src/ui/context_menu.rs:303 src/ui/pages/artist.rs:188
+#: src/ui/pages/history.rs:348 src/ui/pages/playlist.rs:174
+#: src/ui/player_bar.rs:165 src/ui/player_bar.rs:555
+msgid "Play"
+msgstr ""
+
+#: src/tray.rs:192 src/ui/player_bar.rs:149
+msgid "Previous"
+msgstr ""
+
+#: src/tray.rs:193 src/ui/player_bar.rs:169
+msgid "Next"
+msgstr ""
+
+#: src/tray.rs:195
+msgid "Show Mixtapes"
+msgstr ""
+
+#: src/tray.rs:196 src/ui/window.rs:2189 src/ui/window.rs:2743
+msgid "Quit"
+msgstr ""
+
+#: src/ui/context_menu.rs:117
+#, rust-format
+msgid "Play {n} Next"
+msgid_plural "Play {n} Next"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/context_menu.rs:117 src/ui/context_menu.rs:303
+#: src/ui/pages/playlist.rs:1691
+msgid "Play Next"
+msgstr ""
+
+#: src/ui/context_menu.rs:120 src/ui/context_menu.rs:394
+#: src/ui/pages/playlist.rs:1726
+#, rust-format
+msgid "Playing {n} track next"
+msgid_plural "Playing {n} tracks next"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/context_menu.rs:120
+msgid "Playing next"
+msgstr ""
+
+#: src/ui/context_menu.rs:126
+#, rust-format
+msgid "Add {n} to Queue"
+msgid_plural "Add {n} to Queue"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/context_menu.rs:126 src/ui/context_menu.rs:303
+#: src/ui/pages/playlist.rs:1692
+msgid "Add to Queue"
+msgstr ""
+
+#: src/ui/context_menu.rs:129 src/ui/context_menu.rs:398
+#: src/ui/pages/playlist.rs:1735
+#, rust-format
+msgid "Added {n} track to queue"
+msgid_plural "Added {n} tracks to queue"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/context_menu.rs:129
+msgid "Added to queue"
+msgstr ""
+
+#: src/ui/context_menu.rs:138 src/ui/context_menu.rs:317
+#: src/ui/context_menu.rs:324
+msgid "Go to Artist"
+msgstr ""
+
+#: src/ui/context_menu.rs:140
+#, rust-format
+msgid "Artist pages not ported yet ({name})"
+msgstr ""
+
+#: src/ui/context_menu.rs:149
+msgid "Go to Album"
+msgstr ""
+
+#: src/ui/context_menu.rs:151
+#, rust-format
+msgid "Album pages not ported yet ({name})"
+msgstr ""
+
+#: src/ui/context_menu.rs:160 src/ui/context_menu.rs:329
+#: src/ui/pages/artist.rs:204 src/ui/pages/playlist.rs:1698
+msgid "Start Radio"
+msgstr ""
+
+#: src/ui/context_menu.rs:162 src/ui/context_menu.rs:407
+#: src/ui/context_menu.rs:428 src/ui/pages/playlist.rs:1744
+msgid "Starting radio..."
+msgstr ""
+
+#: src/ui/context_menu.rs:169
+#, rust-format
+msgid "Add {n} to Playlist…"
+msgid_plural "Add {n} to Playlist…"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/context_menu.rs:169
+msgid "Add to Playlist…"
+msgstr ""
+
+#: src/ui/context_menu.rs:184
+#, rust-format
+msgid "Remove {n} Download"
+msgid_plural "Remove {n} Downloads"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/context_menu.rs:189
+#, rust-format
+msgid "Download {n} Song"
+msgid_plural "Download {n} Songs"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/context_menu.rs:195
+msgid "Remove Download"
+msgstr ""
+
+#: src/ui/context_menu.rs:197
+msgid "Download removed"
+msgstr ""
+
+#: src/ui/context_menu.rs:202
+msgid "Download"
+msgstr ""
+
+#: src/ui/context_menu.rs:211
+msgid "Refresh Metadata"
+msgstr ""
+
+#: src/ui/context_menu.rs:222 src/ui/context_menu.rs:341
+#: src/ui/pages/playlist.rs:1701
+msgid "Copy Link"
+msgstr ""
+
+#: src/ui/context_menu.rs:224 src/ui/context_menu.rs:343
+msgid "Link copied"
+msgstr ""
+
+#: src/ui/context_menu.rs:235
+#, rust-format
+msgid "Remove {n} Download?"
+msgid_plural "Remove {n} Downloads?"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/context_menu.rs:235
+msgid ""
+"The files are deleted from this device. The songs stay in your library and "
+"playlists."
+msgstr ""
+
+#: src/ui/context_menu.rs:236 src/ui/crop_dialog.rs:146
+#: src/ui/download_queue.rs:88 src/ui/pages/library.rs:963
+#: src/ui/pages/library.rs:1001 src/ui/pages/playlist.rs:2208
+#: src/ui/pages/playlist.rs:2380 src/ui/preferences.rs:518
+#: src/ui/preferences.rs:872 src/ui/preferences.rs:930
+msgid "Cancel"
+msgstr ""
+
+#: src/ui/context_menu.rs:237
+msgid "Remove"
+msgstr ""
+
+#: src/ui/context_menu.rs:249
+#, rust-format
+msgid "Removed {n} download"
+msgid_plural "Removed {n} downloads"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/context_menu.rs:315
+msgid "Open Album"
+msgstr ""
+
+#: src/ui/context_menu.rs:316
+msgid "Open Playlist"
+msgstr ""
+
+#: src/ui/context_menu.rs:378 src/ui/pages/playlist.rs:757
+msgid "Loading..."
+msgstr ""
+
+#: src/ui/context_menu.rs:386
+msgid "Nothing to play"
+msgstr ""
+
+#: src/ui/context_menu.rs:421 src/ui/context_menu.rs:436
+#: src/ui/context_menu.rs:442
+msgid "Radio unavailable"
+msgstr ""
+
+#: src/ui/context_menu.rs:449
+msgid "Refreshing metadata..."
+msgstr ""
+
+#: src/ui/context_menu.rs:459
+msgid "Metadata refreshed"
+msgstr ""
+
+#: src/ui/context_menu.rs:461
+msgid "No metadata found"
+msgstr ""
+
+#: src/ui/context_menu.rs:465
+msgid "Failed to refresh metadata"
+msgstr ""
+
+#: src/ui/cover_view.rs:66 src/ui/expanded_player.rs:80
+#: src/ui/expanded_player.rs:226
+msgid "Player"
+msgstr ""
+
+#: src/ui/cover_view.rs:73 src/ui/expanded_player.rs:82
+#: src/ui/expanded_player.rs:243 src/ui/preferences_lyrics.rs:116
+msgid "Lyrics"
+msgstr ""
+
+#: src/ui/cover_view.rs:110 src/ui/cover_view.rs:500
+#: src/ui/expanded_player.rs:135 src/ui/expanded_player.rs:476
+#: src/ui/player_bar.rs:124 src/ui/player_bar.rs:448
+msgid "Not Playing"
+msgstr ""
+
+#: src/ui/cover_view.rs:240 src/ui/player_bar.rs:341
+msgid "Collapse player"
+msgstr ""
+
+#: src/ui/cover_view.rs:247 src/ui/expanded_player.rs:81
+#: src/ui/expanded_player.rs:237
+msgid "Queue"
+msgstr ""
+
+#: src/ui/cover_view.rs:577 src/ui/expanded_player.rs:549
+#: src/ui/preferences.rs:479
+msgid "Stream Info (Debug)"
+msgstr ""
+
+#: src/ui/crop_dialog.rs:48
+msgid "Edit Playlist Cover"
+msgstr ""
+
+#: src/ui/crop_dialog.rs:52
+msgid "Crop Playlist Cover"
+msgstr ""
+
+#: src/ui/crop_dialog.rs:57
+msgid "Select the square area you want to use."
+msgstr ""
+
+#: src/ui/crop_dialog.rs:152
+msgid "Save & Use PNG"
+msgstr ""
+
+#. Translators: status of a download waiting for its turn.
+#: src/ui/download_queue.rs:81
+msgid "Queued"
+msgstr ""
+
+#: src/ui/download_queue.rs:108
+msgid "Downloading"
+msgstr ""
+
+#. Translators: download progress, {percent} is a number from 0 to 100.
+#: src/ui/download_queue.rs:121
+#, rust-format
+msgid "{percent}%"
+msgstr ""
+
+#. Translators: status of a finished download.
+#. Translators: title of the last setup step, the setup is finished.
+#: src/ui/download_queue.rs:129 src/ui/onboarding.rs:351
+msgid "Done"
+msgstr ""
+
+#: src/ui/download_queue.rs:130
+msgid "Cancelled"
+msgstr ""
+
+#: src/ui/download_queue.rs:131
+msgid "Failed"
+msgstr ""
+
+#: src/ui/expanded_player.rs:730
+msgid "Stream Info"
+msgstr ""
+
+#: src/ui/expanded_player.rs:731
+msgid "Close"
+msgstr ""
+
+#: src/ui/expanded_player.rs:732
+msgid "Copy"
+msgstr ""
+
+#: src/ui/expanded_player.rs:748
+msgid "Stream info copied"
+msgstr ""
+
+#: src/ui/like_button.rs:31 src/ui/like_button.rs:153
+msgid "Dislike"
+msgstr ""
+
+#: src/ui/like_button.rs:153
+msgid "Remove Dislike"
+msgstr ""
+
+#: src/ui/like_button.rs:167
+msgid "Unlike (Hold or right-click for Dislike)"
+msgstr ""
+
+#: src/ui/like_button.rs:168
+msgid "Disliked (Hold or right-click to remove)"
+msgstr ""
+
+#: src/ui/like_button.rs:169
+msgid "Like (Hold or right-click for Dislike)"
+msgstr ""
+
+#: src/ui/login.rs:44 src/ui/login.rs:273
+msgid "Sign in to YouTube Music"
+msgstr ""
+
+#: src/ui/login.rs:49 src/ui/login.rs:278
+msgid "Skip"
+msgstr ""
+
+#: src/ui/login.rs:174 src/ui/login.rs:424
+#, rust-format
+msgid "Could not read cookies: {err}"
+msgstr ""
+
+#: src/ui/login.rs:180
+msgid "Not signed in yet, the session has no SAPISID cookie."
+msgstr ""
+
+#: src/ui/login.rs:193 src/ui/login.rs:434
+msgid "Signing in..."
+msgstr ""
+
+#: src/ui/login.rs:197 src/ui/login.rs:439
+msgid "Signed in."
+msgstr ""
+
+#: src/ui/login.rs:202 src/ui/login.rs:447
+msgid "The server did not accept the session. Try again."
+msgstr ""
+
+#: src/ui/login.rs:364
+msgid "The sign-in page could not be shown."
+msgstr ""
+
+#: src/ui/login.rs:395
+msgid "The sign-in page could not be shown. Is the WebView2 runtime installed?"
+msgstr ""
+
+#: src/ui/onboarding.rs:56 src/ui/onboarding.rs:127
+msgid "Welcome"
+msgstr ""
+
+#: src/ui/onboarding.rs:110
+msgid "Welcome to Mixtapes"
+msgstr ""
+
+#: src/ui/onboarding.rs:112
+msgid "Get Started"
+msgstr ""
+
+#: src/ui/onboarding.rs:120
+msgid "Skip Setup"
+msgstr ""
+
+#: src/ui/onboarding.rs:131
+msgid "Your YouTube Music Account"
+msgstr ""
+
+#: src/ui/onboarding.rs:131
+msgid ""
+"Sign in for your library, likes, playlists and uploads. Without an account "
+"you still get search, radio, downloads, and playlists and likes kept on this "
+"device."
+msgstr ""
+
+#: src/ui/onboarding.rs:134
+msgid "Sign in with Google"
+msgstr ""
+
+#: src/ui/onboarding.rs:143
+msgid "Continue Without an Account"
+msgstr ""
+
+#: src/ui/onboarding.rs:152 src/ui/preferences.rs:160 src/ui/window.rs:2359
+msgid "Account"
+msgstr ""
+
+#: src/ui/onboarding.rs:163 src/ui/preferences.rs:195 src/ui/preferences.rs:227
+#: src/ui/window.rs:553
+msgid "Signed in"
+msgstr ""
+
+#: src/ui/onboarding.rs:195
+msgid "Which Channel?"
+msgstr ""
+
+#: src/ui/onboarding.rs:195
+msgid ""
+"Your Google account has more than one channel. Pick the one whose library "
+"Mixtapes should show. You can change this under Preferences."
+msgstr ""
+
+#: src/ui/onboarding.rs:226 src/ui/preferences.rs:250
+msgid "Channel"
+msgstr ""
+
+#: src/ui/onboarding.rs:249 src/ui/preferences.rs:337
+msgid "Could not switch the channel"
+msgstr ""
+
+#: src/ui/onboarding.rs:260
+msgid "A Few Settings"
+msgstr ""
+
+#: src/ui/onboarding.rs:261
+msgid "Each of these lives under Preferences too."
+msgstr ""
+
+#: src/ui/onboarding.rs:265 src/ui/preferences.rs:701
+msgid "Discord Rich Presence"
+msgstr ""
+
+#: src/ui/onboarding.rs:265
+msgid "Show what you're listening to on your Discord profile"
+msgstr ""
+
+#: src/ui/onboarding.rs:279 src/ui/preferences.rs:958
+msgid "Scrobbling"
+msgstr ""
+
+#: src/ui/onboarding.rs:279
+msgid ""
+"Submit your plays to Last.fm or ListenBrainz. Connect an account under "
+"Preferences."
+msgstr ""
+
+#: src/ui/onboarding.rs:289 src/ui/preferences.rs:578
+msgid "Dynamic Cover Color"
+msgstr ""
+
+#: src/ui/onboarding.rs:289
+msgid "Match the accent color to the cover of the playing song"
+msgstr ""
+
+#: src/ui/onboarding.rs:302 src/ui/preferences.rs:563
+msgid "Blurred Cover Background"
+msgstr ""
+
+#: src/ui/onboarding.rs:302
+msgid "Use the cover as a blurred window background"
+msgstr ""
+
+#: src/ui/onboarding.rs:315 src/ui/preferences.rs:409
+msgid "Release Notes After Updates"
+msgstr ""
+
+#: src/ui/onboarding.rs:315 src/ui/preferences.rs:409
+msgid "Open what's new once for each new version"
+msgstr ""
+
+#: src/ui/onboarding.rs:323
+msgid "Continue"
+msgstr ""
+
+#: src/ui/onboarding.rs:334
+msgid "Settings"
+msgstr ""
+
+#: src/ui/onboarding.rs:338
+msgid "You're All Set"
+msgstr ""
+
+#: src/ui/onboarding.rs:338
+msgid ""
+"Preferences, keyboard shortcuts and the release notes are in the main menu."
+msgstr ""
+
+#: src/ui/onboarding.rs:340
+msgid "Start Listening"
+msgstr ""
+
+#: src/ui/onboarding.rs:347
+msgid "Mixtapes is free. If you like it, you can support my work."
+msgstr ""
+
+#. Translators: {title} is the name of a row of categories, like Genres
+#: src/ui/pages/all_moods.rs:68
+#, rust-format
+msgid "All {title}"
+msgstr ""
+
+#: src/ui/pages/artist.rs:165
+msgid "Artist Name"
+msgstr ""
+
+#: src/ui/pages/artist.rs:196
+msgid "Shuffle"
+msgstr ""
+
+#: src/ui/pages/artist.rs:212 src/ui/pages/artist.rs:1164
+msgid "Subscribe"
+msgstr ""
+
+#: src/ui/pages/artist.rs:227 src/ui/pages/artist.rs:472
+#: src/ui/pages/artist.rs:1180 src/ui/pages/playlist.rs:162
+#: src/ui/pages/playlist.rs:1279 src/ui/pages/playlist.rs:1300
+msgid "Read more"
+msgstr ""
+
+#: src/ui/pages/artist.rs:454 src/ui/pages/artist.rs:839
+#: src/ui/player_bar.rs:472
+msgid "Unknown Artist"
+msgstr ""
+
+#. Translators: {count} is a short number YouTube sends, like 1.2M
+#: src/ui/pages/artist.rs:492 src/ui/pages/library.rs:773
+#, rust-format
+msgid "{count} subscribers"
+msgstr ""
+
+#: src/ui/pages/artist.rs:545
+msgid "Top Songs"
+msgstr ""
+
+#: src/ui/pages/artist.rs:548 src/ui/pages/explore.rs:610
+#: src/ui/pages/library.rs:100 src/ui/pages/library.rs:108
+msgid "Albums"
+msgstr ""
+
+#: src/ui/pages/artist.rs:551
+msgid "Singles & EPs"
+msgstr ""
+
+#: src/ui/pages/artist.rs:554 src/ui/pages/explore.rs:615
+msgid "Videos"
+msgstr ""
+
+#: src/ui/pages/artist.rs:557 src/ui/pages/explore.rs:604
+#: src/ui/pages/explore.rs:605 src/ui/pages/library.rs:99
+msgid "Playlists"
+msgstr ""
+
+#: src/ui/pages/artist.rs:560
+msgid "Featured On"
+msgstr ""
+
+#: src/ui/pages/artist.rs:563
+msgid "Fans Might Also Like"
+msgstr ""
+
+#: src/ui/pages/artist.rs:648
+msgid "Load More"
+msgstr ""
+
+#: src/ui/pages/artist.rs:971 src/ui/pages/category.rs:258
+#: src/ui/pages/explore.rs:315
+msgid "View All"
+msgstr ""
+
+#: src/ui/pages/artist.rs:1009 src/ui/pages/category.rs:281
+#: src/ui/pages/discography.rs:251
+msgid "Copy JSON (Debug)"
+msgstr ""
+
+#: src/ui/pages/artist.rs:1160 src/ui/pages/library.rs:895
+msgid "Unsubscribe"
+msgstr ""
+
+#: src/ui/pages/artist.rs:1176 src/ui/pages/playlist.rs:1297
+msgid "Show less"
+msgstr ""
+
+#: src/ui/pages/artist.rs:1193
+msgid "Copy Banner URL"
+msgstr ""
+
+#: src/ui/pages/explore.rs:80
+msgid "Searching..."
+msgstr ""
+
+#: src/ui/pages/explore.rs:188 src/ui/pages/home.rs:83
+msgid "Loading…"
+msgstr ""
+
+#: src/ui/pages/explore.rs:219 src/ui/pages/home.rs:191
+msgid "You're offline"
+msgstr ""
+
+#: src/ui/pages/explore.rs:219
+msgid ""
+"Explore requires an internet connection.\n"
+"Your downloaded songs are still available."
+msgstr ""
+
+#: src/ui/pages/explore.rs:247
+msgid "Couldn't load Explore"
+msgstr ""
+
+#: src/ui/pages/explore.rs:248 src/ui/pages/home.rs:215
+msgid "Retry"
+msgstr ""
+
+#: src/ui/pages/explore.rs:274
+msgid "Podcasts"
+msgstr ""
+
+#: src/ui/pages/explore.rs:278
+msgid "For You"
+msgstr ""
+
+#: src/ui/pages/explore.rs:279
+msgid "Moods & Moments"
+msgstr ""
+
+#: src/ui/pages/explore.rs:280 src/ui/pages/explore.rs:360
+msgid "Genres"
+msgstr ""
+
+#: src/ui/pages/explore.rs:282
+msgid "Moods & Genres"
+msgstr ""
+
+#: src/ui/pages/explore.rs:285
+msgid "New Albums & Singles"
+msgstr ""
+
+#: src/ui/pages/explore.rs:286
+msgid "New Music Videos"
+msgstr ""
+
+#: src/ui/pages/explore.rs:287 src/ui/pages/explore.rs:378
+msgid "Trending"
+msgstr ""
+
+#: src/ui/pages/explore.rs:370
+msgid "Charts"
+msgstr ""
+
+#: src/ui/pages/explore.rs:379
+msgid "Daily"
+msgstr ""
+
+#: src/ui/pages/explore.rs:380
+msgid "Weekly"
+msgstr ""
+
+#: src/ui/pages/explore.rs:381
+msgid "Genre Charts"
+msgstr ""
+
+#: src/ui/pages/explore.rs:382
+msgid "Top Artists"
+msgstr ""
+
+#: src/ui/pages/explore.rs:536
+#, rust-format
+msgid "Search failed: {err}"
+msgstr ""
+
+#: src/ui/pages/explore.rs:559
+msgid "No results"
+msgstr ""
+
+#: src/ui/pages/explore.rs:559
+#, rust-format
+msgid "Nothing found for \"{query}\""
+msgstr ""
+
+#: src/ui/pages/explore.rs:584
+msgid "Main"
+msgstr ""
+
+#: src/ui/pages/explore.rs:587
+msgid "Top Result"
+msgstr ""
+
+#: src/ui/pages/explore.rs:593
+msgid "Relevant Results"
+msgstr ""
+
+#: src/ui/pages/explore.rs:596 src/ui/pages/explore.rs:597
+msgid "Songs"
+msgstr ""
+
+#: src/ui/pages/explore.rs:600 src/ui/pages/explore.rs:601
+#: src/ui/pages/library.rs:101 src/ui/pages/library.rs:109
+msgid "Artists"
+msgstr ""
+
+#: src/ui/pages/explore.rs:604
+msgid "Community Playlists"
+msgstr ""
+
+#: src/ui/pages/explore.rs:608
+msgid "Other results"
+msgstr ""
+
+#: src/ui/pages/explore.rs:608
+msgid "Other"
+msgstr ""
+
+#: src/ui/pages/explore.rs:618
+msgid "More results"
+msgstr ""
+
+#: src/ui/pages/history.rs:20
+msgid "Your listening history will appear here after you play something."
+msgstr ""
+
+#: src/ui/pages/history.rs:21
+msgid ""
+"Songs you play without signing in appear here. They stay on this device."
+msgstr ""
+
+#: src/ui/pages/history.rs:71 src/ui/pages/history.rs:110 src/ui/window.rs:1316
+#: src/ui/window.rs:2374
+msgid "Listening History"
+msgstr ""
+
+#: src/ui/pages/history.rs:88
+msgid "Loading history..."
+msgstr ""
+
+#: src/ui/pages/history.rs:182
+msgid "History requires an internet connection."
+msgstr ""
+
+#: src/ui/pages/history.rs:222
+msgid "Earlier"
+msgstr ""
+
+#: src/ui/pages/history.rs:339
+msgid "History"
+msgstr ""
+
+#: src/ui/pages/history.rs:355 src/ui/pages/history.rs:366
+msgid "Remove from History"
+msgstr ""
+
+#: src/ui/pages/history.rs:422
+msgid "Yesterday"
+msgstr ""
+
+#: src/ui/pages/history.rs:423
+msgid "This week"
+msgstr ""
+
+#: src/ui/pages/history.rs:424
+msgid "Last week"
+msgstr ""
+
+#: src/ui/pages/home.rs:42
+msgid "Quick picks"
+msgstr ""
+
+#: src/ui/pages/home.rs:90 src/ui/window.rs:159
+msgid "Home"
+msgstr ""
+
+#: src/ui/pages/home.rs:90
+msgid "Your music feed will appear here."
+msgstr ""
+
+#: src/ui/pages/home.rs:191
+msgid ""
+"Home requires an internet connection.\n"
+"Your downloaded songs are still available."
+msgstr ""
+
+#: src/ui/pages/home.rs:204
+msgid "Couldn't load Home"
+msgstr ""
+
+#: src/ui/pages/home.rs:204
+msgid "Try refreshing in a moment."
+msgstr ""
+
+#: src/ui/pages/library.rs:74 src/ui/pages/library.rs:105 src/ui/window.rs:165
+msgid "Library"
+msgstr ""
+
+#: src/ui/pages/library.rs:75 src/ui/pages/library.rs:114
+msgid "Uploads"
+msgstr ""
+
+#: src/ui/pages/library.rs:84
+msgid "All Uploaded Songs"
+msgstr ""
+
+#: src/ui/pages/library.rs:86 src/ui/upload_queue.rs:74 src/ui/window.rs:2373
+msgid "Upload Songs"
+msgstr ""
+
+#: src/ui/pages/library.rs:95 src/ui/playlist_ops.rs:54
+msgid "New Playlist"
+msgstr ""
+
+#: src/ui/pages/library.rs:112
+msgid "No uploaded music"
+msgstr ""
+
+#: src/ui/pages/library.rs:119
+msgid "Refreshing Library..."
+msgstr ""
+
+#: src/ui/pages/library.rs:120
+msgid "Loading uploads..."
+msgstr ""
+
+#: src/ui/pages/library.rs:450
+msgid "Switch to list view"
+msgstr ""
+
+#: src/ui/pages/library.rs:453
+msgid "Switch to grid view"
+msgstr ""
+
+#: src/ui/pages/library.rs:701 src/ui/preferences.rs:1029
+msgid "Downloads"
+msgstr ""
+
+#: src/ui/pages/library.rs:701
+msgid "Downloaded songs"
+msgstr ""
+
+#: src/ui/pages/library.rs:806
+msgid "Automatic Playlist"
+msgstr ""
+
+#: src/ui/pages/library.rs:890 src/ui/pages/library.rs:908
+#: src/ui/pages/playlist.rs:1713
+msgid "Delete Playlist"
+msgstr ""
+
+#: src/ui/pages/library.rs:904
+msgid "Delete Album"
+msgstr ""
+
+#: src/ui/pages/library.rs:911 src/ui/pages/playlist.rs:1705
+msgid "Remove from Library"
+msgstr ""
+
+#: src/ui/pages/library.rs:920 src/ui/pages/playlist.rs:1842
+msgid "Removed from library"
+msgstr ""
+
+#: src/ui/pages/library.rs:925 src/ui/pages/playlist.rs:1848
+msgid "Failed to remove"
+msgstr ""
+
+#: src/ui/pages/library.rs:960 src/ui/pages/playlist.rs:2207
+msgid "Delete Upload?"
+msgstr ""
+
+#: src/ui/pages/library.rs:961 src/ui/pages/playlist.rs:2207
+#, rust-format
+msgid ""
+"Are you sure you want to delete \"{title}\"?\n"
+"This cannot be undone."
+msgstr ""
+
+#: src/ui/pages/library.rs:964 src/ui/pages/library.rs:1002
+#: src/ui/pages/playlist.rs:2209 src/ui/pages/playlist.rs:2381
+msgid "Delete"
+msgstr ""
+
+#: src/ui/pages/library.rs:981
+msgid "Upload deleted"
+msgstr ""
+
+#: src/ui/pages/library.rs:986
+msgid "Failed to delete the upload"
+msgstr ""
+
+#: src/ui/pages/library.rs:998 src/ui/pages/playlist.rs:2379
+msgid "Delete Playlist?"
+msgstr ""
+
+#: src/ui/pages/library.rs:999 src/ui/pages/playlist.rs:2379
+#, rust-format
+msgid ""
+"Are you sure you want to delete \"{title}\"?\n"
+"This action cannot be undone."
+msgstr ""
+
+#: src/ui/pages/library.rs:1014 src/ui/pages/library.rs:1025
+msgid "Playlist deleted"
+msgstr ""
+
+#: src/ui/pages/library.rs:1030
+msgid "Failed to delete the playlist"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:35
+msgid "Default"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:35
+msgid "Title (A-Z)"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:35
+msgid "Artist (A-Z)"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:35
+msgid "Album (A-Z)"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:35
+msgid "Duration"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:35
+msgid "Most viewed"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:35
+msgid "Recently added"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:159
+msgid "Playlist Title"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:179
+msgid "More Options"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:194
+msgid "Toggle sort direction"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:198
+msgid "Select multiple songs"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:210
+#, rust-format
+msgid "{n} selected"
+msgid_plural "{n} selected"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/pages/playlist.rs:212
+msgid "Play selected"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:214
+msgid "Add selected to playlist"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:216
+msgid "Remove selected from playlist"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:218 src/ui/player_bar.rs:233
+msgid "More"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:220 src/ui/pages/playlist.rs:2185
+msgid "Select All"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:221 src/ui/pages/playlist.rs:2187
+msgid "Deselect All"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:225
+msgid "Cancel selection"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:229
+msgid "This playlist has no songs"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:722 src/ui/pages/playlist.rs:723
+msgid "Loading tracks..."
+msgstr ""
+
+#: src/ui/pages/playlist.rs:771
+msgid "Playlist Not Found"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:972
+msgid "Offline"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:985 src/ui/pages/playlist.rs:993
+msgid "Offline - no cached data"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:987
+msgid "This playlist hasn't been cached for offline use"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1047
+msgid "Error Loading Playlist"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1047
+msgid "Error"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1062
+msgid "Chart Playlist"
+msgstr ""
+
+#. Translators: the owner shown on the Liked Music list, meaning the listener
+#: src/ui/pages/playlist.rs:1095
+msgid "You"
+msgstr ""
+
+#. Translators: shown in place of the song count on an endless radio list
+#: src/ui/pages/playlist.rs:1107
+msgid "Infinite"
+msgstr ""
+
+#. Translators: noun, an album the listener uploaded to YouTube Music
+#: src/ui/pages/playlist.rs:1131
+msgid "Upload"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1154
+msgid "Unknown Playlist"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1601
+msgid "This song isn't downloaded"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1656
+msgid "No downloaded songs to play"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1671
+msgid "No downloaded songs to shuffle"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1696
+msgid "Add all to Playlist…"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1707
+msgid "Add to Library"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1710
+msgid "Download All"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1712 src/ui/pages/playlist.rs:2356
+#: src/ui/pages/playlist.rs:2437
+msgid "Edit Playlist"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1755
+msgid "Downloads need an internet connection"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1782
+msgid "Link copied to clipboard"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1842
+msgid "Saved to library"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1848
+msgid "Failed to save"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:1933
+#, rust-format
+msgid "{n} of {total} selected"
+msgid_plural "{n} of {total} selected"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/pages/playlist.rs:1973 src/ui/pages/playlist.rs:1990
+#, rust-format
+msgid "Removed {n} track"
+msgid_plural "Removed {n} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/pages/playlist.rs:1997
+msgid "Failed to remove tracks"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2019
+#, rust-format
+msgid "Copied debug data for {n} track"
+msgid_plural "Copied debug data for {n} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/pages/playlist.rs:2108
+#, rust-format
+msgid "Only {ranked} of {n} song has view counts — the rest stay at the end"
+msgid_plural ""
+"Only {ranked} of {n} songs have view counts — the rest stay at the end"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/pages/playlist.rs:2110
+#, rust-format
+msgid "Only {ranked} of {n} song has add dates — the rest stay at the end"
+msgid_plural ""
+"Only {ranked} of {n} songs have add dates — the rest stay at the end"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/pages/playlist.rs:2117
+msgid "View counts need an internet connection"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2118
+msgid "View counts aren't available for this list"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2119
+msgid "Add dates need an internet connection"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2120
+msgid "Add dates aren't available for this list"
+msgstr ""
+
+#. Translators: {n} is the number of selected songs
+#: src/ui/pages/playlist.rs:2164
+#, rust-format
+msgid "Remove {n} from Playlist"
+msgid_plural "Remove {n} from Playlist"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/pages/playlist.rs:2168
+msgid "Remove from Playlist"
+msgstr ""
+
+#. Translators: stands in for a missing song title in "Are you sure you want to delete "{title}"?" and "Deleted {title}"
+#: src/ui/pages/playlist.rs:2175
+msgid "this song"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2176
+msgid "Delete Upload"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2183
+msgid "Deselect This"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2183
+msgid "Select This"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2190
+msgid "Copy Selection Data (Debug)"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2230
+#, rust-format
+msgid "Deleted {title}"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2278 src/ui/window.rs:1303
+msgid "History requires an internet connection"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2282
+msgid "Refresh requires an internet connection"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2306
+#, rust-format
+msgid "{n} song available offline"
+msgid_plural "{n} songs available offline"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/pages/playlist.rs:2307 src/ui/window.rs:1122 src/ui/window.rs:2184
+msgid "Downloaded Songs"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2350
+msgid "Copy Cover URL"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2442
+msgid "Save"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2446 src/ui/playlist_ops.rs:62
+msgid "Playlist Details"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2448 src/ui/playlist_ops.rs:63
+msgid "Title"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2450 src/ui/playlist_ops.rs:64
+msgid "Description"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2452 src/ui/playlist_ops.rs:65
+msgid "Visibility"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2453 src/ui/pages/playlist.rs:2730
+#: src/ui/playlist_ops.rs:65
+msgid "Public"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2453 src/ui/pages/playlist.rs:2731
+#: src/ui/playlist_ops.rs:65
+msgid "Private"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2453 src/ui/pages/playlist.rs:2732
+#: src/ui/playlist_ops.rs:65
+msgid "Unlisted"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2457
+msgid "Playlist Cover"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2457
+msgid "No file selected"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2461
+msgid "Choose File..."
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2468
+msgid "Images"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2473
+msgid "Select Cover Image"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2499
+#, rust-format
+msgid "Cropped PNG: {basename}"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2756 src/ui/pages/playlist.rs:2771
+#, rust-format
+msgid "{hours} hr {minutes} min"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2756
+#, rust-format
+msgid "{minutes} min {seconds} sec"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2762
+#, rust-format
+msgid "{n} episode"
+msgid_plural "{n} episodes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/pages/playlist.rs:2771
+#, rust-format
+msgid "{minutes} min"
+msgstr ""
+
+#: src/ui/pages/playlist.rs:2896
+msgid "Failed to fetch playlist after retries"
+msgstr ""
+
+#: src/ui/player_bar.rs:173
+msgid "Mute"
+msgstr ""
+
+#: src/ui/player_bar.rs:215
+msgid "Toggle Queue"
+msgstr ""
+
+#: src/ui/player_bar.rs:239 src/ui/player_bar.rs:344
+msgid "Expand player"
+msgstr ""
+
+#. Translators: shown in place of the time while a live stream plays.
+#: src/ui/player_bar.rs:581 src/ui/widgets/transport.rs:160
+msgid "LIVE"
+msgstr ""
+
+#: src/ui/playlist_ops.rs:26
+msgid "Already in that playlist"
+msgstr ""
+
+#: src/ui/playlist_ops.rs:27 src/ui/playlist_ops.rs:39
+msgid "Added to playlist"
+msgstr ""
+
+#: src/ui/playlist_ops.rs:28 src/ui/playlist_ops.rs:39
+#, rust-format
+msgid "Added {n} track to playlist"
+msgid_plural "Added {n} tracks to playlist"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/playlist_ops.rs:42
+msgid "Failed to add to playlist"
+msgstr ""
+
+#: src/ui/playlist_ops.rs:57
+msgid "Create"
+msgstr ""
+
+#: src/ui/playlist_ops.rs:67
+msgid "Save To"
+msgstr ""
+
+#: src/ui/playlist_ops.rs:67
+msgid "This device"
+msgstr ""
+
+#: src/ui/playlist_ops.rs:118
+msgid "Could not create the playlist"
+msgstr ""
+
+#: src/ui/preferences.rs:21
+msgid "Default (recommended)"
+msgstr ""
+
+#: src/ui/preferences.rs:21
+msgid "Legacy GL"
+msgstr ""
+
+#: src/ui/preferences.rs:21
+msgid "Cairo (Software)"
+msgstr ""
+
+#: src/ui/preferences.rs:22
+msgid "Immediately"
+msgstr ""
+
+#: src/ui/preferences.rs:22
+msgid "After 30 seconds"
+msgstr ""
+
+#: src/ui/preferences.rs:22
+msgid "Never"
+msgstr ""
+
+#: src/ui/preferences.rs:23
+msgid "Opus (smallest)"
+msgstr ""
+
+#: src/ui/preferences.rs:23
+msgid "MP3 (universal)"
+msgstr ""
+
+#: src/ui/preferences.rs:23
+msgid "M4A (Apple)"
+msgstr ""
+
+#: src/ui/preferences.rs:23
+msgid "FLAC (lossless)"
+msgstr ""
+
+#: src/ui/preferences.rs:23
+msgid "OGG (Vorbis)"
+msgstr ""
+
+#: src/ui/preferences.rs:24
+msgid "Artist / Album / Song"
+msgstr ""
+
+#: src/ui/preferences.rs:24
+msgid "Artist / Song"
+msgstr ""
+
+#: src/ui/preferences.rs:24
+msgid "No folders"
+msgstr ""
+
+#: src/ui/preferences.rs:25
+msgid "App Name (Mixtapes)"
+msgstr ""
+
+#: src/ui/preferences.rs:25
+msgid "Song Title"
+msgstr ""
+
+#: src/ui/preferences.rs:33 src/ui/window.rs:2737
+msgid "General"
+msgstr ""
+
+#: src/ui/preferences.rs:43
+msgid "Appearance"
+msgstr ""
+
+#: src/ui/preferences.rs:52
+msgid "Services"
+msgstr ""
+
+#: src/ui/preferences.rs:57
+msgid "Advanced"
+msgstr ""
+
+#: src/ui/preferences.rs:167
+msgid "Sign Out"
+msgstr ""
+
+#: src/ui/preferences.rs:167 src/ui/window.rs:2383
+msgid "Sign In"
+msgstr ""
+
+#: src/ui/preferences.rs:188 src/ui/window.rs:2299 src/ui/window.rs:2412
+msgid "Not signed in"
+msgstr ""
+
+#: src/ui/preferences.rs:189
+msgid ""
+"Sign in to YouTube Music to access your library. Playlists and likes stay on "
+"this device until then."
+msgstr ""
+
+#: src/ui/preferences.rs:197 src/ui/preferences.rs:229
+msgid "YouTube Music account"
+msgstr ""
+
+#: src/ui/preferences.rs:250
+msgid "Loading channels…"
+msgstr ""
+
+#: src/ui/preferences.rs:260
+msgid "This account has no other channels"
+msgstr ""
+
+#: src/ui/preferences.rs:266
+msgid "Could not load the channels"
+msgstr ""
+
+#: src/ui/preferences.rs:273
+msgid "Google account"
+msgstr ""
+
+#: src/ui/preferences.rs:331
+#, rust-format
+msgid "Now using {name}"
+msgstr ""
+
+#: src/ui/preferences.rs:346 src/ui/window.rs:2747
+msgid "Playback"
+msgstr ""
+
+#: src/ui/preferences.rs:348
+msgid "Background Playback"
+msgstr ""
+
+#: src/ui/preferences.rs:348
+msgid "Allow music to keep playing when the window is closed"
+msgstr ""
+
+#: src/ui/preferences.rs:355
+msgid "Restore Queue on Startup"
+msgstr ""
+
+#: src/ui/preferences.rs:355
+msgid "Come back to the queue, song and position you left"
+msgstr ""
+
+#: src/ui/preferences.rs:356
+msgid "Play on Startup"
+msgstr ""
+
+#: src/ui/preferences.rs:356
+msgid "Start the restored song as soon as the app opens"
+msgstr ""
+
+#: src/ui/preferences.rs:376
+msgid "Record Plays to History"
+msgstr ""
+
+#: src/ui/preferences.rs:376
+msgid ""
+"When a song counts as played, for YouTube Music or, signed out, for Home on "
+"this device"
+msgstr ""
+
+#: src/ui/preferences.rs:389
+msgid "Force Offline Mode"
+msgstr ""
+
+#: src/ui/preferences.rs:389
+msgid "Disable all network requests and use only downloaded content"
+msgstr ""
+
+#: src/ui/preferences.rs:407
+msgid "Updates"
+msgstr ""
+
+#: src/ui/preferences.rs:416
+msgid "Donation Prompts"
+msgstr ""
+
+#: src/ui/preferences.rs:416
+msgid "Show the Ko-fi and GitHub Sponsors banner under the release notes"
+msgstr ""
+
+#: src/ui/preferences.rs:434
+msgid "System Default"
+msgstr ""
+
+#: src/ui/preferences.rs:438
+msgid "Language"
+msgstr ""
+
+#: src/ui/preferences.rs:438
+msgid "Applies on next launch."
+msgstr ""
+
+#: src/ui/preferences.rs:455
+msgid "Troubleshooting"
+msgstr ""
+
+#: src/ui/preferences.rs:461
+msgid "Renderer"
+msgstr ""
+
+#: src/ui/preferences.rs:461
+msgid "Switch if you hit GPU-related crashes. Applies on next launch."
+msgstr ""
+
+#: src/ui/preferences.rs:472
+msgid "Enable Debug Logs"
+msgstr ""
+
+#: src/ui/preferences.rs:472
+msgid "Print diagnostic information to the terminal"
+msgstr ""
+
+#: src/ui/preferences.rs:479
+msgid "Show format, protocol and seek range of the current stream"
+msgstr ""
+
+#: src/ui/preferences.rs:495
+msgid ""
+"Sign out, clear settings and caches, and run the setup again. Downloads and "
+"playlists kept on this device stay."
+msgstr ""
+
+#: src/ui/preferences.rs:497
+msgid "Reset Mixtapes"
+msgstr ""
+
+#: src/ui/preferences.rs:515
+msgid "Reset Mixtapes?"
+msgstr ""
+
+#: src/ui/preferences.rs:516
+msgid ""
+"This signs you out, clears your settings and every cache, and restarts into "
+"the setup. Downloaded songs and the playlists and likes kept on this device "
+"stay."
+msgstr ""
+
+#: src/ui/preferences.rs:519
+msgid "Reset and Restart"
+msgstr ""
+
+#: src/ui/preferences.rs:552
+msgid "Reset done. Start Mixtapes again to run the setup."
+msgstr ""
+
+#: src/ui/preferences.rs:561
+msgid "Theme"
+msgstr ""
+
+#: src/ui/preferences.rs:563
+msgid "Use the current track's cover as a blurred window background"
+msgstr ""
+
+#: src/ui/preferences.rs:579
+msgid "Match the app accent color to the current track's cover"
+msgstr ""
+
+#: src/ui/preferences.rs:584
+msgid "Tinted Background"
+msgstr ""
+
+#: src/ui/preferences.rs:584
+msgid "Tint the app background with accent color"
+msgstr ""
+
+#: src/ui/preferences.rs:613
+msgid "Layout"
+msgstr ""
+
+#: src/ui/preferences.rs:615
+msgid "Queue on the Right"
+msgstr ""
+
+#: src/ui/preferences.rs:615
+msgid "Place the queue sidebar on the right edge of the window"
+msgstr ""
+
+#: src/ui/preferences.rs:633
+msgid "Visualizer"
+msgstr ""
+
+#: src/ui/preferences.rs:633
+msgid "Bar visualizer beneath the cover art in the expanded player"
+msgstr ""
+
+#: src/ui/preferences.rs:639
+msgid "Enable Visualizer"
+msgstr ""
+
+#: src/ui/preferences.rs:639
+msgid "Show audio bars beneath the cover art"
+msgstr ""
+
+#: src/ui/preferences.rs:640
+msgid "Bar Count"
+msgstr ""
+
+#: src/ui/preferences.rs:640
+msgid "Number of bars in the visualizer (more = finer)"
+msgstr ""
+
+#: src/ui/preferences.rs:641
+msgid "Smoothing"
+msgstr ""
+
+#: src/ui/preferences.rs:641
+msgid "Higher = tighter spikes, lower = peaks bleed into neighbors"
+msgstr ""
+
+#: src/ui/preferences.rs:703
+msgid "Connection Status"
+msgstr ""
+
+#: src/ui/preferences.rs:709
+msgid "Enable Discord RPC"
+msgstr ""
+
+#: src/ui/preferences.rs:709
+msgid "Show what you're listening to on Discord"
+msgstr ""
+
+#: src/ui/preferences.rs:712
+msgid "Status Display"
+msgstr ""
+
+#: src/ui/preferences.rs:712
+msgid "What appears in the status line under your name"
+msgstr ""
+
+#: src/ui/preferences.rs:713
+msgid "Hide on Pause"
+msgstr ""
+
+#: src/ui/preferences.rs:713
+msgid "Hide Discord RPC when music is paused"
+msgstr ""
+
+#: src/ui/preferences.rs:714
+msgid "Show Play/Pause Icon"
+msgstr ""
+
+#: src/ui/preferences.rs:714
+msgid "Display a small play or pause indicator on the album art"
+msgstr ""
+
+#: src/ui/preferences.rs:792
+msgid "This build ships without Last.fm API credentials"
+msgstr ""
+
+#: src/ui/preferences.rs:793 src/ui/preferences.rs:809
+#: src/ui/preferences.rs:931
+msgid "Connect"
+msgstr ""
+
+#: src/ui/preferences.rs:800
+#, rust-format
+msgid "Connected as {name}"
+msgstr ""
+
+#: src/ui/preferences.rs:802
+msgid "Disconnect"
+msgstr ""
+
+#: src/ui/preferences.rs:807
+msgid "Not connected"
+msgstr ""
+
+#: src/ui/preferences.rs:816
+#, rust-format
+msgid "{n} play saved while offline, retried automatically"
+msgid_plural "{n} plays saved while offline, retried automatically"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/preferences.rs:827
+msgid "Could not open your browser"
+msgstr ""
+
+#. Translators: {service} is Last.fm or ListenBrainz.
+#: src/ui/preferences.rs:838
+#, rust-format
+msgid "Disconnected from {service}"
+msgstr ""
+
+#: src/ui/preferences.rs:868
+msgid "Authorize Mixtapes"
+msgstr ""
+
+#: src/ui/preferences.rs:869
+msgid ""
+"Approve access in the browser tab that just opened. This closes on its own "
+"once Last.fm confirms."
+msgstr ""
+
+#: src/ui/preferences.rs:896
+msgid "Connected to Last.fm"
+msgstr ""
+
+#: src/ui/preferences.rs:896
+#, rust-format
+msgid "Scrobbling to Last.fm as {name}"
+msgstr ""
+
+#: src/ui/preferences.rs:901
+msgid "Last.fm authorization timed out"
+msgstr ""
+
+#: src/ui/preferences.rs:908
+msgid "Connect ListenBrainz"
+msgstr ""
+
+#: src/ui/preferences.rs:909
+msgid "Paste the user token from your ListenBrainz settings."
+msgstr ""
+
+#: src/ui/preferences.rs:913
+msgid "User Token"
+msgstr ""
+
+#: src/ui/preferences.rs:916
+msgid "Get Your Token"
+msgstr ""
+
+#: src/ui/preferences.rs:946
+msgid "Connected to ListenBrainz"
+msgstr ""
+
+#: src/ui/preferences.rs:946
+#, rust-format
+msgid "Scrobbling to ListenBrainz as {name}"
+msgstr ""
+
+#: src/ui/preferences.rs:958
+msgid "Submit the tracks you play to Last.fm and ListenBrainz"
+msgstr ""
+
+#: src/ui/preferences.rs:960
+msgid "Enable Scrobbling"
+msgstr ""
+
+#: src/ui/preferences.rs:960
+msgid "Submit a play once you've heard half a track, or four minutes"
+msgstr ""
+
+#: src/ui/preferences.rs:970
+msgid "Send \"Now Playing\""
+msgstr ""
+
+#: src/ui/preferences.rs:970
+msgid "Show the current track on your profile while it plays"
+msgstr ""
+
+#: src/ui/preferences.rs:988
+msgid "Queued Listens"
+msgstr ""
+
+#: src/ui/preferences.rs:1010
+msgid "Reorganizing downloads..."
+msgstr ""
+
+#: src/ui/preferences.rs:1017
+msgid "Downloads already organized"
+msgstr ""
+
+#: src/ui/preferences.rs:1018
+#, rust-format
+msgid "Reorganized {n} file(s)"
+msgid_plural "Reorganized {n} file(s)"
+msgstr[0] ""
+msgstr[1] ""
+
+#. Translators: {n} files were moved, {errors} is how many were left where they are.
+#: src/ui/preferences.rs:1020
+#, rust-format
+msgid "Reorganized {n} file(s); {errors} skipped"
+msgid_plural "Reorganized {n} file(s); {errors} skipped"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/preferences.rs:1033
+#, rust-format
+msgid "Songs are saved to {folder}"
+msgstr ""
+
+#: src/ui/preferences.rs:1034
+msgid "Audio Format"
+msgstr ""
+
+#: src/ui/preferences.rs:1049
+msgid "Folder Structure"
+msgstr ""
+
+#: src/ui/preferences.rs:1049
+msgid "How new downloads are organized on disk"
+msgstr ""
+
+#: src/ui/preferences.rs:1060
+msgid ""
+"Structure saved. Existing files will be reorganized after downloads finish."
+msgstr ""
+
+#: src/ui/preferences.rs:1066
+msgid "Use Songs Subfolder"
+msgstr ""
+
+#: src/ui/preferences.rs:1066
+msgid "Place downloads inside a Songs/ subfolder within the music directory"
+msgstr ""
+
+#: src/ui/preferences.rs:1073
+msgid ""
+"Subfolder setting saved. Existing files will be reorganized after downloads "
+"finish."
+msgstr ""
+
+#: src/ui/preferences.rs:1079
+msgid "Download Liked Songs"
+msgstr ""
+
+#: src/ui/preferences.rs:1079
+msgid "Download a song when you like it"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:17
+msgid "Word-level timing. Best coverage for Western pop"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:18
+msgid "Word-level timing. Mirrors Apple's database"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:19
+msgid "Word-level timing. Strong on Japanese tracks"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:20
+msgid "Line-synced. Romanization and translation for CJK"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:21
+msgid "Line-synced. Large community LRC database"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:22
+msgid "Plain text, no timing. Always available when signed in"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:28
+msgid "Quality-aware"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:28
+msgid "Strict"
+msgstr ""
+
+#. Translators: the choices for the second lyric line. "Background" is the background vocals of a song.
+#: src/ui/preferences_lyrics.rs:30 src/ui/preferences_lyrics.rs:31
+#: src/ui/widgets/lyrics_view.rs:36
+msgid "Off"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:30 src/ui/widgets/lyrics_view.rs:36
+msgid "Auto"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:30 src/ui/widgets/lyrics_view.rs:36
+msgid "Romanization"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:30 src/ui/widgets/lyrics_view.rs:36
+msgid "Translation"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:30
+msgid "Background"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:31
+msgid "Subtle"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:31
+msgid "Full"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:50
+msgid "Move up"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:50
+msgid "Move down"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:96
+msgid "Keep at least one lyrics provider enabled"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:130
+msgid "Search Queue"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:130
+msgid "Tried from the top down. Switch one off to skip it."
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:139
+msgid "Matching"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:140
+msgid ""
+"Quality-aware keeps looking for synced lyrics before settling for plain "
+"text. Strict takes the first hit of any kind."
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:145
+msgid "When to Stop Searching"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:159
+msgid "Second Line"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:160
+msgid ""
+"An extra line under each lyric. Auto picks a romanization for non-Latin "
+"scripts and background vocals otherwise. What's available depends on the "
+"provider."
+msgstr ""
+
+#. Translators: row title, followed by what the second lyric line shows: Off, Auto, Romanization, Translation or Background.
+#: src/ui/preferences_lyrics.rs:165
+msgid "Show"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:180
+msgid "Effects"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:181
+msgid ""
+"Subtle fades each word in over the time it's actually held and grows the "
+"active line. Full adds a glow on the active line and blurs the lines "
+"furthest from it."
+msgstr ""
+
+#. Translators: how strong the lyric effects are: Off, Subtle or Full.
+#: src/ui/preferences_lyrics.rs:186
+msgid "Level"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:189
+msgid "Emulate Word Timing"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:189
+msgid ""
+"On sources with no word timing, move the highlight across the line instead "
+"of lighting the whole line at once"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:202
+msgid "Text Size"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:203
+msgid ""
+"Resting size of the lyric column, and how much bigger the line being sung is "
+"drawn. The active line is scaled when it is painted, so growing it never "
+"changes the row's height or disturbs the scrolling."
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:207
+msgid "Lyrics Size"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:219
+msgid "Active Line Size"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:244
+msgid "Queue changes only apply to tracks that aren't cached yet"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:245
+msgid "Clear Cached Lyrics"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:254
+#, rust-format
+msgid "Cleared {n} cached track(s)"
+msgid_plural "Cleared {n} cached track(s)"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/preferences_lyrics.rs:254
+msgid "No cached lyrics to clear"
+msgstr ""
+
+#: src/ui/queue_panel.rs:101
+msgid "Shuffle Queue"
+msgstr ""
+
+#: src/ui/queue_panel.rs:124
+msgid "Repeat Mode"
+msgstr ""
+
+#: src/ui/queue_panel.rs:152
+msgid "Add all to Playlist"
+msgstr ""
+
+#: src/ui/queue_panel.rs:156
+msgid "Clear Queue"
+msgstr ""
+
+#: src/ui/queue_panel.rs:202
+msgid "Go to the Playing Song"
+msgstr ""
+
+#: src/ui/queue_panel.rs:588
+msgid "Remove from Queue"
+msgstr ""
+
+#: src/ui/queue_panel.rs:669
+#, rust-format
+msgid "{n} track"
+msgid_plural "{n} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+#. Translators: the queue's track count and its length, {m} is minutes.
+#: src/ui/queue_panel.rs:671
+#, rust-format
+msgid "{n} track · {m} min"
+msgid_plural "{n} tracks · {m} min"
+msgstr[0] ""
+msgstr[1] ""
+
+#. Translators: the queue's track count and its length, {h} is hours and {m} is minutes.
+#: src/ui/queue_panel.rs:673
+#, rust-format
+msgid "{n} track · {h} h {m} min"
+msgid_plural "{n} tracks · {h} h {m} min"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/release_notes.rs:102
+#, rust-format
+msgid "What's New in {version}?"
+msgstr ""
+
+#: src/ui/release_notes.rs:105
+#, rust-format
+msgid "Released on {date}"
+msgstr ""
+
+#: src/ui/release_notes.rs:111
+msgid "Changes"
+msgstr ""
+
+#: src/ui/release_notes.rs:120
+#, rust-format
+msgid "…and {n} more change or fix, in the full release notes."
+msgid_plural "…and {n} more changes and fixes, in the full release notes."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/release_notes.rs:124
+msgid "Thanks for reading, and have a great day!"
+msgstr ""
+
+#: src/ui/release_notes.rs:126
+msgid "Full Release Notes"
+msgstr ""
+
+#: src/ui/release_notes.rs:141 src/ui/window.rs:2187
+msgid "What's New"
+msgstr ""
+
+#: src/ui/release_notes.rs:172
+msgid "This version of Mixtapes was made possible by users like you!"
+msgstr ""
+
+#: src/ui/release_notes.rs:173
+msgid ""
+"I love making Mixtapes and my other projects, but I can't do it without "
+"help. Support my work with a donation:"
+msgstr ""
+
+#: src/ui/upload_queue.rs:64
+msgid "Sign in to upload songs"
+msgstr ""
+
+#: src/ui/upload_queue.rs:68
+msgid "Audio Files"
+msgstr ""
+
+#. Translators: status of a file waiting for its turn to upload.
+#: src/ui/upload_queue.rs:106
+msgid "Waiting"
+msgstr ""
+
+#: src/ui/upload_queue.rs:138
+msgid "Uploading..."
+msgstr ""
+
+#: src/ui/upload_queue.rs:151
+msgid "Uploaded"
+msgstr ""
+
+#: src/ui/widgets/add_to_playlist.rs:122
+msgid "Search playlists…"
+msgstr ""
+
+#: src/ui/widgets/add_to_playlist.rs:141
+msgid "No playlists"
+msgstr ""
+
+#: src/ui/widgets/add_to_playlist.rs:150
+msgid "New Playlist…"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:36
+msgid "Background vocals"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:189
+msgid "Word by word"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:190
+msgid "word by word"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:191
+msgid "Line by line"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:192
+msgid "line by line"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:193
+msgid "No timing"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:194
+msgid "no timing"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:216
+msgid "Back to sources"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:255 src/ui/widgets/lyrics_view.rs:661
+msgid "No lyrics"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:255
+msgid "No lyrics found for this track."
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:280
+msgid "Choose lyrics source"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:291
+msgid "Lyrics source"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:301 src/ui/widgets/lyrics_view.rs:1312
+#: src/ui/widgets/lyrics_view.rs:1355
+msgid "Searching…"
+msgstr ""
+
+#. Translators: heading over the choice of what the smaller line under each lyric shows.
+#: src/ui/widgets/lyrics_view.rs:308
+msgid "Second line"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:321
+msgid "Song title"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:323
+msgid "Search by name"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:549 src/ui/widgets/lyrics_view.rs:639
+msgid "Not playing"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:639
+msgid "Play a song to see lyrics."
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:661
+msgid "Nothing matched automatically. Try another source, or search by name."
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:679
+#, rust-format
+msgid "Lyrics source: {source}"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:1163
+msgid "Search by name…"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:1170
+msgid "Use automatic choice"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:1171
+#, rust-format
+msgid "Pinned to {preferred}"
+msgstr ""
+
+#. Translators: marks the lyrics source the listener chose to keep for this song.
+#: src/ui/widgets/lyrics_view.rs:1186
+msgid "Pinned"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:1192
+#, rust-format
+msgid "Other matches from {source}"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:1330
+#, rust-format
+msgid "No other matches from {source}"
+msgstr ""
+
+#: src/ui/widgets/lyrics_view.rs:1370
+msgid "Nothing found"
+msgstr ""
+
+#: src/ui/window.rs:138 src/ui/window.rs:2753
+msgid "Search"
+msgstr ""
+
+#: src/ui/window.rs:143
+msgid "Upload Progress"
+msgstr ""
+
+#: src/ui/window.rs:144
+msgid "Download Progress"
+msgstr ""
+
+#: src/ui/window.rs:171
+msgid "Explore"
+msgstr ""
+
+#: src/ui/window.rs:184
+msgid "Search..."
+msgstr ""
+
+#: src/ui/window.rs:280
+msgid "No album for this track"
+msgstr ""
+
+#: src/ui/window.rs:367
+msgid "Uploads complete"
+msgstr ""
+
+#: src/ui/window.rs:623
+msgid "Back online"
+msgstr ""
+
+#: src/ui/window.rs:642
+msgid "Offline - downloaded songs still available"
+msgstr ""
+
+#: src/ui/window.rs:677
+msgid "No internet - running in offline mode"
+msgstr ""
+
+#: src/ui/window.rs:703
+msgid "Already downloaded"
+msgstr ""
+
+#: src/ui/window.rs:725
+msgid "Downloads complete"
+msgstr ""
+
+#: src/ui/window.rs:1072
+msgid "Uploaded artists are not available yet"
+msgstr ""
+
+#: src/ui/window.rs:1147 src/ui/window.rs:1170
+msgid "Uploaded Songs"
+msgstr ""
+
+#: src/ui/window.rs:1169 src/ui/window.rs:1206
+#, rust-format
+msgid "{n} uploaded song"
+msgid_plural "{n} uploaded songs"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/window.rs:1261
+msgid "Couldn't open your channel"
+msgstr ""
+
+#: src/ui/window.rs:1286
+msgid "Mixtapes cannot open this link"
+msgstr ""
+
+#: src/ui/window.rs:1289
+msgid "Could not open the link"
+msgstr ""
+
+#: src/ui/window.rs:1860
+#, rust-format
+msgid "Couldn't play track: {reason}"
+msgstr ""
+
+#: src/ui/window.rs:1862
+#, rust-format
+msgid "Couldn't play '{title}': {reason}"
+msgstr ""
+
+#: src/ui/window.rs:2095 src/ui/window.rs:2741
+msgid "Refresh"
+msgstr ""
+
+#: src/ui/window.rs:2185 src/ui/window.rs:2740
+msgid "Keyboard Shortcuts"
+msgstr ""
+
+#: src/ui/window.rs:2186 src/ui/window.rs:2739
+msgid "Preferences"
+msgstr ""
+
+#: src/ui/window.rs:2188
+msgid "About Mixtapes"
+msgstr ""
+
+#: src/ui/window.rs:2198
+msgid "Main Menu"
+msgstr ""
+
+#: src/ui/window.rs:2219
+msgid "Follow System Style"
+msgstr ""
+
+#: src/ui/window.rs:2220
+msgid "Light Style"
+msgstr ""
+
+#: src/ui/window.rs:2221
+msgid "Dark Style"
+msgstr ""
+
+#: src/ui/window.rs:2372
+msgid "Your Channel"
+msgstr ""
+
+#: src/ui/window.rs:2383
+msgid "Log Out"
+msgstr ""
+
+#: src/ui/window.rs:2742
+msgid "Go Back / Close Search"
+msgstr ""
+
+#: src/ui/window.rs:2749
+msgid "Play / Pause"
+msgstr ""
+
+#: src/ui/window.rs:2750
+msgid "Open / Close Player"
+msgstr ""

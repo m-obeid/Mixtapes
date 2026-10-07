@@ -53,6 +53,7 @@ Gapless uses the same counter. `Player::arm_gapless` allocates a generation, res
 ```
 src/main.rs        boot order, App context, adw::Application wiring
 src/bootstrap.rs   mallopt arena cap, fd limit, GSK renderer pref, tracing
+src/i18n/mod.rs    translations: tr! macros, catalog lookup, language choice
 src/paths.rs       XDG paths, identical to the Python app
 src/model.rs       Track, VideoId, PlaybackStatus, RepeatMode, StreamInfo, HttpAuth
 src/state/mod.rs   PlayerState GObject: properties, queue ListStore, signals
@@ -898,6 +899,40 @@ extensions on the branch the GNOME 50 SDK declares (`version = 25.08` in its
 metadata), not on 50. The Nix flake builds too, once `openssl` is in its
 build inputs: the ytmusicapi crate's reqwest uses native TLS, so openssl-sys
 compiles even though the app's own client is rustls.
+
+## Translations
+
+The English text in the source is the message id, as in gettext. `tr!`,
+`trn!` (plurals), `trc!` (context) and `tr_noop!` (const tables) are declared
+in `src/i18n/mod.rs` and visible crate-wide through `#[macro_use]`. They must
+be called unqualified: xgettext does not see `crate::tr!`.
+
+`po/update.sh` runs xgettext over `src/` into `po/mixtapes.pot` and merges the
+template into every language in `po/LINGUAS`. It is the only step needing GNU
+gettext (0.24 or newer, the first release reading Rust), and only developers
+and translators run it.
+
+The build needs no gettext. `build.rs` reads each `po/<code>.po` with the
+parser in `src/i18n/po.rs` (the same file, included by path, so the unit tests
+cover what the build does) and writes a sorted Rust table into `OUT_DIR`.
+Fuzzy and empty entries are left out, and so is an entry naming a placeholder
+the English text lacks; each of those shows in English. A PO file failing to
+parse is a cargo warning and the language is skipped. The catalogs are in the
+binary because the app installs as one file on every platform, and a
+`share/locale` tree would need a different path on Flatpak, Nix and Windows.
+
+At startup `i18n::init` runs before GTK. A `language` pref, when set, goes
+into the `LANGUAGE` environment variable, so GTK and libadwaita translate
+their own widgets to match. Then `glib::language_names()` gives the order of
+preference on every platform, and the first language with a catalog wins.
+English ahead of a translated language keeps English. Plural rules are the
+catalog's `Plural-Forms` C expression, parsed once (`src/i18n/plural.rs`).
+
+Placeholders are named (`{name}`), filled at run time by `i18n::format`,
+since `format!` takes only literals. A translator is free to reorder them.
+
+Not translated: text YouTube sends. Requests keep `hl=en` because the
+parsers match English headings ("Songs", "Albums", "Singles").
 
 ## Stutter, measured with sysprof
 
