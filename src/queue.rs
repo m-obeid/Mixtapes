@@ -34,6 +34,54 @@ pub struct Bounds {
     pub can_previous: bool,
 }
 
+/// A queue as it is written to disk between runs.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct QueueSnapshot {
+    pub tracks: Vec<Track>,
+    /// The order before shuffling. Left out when it is the order of `tracks`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original: Option<Vec<Track>>,
+    #[serde(default)]
+    pub current: Option<usize>,
+    #[serde(default)]
+    pub shuffle: bool,
+    /// "off", "track" or "all".
+    #[serde(default)]
+    pub repeat: String,
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub source_title: String,
+    #[serde(default)]
+    pub infinite: bool,
+}
+
+/// Where a queue came from: the id a page compares itself to and the name the queue header shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueSource {
+    pub id: String,
+    /// Empty when the source has no name worth showing.
+    pub title: String,
+}
+
+impl QueueSource {
+    pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
+        Self { id: id.into(), title: title.into() }
+    }
+}
+
+impl From<String> for QueueSource {
+    fn from(id: String) -> Self {
+        Self::new(id, "")
+    }
+}
+
+impl From<&str> for QueueSource {
+    fn from(id: &str) -> Self {
+        Self::new(id, "")
+    }
+}
+
 #[derive(Default)]
 pub struct Queue {
     tracks: Vec<Track>,
@@ -44,6 +92,8 @@ pub struct Queue {
     repeat: RepeatMode,
     /// The playlist, album or radio the queue came from, or None for a loose set.
     source_id: Option<String>,
+    /// The name of that source for the queue header, or empty.
+    source_title: String,
     infinite: bool,
 }
 
@@ -84,6 +134,10 @@ impl Queue {
 
     pub fn source_id(&self) -> Option<&str> {
         self.source_id.as_deref()
+    }
+
+    pub fn source_title(&self) -> &str {
+        &self.source_title
     }
 
     pub fn is_infinite(&self) -> bool {
@@ -189,15 +243,55 @@ impl Queue {
         Step::Stop
     }
 
+    // -- between runs -----------------------------------------------------
+
+    pub fn snapshot(&self) -> QueueSnapshot {
+        let repeat = match self.repeat {
+            RepeatMode::Off => "off",
+            RepeatMode::Track => "track",
+            RepeatMode::All => "all",
+        };
+        QueueSnapshot {
+            tracks: self.tracks.clone(),
+            original: (self.original != self.tracks).then(|| self.original.clone()),
+            current: self.current,
+            shuffle: self.shuffle,
+            repeat: repeat.to_owned(),
+            source_id: self.source_id.clone(),
+            source_title: self.source_title.clone(),
+            infinite: self.infinite,
+        }
+    }
+
+    /// Become the queue a snapshot was taken of. Nothing in a file is trusted to add up:
+    /// an index past the end selects nothing, and an original order of another length is dropped.
+    pub fn restore(&mut self, snapshot: QueueSnapshot) {
+        let QueueSnapshot { tracks, original, current, shuffle, repeat, source_id, source_title, infinite } = snapshot;
+        self.original = original.filter(|o| o.len() == tracks.len()).unwrap_or_else(|| tracks.clone());
+        self.current = current.filter(|index| *index < tracks.len());
+        self.tracks = tracks;
+        self.shuffle = shuffle;
+        self.repeat = match repeat.as_str() {
+            "track" => RepeatMode::Track,
+            "all" => RepeatMode::All,
+            _ => RepeatMode::Off,
+        };
+        self.source_id = source_id;
+        self.source_title = source_title;
+        self.infinite = infinite;
+    }
+
     // -- editing ----------------------------------------------------------
 
     /// Replace everything and choose where to start. An out-of-range index
     /// under shuffle means "no chosen first track", which is what Shuffle does.
-    pub fn replace(&mut self, tracks: Vec<Track>, start_index: usize, shuffle: bool, source_id: Option<String>, infinite: bool) -> Step {
+    pub fn replace(&mut self, tracks: Vec<Track>, start_index: usize, shuffle: bool, source: Option<QueueSource>, infinite: bool) -> Step {
         self.original = tracks.clone();
         self.tracks = tracks;
         self.shuffle = shuffle;
+        let (source_id, source_title) = source.map(|s| (Some(s.id), s.title)).unwrap_or_default();
         self.source_id = source_id;
+        self.source_title = source_title;
         self.infinite = infinite;
         if shuffle {
             // The chosen track plays first, everything behind it is shuffled.
@@ -224,6 +318,7 @@ impl Queue {
         self.tracks = tracks;
         self.shuffle = false;
         self.source_id = None;
+        self.source_title.clear();
         self.infinite = false;
         self.current = (start_index < self.tracks.len()).then_some(start_index);
     }
@@ -535,6 +630,42 @@ mod tests {
         q.replace(vec![track("a")], 0, false, Some("RDAMVMa".into()), true);
         assert_eq!(q.advance(), Step::Extend);
         assert_eq!(q.current(), Some(0), "an extendable queue keeps its position");
+    }
+
+    #[test]
+    fn a_snapshot_restores_the_queue_with_its_shuffle_and_place() {
+        let mut q = queue(&["a", "b", "c", "d"], 1);
+        q.set_shuffle(true);
+        q.set_repeat(RepeatMode::All);
+        q.adopt_source("PLx".into(), true);
+        let mut back = Queue::default();
+        back.restore(q.snapshot());
+        assert_eq!(ids(&back), ids(&q));
+        assert_eq!((back.current(), back.shuffle(), back.repeat(), back.source_id(), back.is_infinite()), (q.current(), true, RepeatMode::All, Some("PLx"), true));
+        back.set_shuffle(false);
+        assert_eq!(ids(&back), ["a", "b", "c", "d"], "the order before shuffling came along");
+    }
+
+    #[test]
+    fn a_snapshot_that_does_not_add_up_is_restored_safely() {
+        let snapshot = QueueSnapshot { tracks: vec![track("a")], original: Some(vec![track("a"), track("b")]), current: Some(7), ..QueueSnapshot::default() };
+        let mut q = Queue::default();
+        q.restore(snapshot);
+        assert_eq!((q.current(), q.len()), (None, 1));
+        q.set_shuffle(true);
+        q.set_shuffle(false);
+        assert_eq!(ids(&q), ["a"]);
+    }
+
+    #[test]
+    fn a_radio_taking_over_keeps_the_name_the_queue_started_with() {
+        let mut q = Queue::default();
+        q.replace(vec![track("a")], 0, false, Some(QueueSource::new("home-radio:a:1", "Quick picks")), false);
+        q.adopt_source("RDAMVMa".into(), true);
+        assert_eq!(q.source_id(), Some("RDAMVMa"));
+        assert_eq!(q.source_title(), "Quick picks");
+        q.replace(vec![track("b")], 0, false, None, false);
+        assert_eq!(q.source_title(), "", "a loose set has no name");
     }
 
     #[test]

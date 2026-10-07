@@ -44,6 +44,11 @@
 //! MIXTAPES_DEMO_NEXT_EVERY=ms  after ten seconds, skip to the next track at that interval (for profiling)
 //! MIXTAPES_DEMO_ONBOARDING=ms[,page] open the setup wizard (page: account, extras, done), MIXTAPES_DEMO_WHATS_NEW=ms the release notes
 //! MIXTAPES_DEMO_RESIZE=ms    from then on, flip the window between 1040 and 420 px wide once a second
+//! MIXTAPES_DEMO_RESIZE_SWEEP=ms[,secs]  drag the window width between 760 and 1100 px, 6 px a frame, and log how far the lyric line sat from the middle in each painted frame
+//! MIXTAPES_DEMO_SILENT=1     play into a fakesink: real pace, no sound
+//! MIXTAPES_DEMO_SESSION=1    let a demo run save and restore the queue between runs. Point XDG_DATA_HOME somewhere else first
+//! MIXTAPES_DEMO_QUIT=ms      quit the app the way the menu does
+//! MIXTAPES_DEMO_SCRUB=ms[,secs]  seek every 50 ms, back and forth between 0:40 and 2:00, like dragging the seek bar
 //! MIXTAPES_DEMO_WATCHDOG=ms  raise SIGUSR2 when the GTK thread has not run for that long, for a gdb backtrace
 //! MIXTAPES_DEMO_PHASES=1     log frame clock phases that take more than 40 ms
 //! MIXTAPES_DEMO_CLASSES=1    with TOGGLE: log every widget's classes and state after each toggle, to diff
@@ -56,7 +61,7 @@
 //! MIXTAPES_DEMO_PLAYLIST=id  open a playlist or album page 1.5 s in
 //! MIXTAPES_DEMO_PLAYLIST_PLAY=1  press Play on that page six seconds in
 //! MIXTAPES_DEMO_DISCOGRAPHY=id  open a discography grid for a browse id 1.5 s in
-//! MIXTAPES_DEMO_SEEK=secs    seek to that position seven seconds in
+//! MIXTAPES_DEMO_SEEK=secs[,ms]  seek to that position, seven seconds in unless ms says when
 //! MIXTAPES_DEMO_NEXT_AT=ms   skip to the next queue entry after that many ms
 //! MIXTAPES_DEMO_EDIT_AT=ms   append a copy of the first track after that many ms
 //! MIXTAPES_DEMO_ARTIST=id    open an artist page 1.5 s in
@@ -129,7 +134,19 @@ pub fn from_env() -> Option<Demo> {
 /// Stage the queue and schedule autoplay and snapshots. Call after the window is presented.
 pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     tracing::info!(tracks = demo.tracks.len(), autoplay = demo.autoplay, "demo queue staged");
-    ctx.player.stage_tracks(demo.tracks.clone(), 0);
+    // With nothing to stage, a queue restored under MIXTAPES_DEMO_SESSION stays.
+    if !demo.tracks.is_empty() {
+        ctx.player.stage_tracks(demo.tracks.clone(), 0);
+    }
+    if let Some(ms) = std::env::var("MIXTAPES_DEMO_QUIT").ok().and_then(|v| v.parse::<u64>().ok()) {
+        let app = main_window.window().application();
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            tracing::info!("demo: quitting");
+            if let Some(app) = &app {
+                app.quit();
+            }
+        });
+    }
     let window = main_window.window();
     let height = std::env::var("MIXTAPES_DEMO_HEIGHT").ok().and_then(|h| h.parse::<i32>().ok()).unwrap_or(700);
     if let Some(width) = std::env::var("MIXTAPES_DEMO_WIDTH").ok().and_then(|w| w.parse::<i32>().ok()) {
@@ -273,6 +290,49 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             } else {
                 crate::ui::release_notes::present(&mw, &ctx_w);
             }
+        });
+    }
+
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_RESIZE_SWEEP") {
+        let (ms, secs) = spec.split_once(',').unwrap_or((spec.as_str(), "4"));
+        let (ms, secs) = (ms.parse::<u64>().unwrap_or(10_000), secs.parse::<f64>().unwrap_or(4.0));
+        let win = window.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            let Some(clock) = win.frame_clock() else { return };
+            // What each frame put on screen: the offset is read once the frame is painted.
+            let offsets = Rc::new(std::cell::RefCell::new(Vec::<f64>::new()));
+            let seen = offsets.clone();
+            let handler = clock.connect_local("after-paint", true, move |_| {
+                let worst = crate::ui::widgets::lyrics_view::live_views().iter().filter_map(|v| v.centre_error_for_demo()).fold(None::<f64>, |a, b| Some(a.map_or(b, |a| if b.abs() > a.abs() { b } else { a })));
+                if let Some(worst) = worst {
+                    seen.borrow_mut().push(worst);
+                }
+                None
+            });
+            let (width, step) = (std::cell::Cell::new(1100), std::cell::Cell::new(-6));
+            let start = std::cell::Cell::new(None::<i64>);
+            let handler = std::cell::RefCell::new(Some(handler));
+            win.add_tick_callback(move |win, clock| {
+                let begun = *start.get().get_or_insert(clock.frame_time());
+                start.set(Some(begun));
+                if (clock.frame_time() - begun) as f64 / 1e6 >= secs {
+                    if let Some(handler) = handler.borrow_mut().take() {
+                        clock.disconnect(handler);
+                    }
+                    let offsets = offsets.borrow();
+                    let off: Vec<i64> = offsets.iter().map(|o| o.round() as i64).collect();
+                    let bad = off.iter().filter(|o| o.abs() > 2).count();
+                    tracing::info!(frames = off.len(), off_centre = bad, worst = off.iter().map(|o| o.abs()).max().unwrap_or(0), "demo: resize sweep");
+                    tracing::info!("demo: resize sweep offsets {off:?}");
+                    return glib::ControlFlow::Break;
+                }
+                if !(760..=1100).contains(&(width.get() + step.get())) {
+                    step.set(-step.get());
+                }
+                width.set(width.get() + step.get());
+                win.set_default_size(width.get(), win.default_height());
+                glib::ControlFlow::Continue
+            });
         });
     }
 
@@ -791,9 +851,35 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             player.next();
         });
     }
-    if let Some(secs) = std::env::var("MIXTAPES_DEMO_SEEK").ok().and_then(|v| v.parse::<f64>().ok()) {
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SCRUB") {
+        // Drag the seek bar back and forth: a seek every 50 ms, two seconds apart, like a pointer would.
+        let (ms, secs) = spec.split_once(',').unwrap_or((spec.as_str(), "4"));
+        let (ms, secs) = (ms.parse::<u64>().unwrap_or(12_000), secs.parse::<f64>().unwrap_or(4.0));
         let player = ctx.player.clone();
-        glib::timeout_add_local_once(Duration::from_millis(7000), move || {
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            tracing::info!(status = ?player.state().status(), "demo: scrub begins");
+            let began = std::time::Instant::now();
+            let (at, step) = (std::cell::Cell::new(60.0), std::cell::Cell::new(2.0));
+            glib::timeout_add_local(Duration::from_millis(50), move || {
+                if began.elapsed().as_secs_f64() >= secs {
+                    tracing::info!("demo: scrub ends");
+                    return glib::ControlFlow::Break;
+                }
+                if !(40.0..=120.0).contains(&(at.get() + step.get())) {
+                    step.set(-step.get());
+                }
+                at.set(at.get() + step.get());
+                player.seek(at.get());
+                glib::ControlFlow::Continue
+            });
+        });
+    }
+
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SEEK") {
+        let (secs, ms) = spec.split_once(',').unwrap_or((spec.as_str(), "7000"));
+        let (secs, ms) = (secs.parse::<f64>().unwrap_or(0.0), ms.parse::<u64>().unwrap_or(7000));
+        let player = ctx.player.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
             tracing::info!(secs, before = player.state().position(), "demo: seek");
             player.seek(secs);
         });

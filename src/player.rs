@@ -19,7 +19,7 @@ use crate::local_library::LocalLibrary;
 use crate::net::NetHandle;
 use crate::paths::Paths;
 use crate::net::ytmusic::AuthState;
-use crate::queue::{Bounds, Queue, Step};
+use crate::queue::{Bounds, Queue, QueueSource, Step};
 use crate::state::{PlayerState, QueueEntry};
 use gtk::glib;
 
@@ -114,6 +114,14 @@ pub struct Player {
     play_listeners: RefCell<Vec<PlayListener>>,
     /// Set while the audio-version swap writes its metadata, so the source id survives it.
     swapping: Cell<bool>,
+    /// Where the queue is kept between runs.
+    session_file: std::path::PathBuf,
+    /// `restore_queue` in the prefs: the queue is saved as it changes and comes back at startup.
+    keep_session: Cell<bool>,
+    /// A save is waiting for the queue to stop changing.
+    session_save: RefCell<Option<glib::SourceId>>,
+    /// The song a restored session stopped in and how far, for the first play to seek to.
+    resume: RefCell<Option<(String, f64)>>,
 }
 
 impl Player {
@@ -146,6 +154,10 @@ impl Player {
             swap_checked: RefCell::new(std::collections::HashSet::new()),
             play_listeners: RefCell::new(Vec::new()),
             swapping: Cell::new(false),
+            session_file: crate::session::file(paths),
+            keep_session: Cell::new(session_allowed() && paths.read_prefs().get("restore_queue").and_then(|v| v.as_bool()).unwrap_or(true)),
+            session_save: RefCell::new(None),
+            resume: RefCell::new(None),
         })
     }
 
@@ -230,6 +242,87 @@ impl Player {
     /// Change when plays are written to the account's history, live.
     pub fn set_history_mode(&self, mode: &str) {
         self.history_mode.replace(mode.to_owned());
+    }
+
+    // -- the queue between runs --------------------------------------------
+
+    /// Turn keeping the queue between runs on or off, live. Off forgets the saved one.
+    pub fn set_keep_session(&self, enabled: bool) {
+        if !session_allowed() {
+            return;
+        }
+        self.keep_session.set(enabled);
+        if enabled {
+            self.save_session();
+        } else {
+            crate::session::clear(&self.session_file);
+        }
+    }
+
+    /// Bring back the queue the last run ended with, stopped on its song at its position.
+    /// With `play` it starts at once. Call after `start`, before anything else queues.
+    pub fn restore_session(&self, play: bool) {
+        if !self.keep_session.get() {
+            return;
+        }
+        let Some(session) = crate::session::load(&self.session_file) else { return };
+        let (track, shuffle, repeat) = {
+            let mut q = self.queue.borrow_mut();
+            q.restore(session.queue);
+            (q.current_track().cloned(), q.shuffle(), q.repeat())
+        };
+        tracing::info!(tracks = self.queue.borrow().len(), position = session.position, play, "queue restored");
+        self.state.set_shuffle(shuffle);
+        self.state.set_repeat(repeat);
+        self.state.set_status(PlaybackStatus::Stopped);
+        let duration = track.as_ref().and_then(|t| t.duration_seconds).map(f64::from).unwrap_or(0.0);
+        // A position at the very end would finish the song the moment it starts.
+        let position = if duration > 0.0 && session.position > duration - 5.0 { 0.0 } else { session.position.max(0.0) };
+        self.state.set_duration(duration);
+        self.state.set_position(position);
+        self.apply_track_metadata(track.as_ref());
+        self.sync_queue_model();
+        if let Some(track) = track {
+            self.resume.replace(Some((track.video_id.0.clone(), position)));
+            if play {
+                self.load_current();
+            }
+        }
+    }
+
+    /// Save soon, once a burst of queue changes has passed.
+    fn schedule_session_save(&self) {
+        if !self.keep_session.get() || self.session_save.borrow().is_some() {
+            return;
+        }
+        let weak = self.weak_self();
+        let id = glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+            if let Some(player) = weak.upgrade() {
+                player.session_save.take();
+                player.save_session();
+            }
+        });
+        self.session_save.replace(Some(id));
+    }
+
+    fn save_session(&self) {
+        if !self.keep_session.get() {
+            return;
+        }
+        if let Some(id) = self.session_save.take() {
+            id.remove();
+        }
+        let queue = self.queue.borrow().snapshot();
+        if queue.tracks.is_empty() {
+            crate::session::clear(&self.session_file);
+            return;
+        }
+        // A restored song that never played is still where the last run left it.
+        let position = match self.resume.borrow().as_ref() {
+            Some((_, position)) if self.state.status() == PlaybackStatus::Stopped => *position,
+            _ => self.state.position(),
+        };
+        crate::session::save(&self.session_file, &crate::session::Session { queue, position });
     }
 
     /// Turn downloading on a like on or off, live.
@@ -414,6 +507,8 @@ impl Player {
     }
 
     pub fn shutdown(&self) {
+        // First, while the position is still the listener's.
+        self.save_session();
         self.abort_inflight();
         self.audio.send(AudioCommand::Stop);
         self.audio.shutdown();
@@ -451,10 +546,10 @@ impl Player {
         tracks: Vec<Track>,
         start_index: usize,
         shuffle: bool,
-        source_id: Option<String>,
+        source: Option<QueueSource>,
         infinite: bool,
     ) {
-        let step = self.queue.borrow_mut().replace(tracks, start_index, shuffle, source_id, infinite);
+        let step = self.queue.borrow_mut().replace(tracks, start_index, shuffle, source, infinite);
         self.state.set_shuffle(shuffle);
         self.sync_queue_model();
         self.apply(step);
@@ -916,9 +1011,20 @@ impl Player {
                         self.arm_gapless();
                     }
                     self.precache_neighbours();
+                    // The first play after a restart picks the song up where the last run left it.
+                    if let Some((video_id, position)) = self.resume.take() {
+                        let same = self.queue.borrow().current_track().is_some_and(|t| t.video_id.0 == video_id);
+                        if same && position > 1.0 {
+                            self.seek(position);
+                        }
+                    }
                 }
                 self.state.set_status(status);
                 self.sync_paused_flag();
+                // A pause is a likely last word before the app closes or is killed.
+                if status == PlaybackStatus::Paused {
+                    self.schedule_session_save();
+                }
             }
             AudioEvent::Prerolled { .. } => {}
             AudioEvent::EndOfStream { generation } => {
@@ -1166,6 +1272,7 @@ impl Player {
         let value = index.map(|i| i as i32).unwrap_or(-1);
         if self.state.current_index() != value {
             self.state.set_current_index(value);
+            self.schedule_session_save();
         }
         let paused = self.state.status() != PlaybackStatus::Playing;
         let model = self.state.queue_model();
@@ -1227,9 +1334,15 @@ impl Player {
             entry.update(i as u32, &tracks[i], Some(i) == current, paused);
         }
         self.state.set_queue_length(tracks.len() as u32);
+        self.state.set_queue_duration(tracks.iter().filter_map(|t| t.duration_seconds).sum::<u32>());
+        let source_title = self.queue.borrow().source_title().to_owned();
+        if self.state.queue_source_title() != source_title {
+            self.state.set_queue_source_title(source_title);
+        }
         self.mark_current(current);
         self.resync_gapless();
         self.state.emit_queue_changed();
+        self.schedule_session_save();
     }
 
     fn weak_self(&self) -> Weak<Self> {
@@ -1258,6 +1371,11 @@ impl Player {
     /// long, "never" not at all.
     fn record_play(&self, video_id: &str) {
         if video_id.is_empty() || self.history_mode.borrow().as_str() == HISTORY_NEVER {
+            return;
+        }
+        // A demo run plays whatever the test needs. That is not the listener's history,
+        // unless MIXTAPES_DEMO_PRESENCE=1 lets it through as it does for scrobbles.
+        if std::env::var_os("MIXTAPES_DEMO").is_some() && std::env::var_os("MIXTAPES_DEMO_PRESENCE").is_none() {
             return;
         }
         if self.history_recorded.borrow().as_deref() == Some(video_id) {
@@ -1325,7 +1443,7 @@ impl Player {
             return;
         }
         let stamp = format!("home-radio:{seed}:{}", self.next_stamp());
-        self.play_tracks(tracks, start_index, false, Some(stamp.clone()), false);
+        self.play_tracks(tracks, start_index, false, Some(stamp.as_str().into()), false);
 
         let api = self.net.client().api();
         let seed = seed.to_owned();
@@ -1384,7 +1502,9 @@ impl Player {
                     };
                     // A linked playlist ends where it ends. A lone song keeps going as its radio.
                     let infinite = playlist_id.is_none();
-                    player.play_tracks(tracks, index, false, watch.playlist_id.or(playlist_id), infinite);
+                    let title = if infinite { radio_title(&tracks[index].title) } else { String::new() };
+                    let source = watch.playlist_id.or(playlist_id).map(|id| QueueSource::new(id, title));
+                    player.play_tracks(tracks, index, false, source, infinite);
                 }
                 Ok(Err(err)) => tracing::warn!(%err, video_id, "link playback failed"),
                 Err(_) => {}
@@ -1392,7 +1512,9 @@ impl Player {
         });
     }
 
-    pub fn start_radio(self: &Rc<Self>, video_id: Option<String>, playlist_id: Option<String>) {
+    /// `seed_name` is the song, playlist or artist the radio grows from, for the queue header.
+    pub fn start_radio(self: &Rc<Self>, video_id: Option<String>, playlist_id: Option<String>, seed_name: &str) {
+        let title = radio_title(seed_name);
         let api = self.net.client().api();
         let handle = self.net.spawn(async move {
             crate::net::playlists::radio_tracks(&api, video_id.as_deref(), playlist_id.as_deref())
@@ -1408,7 +1530,8 @@ impl Player {
                         return;
                     }
                     if let Some(player) = weak.upgrade() {
-                        player.play_tracks(tracks, 0, false, watch.playlist_id, true);
+                        let source = watch.playlist_id.map(|id| QueueSource::new(id, title));
+                        player.play_tracks(tracks, 0, false, source, true);
                     }
                 }
                 Ok(Err(err)) => tracing::warn!(%err, "radio failed"),
@@ -1416,6 +1539,17 @@ impl Player {
             }
         });
     }
+}
+
+/// A demo run plays scratch queues. It neither restores the listener's queue nor
+/// overwrites it, unless MIXTAPES_DEMO_SESSION=1 asks for that on purpose.
+fn session_allowed() -> bool {
+    std::env::var_os("MIXTAPES_DEMO").is_none() || std::env::var_os("MIXTAPES_DEMO_SESSION").is_some()
+}
+
+/// What the queue header calls a radio grown from `seed_name`.
+fn radio_title(seed_name: &str) -> String {
+    if seed_name.is_empty() { "Radio".to_owned() } else { format!("Radio of {seed_name}") }
 }
 
 // -- infinite radio -------------------------------------------------------

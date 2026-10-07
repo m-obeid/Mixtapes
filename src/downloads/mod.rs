@@ -41,6 +41,8 @@ const STALE_TMP: Duration = Duration::from_secs(3600);
 pub enum Event {
     /// A track joined the queue.
     Queued { video_id: String, title: String },
+    /// A track queued by id alone got its title looked up.
+    Named { video_id: String, title: String },
     /// How far the file itself is, 0 to 1.
     Progress { video_id: String, fraction: f64 },
     /// One track finished, for better or worse.
@@ -504,6 +506,7 @@ impl Downloads {
                     }
                     if details.title.is_empty() {
                         details.title = first.title.clone();
+                        self.emit(Event::Named { video_id: track.video_id.0.clone(), title: details.title.clone() });
                     }
                     if details.thumbnail.is_empty() {
                         details.thumbnail = first.thumb.clone().unwrap_or_default();

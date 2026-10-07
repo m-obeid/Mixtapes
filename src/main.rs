@@ -28,6 +28,7 @@ mod queue;
 #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
 mod sampler;
 mod scrobbler;
+mod session;
 mod state;
 mod tray;
 mod ui;
@@ -219,6 +220,8 @@ fn on_startup(ctx: &Rc<App>) {
 
     // Event pumps must attach to the running GTK main context.
     ctx.player.start();
+    let prefs = ctx.paths.read_prefs();
+    ctx.player.restore_session(prefs.get("autoplay_on_start").and_then(|v| v.as_bool()).unwrap_or(false));
     ctx.mpris.replace(Some(Mpris::start(ctx)));
     tray::start(ctx);
     presence::wire(ctx);

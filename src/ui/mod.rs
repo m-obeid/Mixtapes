@@ -207,6 +207,10 @@ pub fn high_res_url(url: &str, target_size: Option<u32>) -> String {
 /// Port of suppress_hover_while_scrolling: while the content scrolls, stop
 /// pointer hit-testing on it so GTK does no per-frame hover restyle of the
 /// row sliding under a stationary pointer, and restore it once motion settles.
+///
+/// No class goes on the scrolled window for this. A class on an ancestor restyles
+/// every widget below it, twice per scroll, and on the history page's few hundred
+/// rows each restyle outlasted the settle timer: 5 frames a second while scrolling.
 pub fn suppress_hover_while_scrolling(scrolled: &gtk::ScrolledWindow) {
     const SETTLE: std::time::Duration = std::time::Duration::from_millis(110);
     let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
@@ -217,7 +221,6 @@ pub fn suppress_hover_while_scrolling(scrolled: &gtk::ScrolledWindow) {
         match previous {
             Some(id) => id.remove(),
             None => {
-                scrolled.add_css_class("is-scrolling");
                 if let Some(child) = scrolled.child() {
                     child.set_can_target(false);
                 }
@@ -228,7 +231,6 @@ pub fn suppress_hover_while_scrolling(scrolled: &gtk::ScrolledWindow) {
         let id = glib::timeout_add_local_once(SETTLE, move || {
             slot.borrow_mut().take();
             if let Some(scrolled) = weak.upgrade() {
-                scrolled.remove_css_class("is-scrolling");
                 if let Some(child) = scrolled.child() {
                     child.set_can_target(true);
                 }

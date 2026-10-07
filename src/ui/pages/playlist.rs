@@ -20,6 +20,7 @@ use crate::net::cache::{CachedMeta, CachedPlaylist, SortMetric};
 use crate::net::covers::save_playlist_cover;
 use crate::net::playlists::{self, PlaylistDetails};
 use crate::net::ytmusic::{AuthState, NetError};
+use crate::queue::QueueSource;
 use crate::state::track_object::TrackObject;
 use crate::ui::context::{NavRequest, UiContext};
 use crate::ui::context_menu::{MenuAction, Section, SongMenuOptions, show_song_menu};
@@ -130,6 +131,8 @@ pub struct PlaylistPage {
     more_menu_dirty: Cell<bool>,
     more_menu_pending_owned: Cell<bool>,
     selected_cover_path: RefCell<Option<PathBuf>>,
+    /// The Downloads page is about to reload after a removal.
+    downloads_reload_queued: Cell<bool>,
     on_title: RefCell<Option<TitleListener>>,
     compact: Cell<bool>,
     me: RefCell<Weak<PlaylistPage>>,
@@ -325,6 +328,7 @@ impl PlaylistPage {
             more_menu_dirty: Cell::new(true),
             more_menu_pending_owned: Cell::new(false),
             selected_cover_path: RefCell::new(None),
+            downloads_reload_queued: Cell::new(false),
             on_title: RefCell::new(None),
             compact: Cell::new(false),
             me: RefCell::new(Weak::new()),
@@ -387,6 +391,11 @@ impl PlaylistPage {
 
     pub fn playlist_id(&self) -> Option<String> {
         self.playlist_id.borrow().clone()
+    }
+
+    /// The queue this page starts: its id and the title the queue header shows.
+    fn queue_source(&self) -> Option<QueueSource> {
+        self.playlist_id().map(|id| QueueSource::new(id, self.title_text.borrow().clone()))
     }
 
     /// The window sets its title from this, like the header-title-changed signal.
@@ -605,6 +614,21 @@ impl PlaylistPage {
         let weak = Rc::downgrade(self);
         self.ctx.on_download(move |event| {
             let Some(page) = weak.upgrade() else { return false };
+            // The Downloads page lists files. One that is gone leaves the list, and a
+            // selection removed in one go asks for a single reload.
+            if matches!(event, crate::downloads::Event::Removed { .. }) && page.is_downloads_page() {
+                if !page.downloads_reload_queued.replace(true) {
+                    let weak = Rc::downgrade(&page);
+                    glib::idle_add_local_once(move || {
+                        if let Some(page) = weak.upgrade() {
+                            page.downloads_reload_queued.set(false);
+                            page.select_btn.set_active(false);
+                            page.show_downloads();
+                        }
+                    });
+                }
+                return true;
+            }
             let video_id = match event {
                 crate::downloads::Event::Queued { video_id, .. } | crate::downloads::Event::Removed { video_id } => video_id.clone(),
                 crate::downloads::Event::Item { video_id, ok: true, .. } => video_id.clone(),
@@ -1591,7 +1615,7 @@ impl PlaylistPage {
             t
         }).collect();
         let Some(start) = start_index else { return };
-        self.ctx.player.play_tracks(queue, start, false, pid, self.is_inf());
+        self.ctx.player.play_tracks(queue, start, false, self.queue_source(), self.is_inf());
         if self.is_background_fetching.get() {
             self.pending_queue_append.set(true);
         }
@@ -1624,7 +1648,7 @@ impl PlaylistPage {
             toast(&self.stack, "No downloaded songs to play");
             return;
         }
-        self.ctx.player.play_tracks(queue, 0, false, self.playlist_id(), self.is_inf());
+        self.ctx.player.play_tracks(queue, 0, false, self.queue_source(), self.is_inf());
         if self.is_background_fetching.get() {
             self.pending_queue_append.set(true);
         }
@@ -1639,7 +1663,7 @@ impl PlaylistPage {
             toast(&self.stack, "No downloaded songs to shuffle");
             return;
         }
-        self.ctx.player.play_tracks(queue, usize::MAX, true, self.playlist_id(), self.is_inf());
+        self.ctx.player.play_tracks(queue, usize::MAX, true, self.queue_source(), self.is_inf());
         if self.is_background_fetching.get() {
             self.pending_queue_append.set(true);
         }
@@ -1708,7 +1732,7 @@ impl PlaylistPage {
         let pid = self.audio_playlist_id.borrow().clone().or_else(|| self.playlist_id());
         let Some(pid) = pid else { return };
         let radio_id = if pid.starts_with("RDAMPL") { pid } else { format!("RDAMPL{pid}") };
-        self.ctx.player.start_radio(None, Some(radio_id));
+        self.ctx.player.start_radio(None, Some(radio_id), &self.title_text.borrow());
         toast(&self.stack, "Starting radio...");
     }
 
@@ -1911,6 +1935,10 @@ impl PlaylistPage {
             return;
         }
         self.add_to_playlist(target.to_owned(), self.selected_tracks());
+    }
+
+    fn is_downloads_page(&self) -> bool {
+        self.playlist_id().as_deref() == Some("DOWNLOADS")
     }
 
     fn on_sel_remove(self: &Rc<Self>) {
@@ -2224,16 +2252,7 @@ impl PlaylistPage {
     pub fn refresh_in_place(self: &Rc<Self>) {
         let Some(pid) = self.playlist_id() else { return };
         if pid == "DOWNLOADS" {
-            self.clear_track_store();
-            self.tracks.borrow_mut().clear();
-            self.stack.set_visible_child_name("loading");
-            // No downloads database yet: the list is empty.
-            let weak = Rc::downgrade(self);
-            glib::idle_add_local_once(move || {
-                if let Some(p) = weak.upgrade() {
-                    p.show_virtual("Downloaded Songs", Vec::new(), "0 songs available offline");
-                }
-            });
+            self.show_downloads();
             return;
         }
         if pid == "HISTORY" {
@@ -2260,6 +2279,13 @@ impl PlaylistPage {
         self.is_fully_loaded.set(true);
         self.is_fully_fetched.set(true);
         self.stack.set_visible_child_name("loading");
+    }
+
+    /// Fill the Downloads page from what is on disk now.
+    pub fn show_downloads(self: &Rc<Self>) {
+        let tracks: Vec<Track> = self.ctx.downloads.all().iter().map(|entry| entry.track()).collect();
+        let meta = format!("{} {} available offline", tracks.len(), if tracks.len() == 1 { "song" } else { "songs" });
+        self.show_virtual("Downloaded Songs", tracks, &meta);
     }
 
     /// Port of _reshow_virtual and _fill_downloads_page.

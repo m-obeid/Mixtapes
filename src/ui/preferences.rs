@@ -341,6 +341,24 @@ fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup 
     }
     group.add(&background_row);
 
+    let restore_row = switch_row("Restore Queue on Startup", "Come back to the queue, song and position you left", pref_bool(ctx, "restore_queue", true));
+    let autoplay_row = switch_row("Play on Startup", "Start the restored song as soon as the app opens", pref_bool(ctx, "autoplay_on_start", false));
+    autoplay_row.set_sensitive(restore_row.is_active());
+    {
+        let (ctx, autoplay_row) = (ctx.clone(), autoplay_row.clone());
+        restore_row.connect_active_notify(move |row| {
+            save(&ctx, "restore_queue", row.is_active());
+            ctx.player.set_keep_session(row.is_active());
+            autoplay_row.set_sensitive(row.is_active());
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        autoplay_row.connect_active_notify(move |row| save(&ctx, "autoplay_on_start", row.is_active()));
+    }
+    group.add(&restore_row);
+    group.add(&autoplay_row);
+
     let current = pref_str(ctx, "history_mode", "immediate");
     let labels: Vec<&str> = HISTORY_MODES.iter().map(|(_, label)| *label).collect();
     let selected = HISTORY_MODES.iter().position(|(key, _)| *key == current).unwrap_or(0);

@@ -18,11 +18,14 @@ use crate::lyrics::model::{Alternative, LyricLine, LyricsMatch, LyricsResult};
 use crate::lyrics::{DEFAULT_MANUAL_SEARCH_LIMIT, DEFAULT_MATCH_LIMIT, Lyrics, TrackQuery, prefs};
 use crate::model::PlaybackStatus;
 use crate::ui::context::UiContext;
+use crate::ui::widgets::allocate_bin::AllocateBin;
 use crate::ui::widgets::fade_edges_bin::FadeEdgesBin;
 use crate::ui::widgets::lyric_rows::{Effects, InterludeRow, LyricRow, RowOptions, find_interludes};
 
 /// Autoscroll stands down this long after the listener scrolls by hand.
 const USER_SCROLL_PAUSE: Duration = Duration::from_secs(4);
+/// Two position ticks further apart than this, in seconds, are a seek and not playback.
+const SEEK_JUMP: f64 = 1.5;
 /// After a tap-to-seek, position ticks from before the seek are ignored this long.
 const SEEK_SETTLE: Duration = Duration::from_millis(600);
 const SCROLL_ANIMATION_MS: f64 = 500.0;
@@ -103,6 +106,9 @@ pub struct LyricsView {
     stack: gtk::Stack,
     status_page: adw::StatusPage,
     scroller: gtk::ScrolledWindow,
+    laid_out: AllocateBin,
+    /// The list and viewport size the last recentre saw.
+    laid_out_size: Cell<(i32, i32, i32)>,
     list: gtk::ListBox,
     picker_btn: gtk::MenuButton,
     popover: gtk::Popover,
@@ -255,7 +261,9 @@ impl LyricsView {
         // large bottom one lets the last lines reach the viewport centre.
         let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::Single).margin_top(32).margin_bottom(400).margin_start(16).margin_end(16).css_classes(["lyrics-list"]).build();
         let clamp = adw::Clamp::builder().maximum_size(820).tightening_threshold(640).child(&list).build();
-        scroller.set_child(Some(&clamp));
+        // The rows report their new bounds here, in the frame that moved them.
+        let laid_out = AllocateBin::new(&clamp);
+        scroller.set_child(Some(&laid_out));
         let fade = FadeEdgesBin::new(20.0, 80.0);
         fade.set_orientation(gtk::Orientation::Vertical);
         fade.set_hexpand(true);
@@ -331,6 +339,8 @@ impl LyricsView {
             stack,
             status_page,
             scroller,
+            laid_out,
+            laid_out_size: Cell::new((0, 0, 0)),
             list,
             picker_btn,
             popover,
@@ -407,6 +417,28 @@ impl LyricsView {
         self.list.connect_row_activated(weak!(|v, _, row| v.on_row_activated(row)));
         // A resize rewraps the lines and moves the current one out of the middle.
         self.scroller.vadjustment().connect_changed(weak!(|v, _| v.recentre_after_layout()));
+        // The rows have their new bounds here, before the frame is painted. Recentring now
+        // keeps the line in the middle in every frame of a resize. The adjustment's own
+        // signal comes too late for that: the tick it queues runs in the next frame.
+        let weak = Rc::downgrade(self);
+        self.laid_out.set_on_allocated(move || {
+            let Some(view) = weak.upgrade() else { return };
+            let size = (view.laid_out.width(), view.laid_out.height(), view.scroller.height());
+            // Only a new size. Words lighting up relayout the list every frame, and
+            // recentring on those would cut the eased scroll to the next line short.
+            if view.laid_out_size.replace(size) != size && view.synced.get() {
+                view.recentre_queued.set(false);
+                let adj = view.scroller.vadjustment();
+                let before = adj.value();
+                view.recentre();
+                // The viewport placed the list before the scroll moved, and a relayout asked
+                // for from inside one is dropped. Place the list where the viewport would.
+                if adj.value() != before {
+                    let offset = gtk::graphene::Point::new(0.0, -(adj.value() as i32) as f32);
+                    view.laid_out.allocate(size.0, size.1, -1, Some(gtk::gsk::Transform::new().translate(&offset)));
+                }
+            }
+        });
         // Only the scroll controller: a drag gesture fired on incidental pointer movement.
         let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
         let weak = Rc::downgrade(self);
@@ -468,6 +500,14 @@ impl LyricsView {
         let state = self.ctx.player.state().clone();
         state.connect_video_id_notify(weak!(|v, state| v.on_metadata_changed(&state.video_id())));
         state.connect_position_notify(weak!(|v, state| v.on_progression(state.position())));
+        // While a song plays, the audio thread keeps reporting the old position until the
+        // seek lands. Each of those ticks would light the old line again, then the new one.
+        let weak = Rc::downgrade(self);
+        state.connect_seeked(move |position| {
+            if let Some(view) = weak.upgrade() {
+                view.seek_pending.set(Some((position, Instant::now())));
+            }
+        });
         state.connect_status_notify(weak!(|v, state| v.on_state_changed(state.status())));
     }
 
@@ -509,7 +549,7 @@ impl LyricsView {
     }
 
     fn on_progression(self: &Rc<Self>, pos: f64) {
-        self.last_pos.set(pos);
+        let previous = self.last_pos.replace(pos);
         if !self.synced.get() || self.lines.borrow().is_empty() {
             return;
         }
@@ -520,9 +560,19 @@ impl LyricsView {
         }
         if let Some((start, at)) = self.seek_pending.get() {
             if (pos - start).abs() > 1.5 && at.elapsed() < SEEK_SETTLE {
+                // A tick from before the seek is not where playback is.
+                self.last_pos.set(start);
                 return;
             }
             self.seek_pending.set(None);
+        }
+        // A line that is left behind sweeps on to its end before it fades. After a seek
+        // that would leave every line the scrub crossed singing at once, so they go dark.
+        // They fade out as any line does: a hard reset of every row flashed on each scrub step.
+        if (pos - previous).abs() > SEEK_JUMP {
+            for row in self.rows.borrow().values() {
+                row.stop_sweep();
+            }
         }
 
         let ms = (pos * 1000.0) as i64;
@@ -540,8 +590,10 @@ impl LyricsView {
         let idx = self.index_for_position(pos).filter(|i| self.lines.borrow()[*i].end.is_none_or(|end| pos < end));
         if idx != self.active_idx.get() {
             self.activate_row(idx, ms);
-        } else if let Some(row) = idx.and_then(|i| self.rows.borrow().get(&i).cloned()) {
-            row.set_cursor_ms(ms);
+        } else if let Some(idx) = idx {
+            for row in self.group_rows(idx) {
+                row.set_cursor_ms(ms);
+            }
         }
     }
 
@@ -747,16 +799,28 @@ impl LyricsView {
         pending.into_iter().for_each(add_interlude);
     }
 
+    /// The line being sung at `pos`. Of lines that share a start, the first: the rest follow it.
     fn index_for_position(&self, pos: f64) -> Option<usize> {
-        let mut active = None;
+        let mut active: Option<(usize, f64)> = None;
         for (i, line) in self.lines.borrow().iter().enumerate() {
             match line.start {
-                Some(start) if start <= pos => active = Some(i),
+                Some(start) if start <= pos => {
+                    if active.is_none_or(|(_, leader)| start > leader) {
+                        active = Some((i, start));
+                    }
+                }
                 Some(_) => break,
                 None => {}
             }
         }
-        active
+        active.map(|(i, _)| i)
+    }
+
+    /// The row of line `idx` and the rows sung with it.
+    fn group_rows(&self, idx: usize) -> Vec<LyricRow> {
+        let followers = sung_with(&self.lines.borrow(), idx);
+        let rows = self.rows.borrow();
+        std::iter::once(idx).chain(followers).filter_map(|i| rows.get(&i).cloned()).collect()
     }
 
     fn interlude_at(&self, ms: i64) -> Option<InterludeRow> {
@@ -772,8 +836,10 @@ impl LyricsView {
     fn enter_interlude(self: &Rc<Self>, row: &InterludeRow, ms: i64) {
         if self.lit_interlude.borrow().as_ref() != Some(row) {
             // Dim whatever lyric line was lit before the break.
-            if let Some(prev) = self.lit_idx.take().and_then(|i| self.rows.borrow().get(&i).cloned()) {
-                prev.set_cursor_ms(-1);
+            if let Some(prev) = self.lit_idx.take() {
+                for row in self.group_rows(prev) {
+                    row.set_cursor_ms(-1);
+                }
             }
             if let Some(prev) = self.lit_interlude.replace(Some(row.clone())) {
                 prev.set_cursor_ms(-1);
@@ -790,15 +856,18 @@ impl LyricsView {
             lit.set_cursor_ms(-1);
         }
         if let Some(prev) = self.lit_idx.get().filter(|lit| Some(*lit) != idx) {
-            if let Some(row) = self.rows.borrow().get(&prev) {
+            for row in self.group_rows(prev) {
                 row.set_cursor_ms(-1);
             }
             self.lit_idx.set(None);
         }
         self.active_idx.set(idx);
         let Some(idx) = idx else { return };
-        let Some(row) = self.rows.borrow().get(&idx).cloned() else { return };
-        row.set_cursor_ms(cursor_ms);
+        let group = self.group_rows(idx);
+        let Some(row) = group.first().cloned() else { return };
+        for member in &group {
+            member.set_cursor_ms(cursor_ms);
+        }
         self.lit_idx.set(Some(idx));
         // Only the full level blurs by distance, and this walk runs on every line change.
         self.restore_distances();
@@ -819,7 +888,9 @@ impl LyricsView {
         self.reset_all_rows();
         self.last_pos.set(start);
         if let Some(row) = lyric {
-            self.activate_row(usize::try_from(row.line_idx()).ok(), start_ms);
+            // A tap on a translation line lights the pair, from its first line.
+            let leader = usize::try_from(row.line_idx()).ok().map(|idx| leader_of(&self.lines.borrow(), idx));
+            self.activate_row(leader, start_ms);
         } else if let Some(row) = interlude {
             self.enter_interlude(row, start_ms);
         }
@@ -847,6 +918,18 @@ impl LyricsView {
             view.restore_distances();
             glib::ControlFlow::Break
         });
+    }
+
+    /// Demo hook: how many pixels the current line sits from the middle of the viewport, when shown.
+    pub fn centre_error_for_demo(&self) -> Option<f64> {
+        if !self.root.is_mapped() || !self.synced.get() {
+            return None;
+        }
+        let bounds = self.list.selected_row()?.compute_bounds(&self.list).filter(|b| b.height() > 0.0)?;
+        // The scroll offset the rows were placed with, which is what the frame shows. The
+        // adjustment alone would hide a frame that moved it after the rows were laid out.
+        let placed_with = self.list.compute_bounds(&self.laid_out)?.y() - self.list.compute_bounds(&self.scroller)?.y();
+        Some(self.centred_value(&bounds)? - f64::from(placed_with))
     }
 
     /// Demo hook: a scripted scroll counts as the listener's.
@@ -909,7 +992,8 @@ impl LyricsView {
         Some(centred.clamp(adj.lower(), (adj.upper() - adj.page_size()).max(adj.lower())))
     }
 
-    /// The viewport or the list changed size. The rows have their new bounds one frame later.
+    /// The viewport or the list changed size. `laid_out` recentres inside the layout pass
+    /// when it sees one. The tick is for a change it did not see.
     fn recentre_after_layout(self: &Rc<Self>) {
         if !self.synced.get() || !self.root.is_mapped() || self.recentre_queued.replace(true) {
             return;
@@ -917,8 +1001,9 @@ impl LyricsView {
         let weak = Rc::downgrade(self);
         self.root.add_tick_callback(move |_, _| {
             if let Some(view) = weak.upgrade() {
-                view.recentre_queued.set(false);
-                view.recentre();
+                if view.recentre_queued.replace(false) {
+                    view.recentre();
+                }
             }
             glib::ControlFlow::Break
         });
@@ -1316,8 +1401,24 @@ fn sweep_end_ms(lines: &[LyricLine], idx: usize, synced: bool) -> Option<i64> {
     if !synced {
         return None;
     }
-    let end = lines[idx].end.or_else(|| lines[idx + 1..].iter().find_map(|l| l.start));
+    // The next line that starts later: one that shares this line's start is sung with it.
+    let own = lines[idx].start;
+    let end = lines[idx].end.or_else(|| lines[idx + 1..].iter().filter_map(|l| l.start).find(|start| own.is_none_or(|own| *start > own)));
     end.map(|seconds| (seconds * 1000.0) as i64)
+}
+
+/// The first of the lines that start when line `idx` does.
+fn leader_of(lines: &[LyricLine], idx: usize) -> usize {
+    let Some(start) = lines.get(idx).and_then(|l| l.start) else { return idx };
+    idx - lines[..idx].iter().rev().take_while(|l| l.start == Some(start)).count()
+}
+
+/// The lines after `idx` that start at the same moment: a translation printed as a line of
+/// its own under the original, as some LRC files have it. They are lit with their leader.
+fn sung_with(lines: &[LyricLine], idx: usize) -> std::ops::Range<usize> {
+    let Some(start) = lines.get(idx).and_then(|l| l.start) else { return idx + 1..idx + 1 };
+    let count = lines[idx + 1..].iter().take_while(|l| l.start == Some(start)).count();
+    idx + 1..idx + 1 + count
 }
 
 #[cfg(test)]
@@ -1333,5 +1434,15 @@ mod tests {
         assert_eq!(sweep_end_ms(&lines, 1, true), Some(9000));
         assert_eq!(sweep_end_ms(&lines, 3, true), None);
         assert_eq!(sweep_end_ms(&lines, 0, false), None);
+    }
+
+    #[test]
+    fn a_translation_on_its_own_line_is_sung_with_the_line_above() {
+        let lines = vec![LyricLine::new(Some(1.0), "少し"), LyricLine::new(Some(1.0), "a little"), LyricLine::new(Some(4.0), "次"), LyricLine::new(None, "x"), LyricLine::new(None, "y")];
+        assert_eq!(sung_with(&lines, 0), 1..2);
+        assert_eq!(sung_with(&lines, 2), 3..3);
+        assert_eq!(sung_with(&lines, 3), 4..4, "unsynced lines share no moment");
+        assert_eq!((leader_of(&lines, 1), leader_of(&lines, 2), leader_of(&lines, 4)), (0, 2, 4));
+        assert_eq!(sweep_end_ms(&lines, 0, true), Some(4000), "the pair sweeps until the next moment, not zero seconds");
     }
 }

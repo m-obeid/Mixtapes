@@ -22,6 +22,9 @@ mod imp {
         pub artist: RefCell<String>,
         #[property(get, set)]
         pub video_id: RefCell<String>,
+        /// The cover's address, or empty when the track has none.
+        #[property(get, set)]
+        pub thumbnail_url: RefCell<String>,
         #[property(get, set)]
         pub playing: Cell<bool>,
         /// True while the playing row's track is paused or stopped.
@@ -51,6 +54,7 @@ impl QueueEntry {
             .property("title", track.title.as_str())
             .property("artist", track.artist.as_str())
             .property("video-id", track.video_id.as_str())
+            .property("thumbnail-url", track.thumb.as_deref().unwrap_or_default())
             .property("playing", playing)
             .property("paused", paused)
             .build();
@@ -73,6 +77,9 @@ impl QueueEntry {
         }
         if self.artist() != track.artist {
             self.set_artist(track.artist.as_str());
+        }
+        if self.thumbnail_url() != track.thumb.as_deref().unwrap_or_default() {
+            self.set_thumbnail_url(track.thumb.as_deref().unwrap_or_default());
         }
         if self.playing() != playing {
             self.set_playing(playing);

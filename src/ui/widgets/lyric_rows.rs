@@ -894,6 +894,21 @@ impl LyricRow {
         s.recompute_targets();
     }
 
+    /// Stop singing at once, where `set_cursor_ms(-1)` lets the sweep finish first.
+    /// The words fade from where they are, paused or not. A row at rest is left alone.
+    pub fn stop_sweep(&self) {
+        let mut guard = self.imp().state.borrow_mut();
+        let Some(s) = guard.as_mut() else { return };
+        if s.cursor_ms < 0 && !s.wants_turn_off {
+            return;
+        }
+        s.cursor_ms = -1;
+        s.internal_cursor_ms = -1.0;
+        s.wants_turn_off = false;
+        s.recompute_effect_targets();
+        s.recompute_targets();
+    }
+
     pub fn set_distance(&self, distance: i32) {
         if let Some(s) = self.imp().state.borrow_mut().as_mut() {
             if s.distance != distance {

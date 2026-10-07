@@ -210,30 +210,6 @@ box.song-row, .song-row-button {
   padding: 8px;
 }
 
-/* While a view is actively scrolling, freeze the hover-background fades.
-   Rows/cards sliding under a stationary pointer re-toggle :hover every frame,
-   and each fade is a 150-300 ms animation — dozens overlapping is what makes
-   scrolling stutter only when the pointer is over content. The is-scrolling
-   class is added/removed by suppress_hover_while_scrolling(); a still pointer
-   (genuine hover) keeps the fade. Selectors are kept specific enough to win
-   the cascade over the base transition rules they mirror. */
-
-/* Freezing the *fade* still left an instant per-row repaint as each row's
-   :hover background flipped on/off under the moving content. Blank the hover
-   background entirely while scrolling so a row passing under the pointer
-   produces no visual change at all — the actual residual stutter. The
-   stationary highlight returns the moment the scroll settles;
-   .playing/.selected keep their persistent tint. Child controls (like button,
-   menu) get the same treatment so their Adwaita hover doesn't repaint either. */
-.is-scrolling listview.playlist-view box.song-row:hover:not(.playing):not(.selected),
-.is-scrolling gridview.playlist-view box.song-row:hover:not(.playing):not(.selected),
-.is-scrolling list > row:hover:not(.playing) box.song-row,
-.is-scrolling .artist-horizontal-item:hover,
-.is-scrolling box.song-row button:hover,
-.is-scrolling list > row:hover:not(.playing) {
-  background-color: transparent;
-}
-
 list,
 list > row,
 listbox,
@@ -647,6 +623,22 @@ window > windowhandle,
     background-color: transparent;
 }
 
+/* The sidebar's action row is as tall as the player bar, 74px, with its
+   buttons level with the player bar's controls. The player bar is a 1px
+   border, a 5px seek line, then 8px + 48px cover + 12px, so its controls
+   are centered 36px above the window edge and a 34px button needs 19px
+   below. The 12px at the sides is the player bar's own side margin. */
+.queue-panel.sidebar .queue-actions {
+    padding: 21px 12px 19px 12px;
+}
+
+/* The queue header's two lines of text stand 35px tall, 1px more than a
+   header bar's buttons, which made that header taller than the window's.
+   Tucked in, the pair fits with room. */
+.queue-summary {
+    margin-top: -2px;
+}
+
 .sidebar-title {
     font-weight: 800;
     color: var(--window-fg-color);
@@ -862,6 +854,33 @@ window > windowhandle,
 
 /* One-column grids standing in for lists: drop Adwaita's grid cell padding and corners. */
 gridview.playlist-view > child,
+/* The badge over a queue row's cover: the row's position while the pointer
+   is on it, the play or pause icon on the current row. Out of sight otherwise,
+   so the cover reads clean.
+
+   The cover itself goes dark under the badge, through a filter. A dark layer
+   on top left a bright fringe at the rounded corners: each layer is clipped
+   on its own, and the half-covered edge pixels let the cover through. */
+.queue-cover {
+  border-radius: 6px;
+}
+.queue-cover > image {
+  transition: filter 150ms ease;
+}
+.queue-row:hover .queue-cover > image,
+.queue-row.playing .queue-cover > image {
+  filter: brightness(0.25);
+}
+.queue-badge {
+  color: white;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.queue-row:hover .queue-badge,
+.queue-row.playing .queue-badge {
+  opacity: 1;
+}
+
 gridview.queue-list > child {
   padding: 2px;
   border-radius: 0;

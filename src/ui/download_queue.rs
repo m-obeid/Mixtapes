@@ -20,6 +20,7 @@ const LINGER: Duration = Duration::from_secs(5);
 
 struct Row {
     widget: gtk::Box,
+    name: gtk::Label,
     status: gtk::Label,
     bar: gtk::ProgressBar,
     cancel: gtk::Button,
@@ -92,7 +93,7 @@ impl DownloadQueue {
         widget.append(&cancel);
 
         self.items.append(&widget);
-        self.rows.borrow_mut().insert(video_id.to_owned(), Row { widget, status, bar, cancel });
+        self.rows.borrow_mut().insert(video_id.to_owned(), Row { widget, name, status, bar, cancel });
         tracing::debug!(video_id, rows = self.rows.borrow().len(), "download row");
     }
 
@@ -104,6 +105,11 @@ impl DownloadQueue {
                     id.remove();
                 }
                 self.add_row(video_id, if title.is_empty() { "Downloading" } else { title });
+            }
+            Event::Named { video_id, title } => {
+                if let Some(row) = self.rows.borrow().get(video_id) {
+                    row.name.set_label(title);
+                }
             }
             Event::Progress { video_id, fraction } => {
                 if let Some(row) = self.rows.borrow().get(video_id) {

@@ -89,6 +89,40 @@
 
   <releases>
 
+    <release version="2026-10-07.0" date="2026-10-07">
+      <description>
+        <p>A release about the queue and the player. The queue comes back after a restart, shows covers, names where it came from and keeps the playing song in the middle, the desktop player follows your pointer like the drawer on phones, and a round of fixes from your reports makes lyrics and the listening history smoother.</p>
+        <ul>
+          <li>Covers in the queue. Hover a row to see its position, and the playing row shows play or pause on its cover</li>
+          <li>The queue says where it came from: the playlist, album or artist, or "Radio of" a song, with the track count and total time under it</li>
+          <li>The playing song stays in the middle of the queue. Scroll away and a round arrow button takes you back to it</li>
+          <li>On desktop, drag the player bar up and the player follows your pointer, settling open or shut when you let go. Drag the cover side down to close it. Clicking the bar opens and closes it too</li>
+          <li>Shuffle, repeat, add to playlist and clear sit in a row at the bottom of the queue, level with the player bar and in reach on a tall phone</li>
+          <li>The queue survives a restart. The app opens with the queue, song and position you left, and can start playing at once: both under Preferences, Playback</li>
+          <li>Remove several downloads at once: select songs, right-click, Remove Downloads</li>
+          <li>Keyboard shortcuts for the player (Ctrl+E), refresh (F5 or Ctrl+R) and search (Ctrl+F), listed in a shortcuts dialog that matches the rest of GNOME</li>
+        </ul>
+        <ul>
+          <li>The Player and Lyrics switch on the desktop player moved to the bottom, in one row with the queue and collapse buttons</li>
+          <li>Like sits before the queue button in the player bar, the same order as in the expanded player</li>
+          <li>A long queue title scrolls instead of being cut off</li>
+          <li>Song lists in the listening history look like the ones on Home</li>
+          <li>Downloading a song when you like it can be switched off under Preferences</li>
+          <li>Lyrics that print a translation as a line of its own, under the same timestamp, light both lines together</li>
+          <li>Fix: lyrics stay centred while the window is resized, without the line bouncing up and down</li>
+          <li>Fix: dragging the seek bar no longer leaves several lyric lines lit at once, with or without the song playing</li>
+          <li>Fix: the listening history scrolls smoothly and opens without a freeze</li>
+          <li>Fix: the download list names a song queued by a like once its download starts, instead of "Downloading"</li>
+          <li>Fix: the refresh button on the Downloads page reloads the list instead of emptying it, and a removed download leaves the list at once</li>
+          <li>Fix: the artist banner fades into the page when the blurred background switches on after the page is open</li>
+          <li>Fix: the player bar slides in on the first song instead of popping up</li>
+          <li>Fix: Quick picks tiles keep their shadow and are no longer cut off at the edges, and every tile reads as a tile in light mode</li>
+          <li>Fix: the artist picture is no longer cut off by the header bar</li>
+          <li>Fix: the title, artist and cover match the song when the queue changes while it loops</li>
+        </ul>
+      </description>
+    </release>
+
     <release version="2026-10-03.0" date="2026-10-03">
       <description>
         <p>Mixtapes is now written in Rust. The whole app was rebuilt from the ground up over the past weeks, with every feature of the Python version carried over, and it is faster, lighter and quicker to start in every way we could measure.</p>

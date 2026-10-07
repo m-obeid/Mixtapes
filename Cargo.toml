@@ -103,9 +103,15 @@ glib-build-tools = "0.22"
 # The icon and file details in mixtapes.exe (windows/mixtapes.rc).
 embed-resource = "3"
 
+[profile.dev]
+# File and line in backtraces, no variable info. Full debug info made a 680 MB binary.
+debug = "line-tables-only"
+
 [profile.dev.package."*"]
 # Optimized dependencies keep debug builds of gtk and gst usable.
 opt-level = 2
+# Nobody steps through the dependencies, and their debug info was most of target/.
+debug = false
 
 [profile.release]
 lto = "thin"

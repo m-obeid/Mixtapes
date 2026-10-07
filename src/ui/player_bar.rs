@@ -16,6 +16,7 @@ use crate::state::PlayerState;
 use crate::ui::cover::CoverImage;
 use crate::ui::format_time;
 use crate::ui::like_button::LikeButton;
+use crate::ui::widgets::sheet_stack::{watch_drag, SheetDrag};
 use crate::ui::marquee::MarqueeLabel;
 
 /// Position updates are ignored this long after a user seek, until the pipeline catches up.
@@ -36,6 +37,7 @@ pub struct PlayerBarCallbacks {
 struct LateCallbacks {
     on_queue_click: RefCell<Option<Rc<dyn Fn()>>>,
     on_expand: RefCell<Option<Rc<dyn Fn()>>>,
+    on_drag: RefCell<Option<Rc<dyn Fn(SheetDrag)>>>,
 }
 
 pub struct PlayerBar {
@@ -200,6 +202,12 @@ impl PlayerBar {
         volume_container.add_controller(hover);
         controls_box.append(&volume_container);
 
+        // Like sits before the queue toggle, the order the expanded player uses.
+        let like = LikeButton::new(player.clone());
+        like.widget().remove_css_class("circular");
+        like.widget().set_visible(false);
+        controls_box.append(like.widget());
+
         let queue_btn = gtk::ToggleButton::builder()
             .icon_name("music-queue-symbolic")
             .css_classes(["flat"])
@@ -207,11 +215,6 @@ impl PlayerBar {
             .tooltip_text("Toggle Queue")
             .build();
         controls_box.append(&queue_btn);
-
-        let like = LikeButton::new(player.clone());
-        like.widget().remove_css_class("circular");
-        like.widget().set_visible(false);
-        controls_box.append(like.widget());
 
         // Overflow popover receives controls the responsive tick folds away.
         let overflow_box = gtk::Box::builder()
@@ -304,6 +307,11 @@ impl PlayerBar {
 
     pub fn set_on_expand(&self, f: impl Fn() + 'static) {
         self.late.on_expand.replace(Some(Rc::new(f)));
+    }
+
+    /// Desktop: an upward drag on the bar, for the window to pull the player view up with.
+    pub fn set_on_drag(&self, f: impl Fn(SheetDrag) + 'static) {
+        self.late.on_drag.replace(Some(Rc::new(f)));
     }
 
     fn queue_click(&self) {
@@ -665,7 +673,9 @@ impl PlayerBar {
         });
     }
 
-    /// Compact-mode gestures: drag up or tap expands, horizontal swipe skips.
+    /// Bar gestures: a tap expands or collapses at every width. A drag up expands: on
+    /// phones past a threshold, on desktop with the player view following the pointer.
+    /// Horizontal swipe skips on phones.
     fn connect_gestures(self: &Rc<Self>) {
         let drag = gtk::GestureDrag::builder()
             .propagation_phase(gtk::PropagationPhase::Bubble)
@@ -683,13 +693,26 @@ impl PlayerBar {
         });
         self.content_box.add_controller(drag);
 
+        // Desktop: the player view rises with the pointer and settles when it lets go.
+        let (weak, weak_report) = (Rc::downgrade(self), Rc::downgrade(self));
+        watch_drag(
+            &self.content_box,
+            move |dy| weak.upgrade().is_some_and(|bar| !bar.compact.get() && !bar.sheet_bar.get() && dy < 0.0),
+            move |drag| {
+                let handler = weak_report.upgrade().and_then(|bar| bar.late.on_drag.borrow().clone());
+                if let Some(f) = handler {
+                    f(drag);
+                }
+            },
+        );
+
         let tap = gtk::GestureClick::builder()
             .propagation_phase(gtk::PropagationPhase::Bubble)
             .build();
         let weak = Rc::downgrade(self);
-        tap.connect_released(move |_, _, _, _| {
+        tap.connect_released(move |_, _, x, y| {
             let Some(bar) = weak.upgrade() else { return };
-            if !bar.sheet_bar.get() && bar.compact.get() {
+            if !bar.sheet_bar.get() && !bar.on_control(x, y) {
                 bar.expand();
             }
         });
@@ -722,6 +745,22 @@ impl PlayerBar {
             });
         });
         self.content_box.add_controller(swipe);
+    }
+
+    /// A tap on a button or slider belongs to that control, and one that
+    /// lands while the overflow popover is up only closes the popover.
+    fn on_control(&self, x: f64, y: f64) -> bool {
+        if self.overflow_btn.popover().is_some_and(|p| p.is_visible()) {
+            return true;
+        }
+        let mut widget = self.content_box.pick(x, y, gtk::PickFlags::DEFAULT);
+        while let Some(w) = widget.filter(|w| w != self.content_box.upcast_ref::<gtk::Widget>()) {
+            if w.is::<gtk::Button>() || w.is::<gtk::MenuButton>() || w.is::<gtk::Range>() {
+                return true;
+            }
+            widget = w.parent();
+        }
+        false
     }
 
     fn seek(&self, seconds: f64) {
@@ -765,8 +804,8 @@ impl PlayerBar {
     fn responsive_order(&self) -> Vec<gtk::Widget> {
         vec![
             self.volume_container.clone().upcast(),
-            self.queue_btn.clone().upcast(),
             self.like.widget().clone().upcast(),
+            self.queue_btn.clone().upcast(),
         ]
     }
 

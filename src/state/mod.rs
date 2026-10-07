@@ -65,6 +65,12 @@ mod imp {
         pub current_index: Cell<i32>,
         #[property(get, set)]
         pub queue_length: Cell<u32>,
+        /// Seconds of every queued track with a known length, summed.
+        #[property(get, set)]
+        pub queue_duration: Cell<u32>,
+        /// The playlist, album or radio the queue came from, else empty.
+        #[property(get, set)]
+        pub queue_source_title: RefCell<String>,
 
         #[property(get, set)]
         pub authenticated: Cell<bool>,

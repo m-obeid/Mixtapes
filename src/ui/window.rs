@@ -34,6 +34,7 @@ use crate::ui::pages::library::LibraryPage;
 use crate::ui::pages::playlist::{InitialData, PlaylistPage};
 use crate::ui::player_bar::{PlayerBar, PlayerBarCallbacks};
 use crate::ui::queue_panel::QueuePanel;
+use crate::ui::widgets::sheet_stack::SheetStack;
 
 const APP_ID: &str = "com.pocoguy.Muse";
 const APP_NAME: &str = "Mixtapes";
@@ -54,7 +55,8 @@ pub struct MainWindow {
     toast_overlay: adw::ToastOverlay,
     split_view: adw::OverlaySplitView,
     bottom_sheet: adw::BottomSheet,
-    main_stack: gtk::Stack,
+    /// The browser with the desktop player view as a sheet over it.
+    main_stack: SheetStack,
     view_stack: adw::ViewStack,
     back_btn: gtk::Button,
     search_bar: gtk::SearchBar,
@@ -80,7 +82,6 @@ pub struct MainWindow {
     ui: Rc<UiContext>,
     is_compact: Cell<bool>,
     sidebar_explicitly_opened: Cell<bool>,
-    prev_transition: Cell<(gtk::StackTransitionType, u32)>,
     search_timer: RefCell<Option<glib::SourceId>>,
     /// The channel behind the account's handle, resolved once per session.
     own_channel: RefCell<Option<String>>,
@@ -201,13 +202,8 @@ impl MainWindow {
             .vscrollbar_policy(gtk::PolicyType::Never)
             .child(&view_stack)
             .build();
-        let main_stack = gtk::Stack::builder()
-            .transition_type(gtk::StackTransitionType::SlideLeftRight)
-            .transition_duration(300)
-            .build();
-        main_stack.add_named(&content_bin, Some("browser"));
         let cover_view = DesktopCoverView::new(ui.clone());
-        main_stack.add_named(cover_view.widget(), Some("cover"));
+        let main_stack = SheetStack::new(&content_bin, cover_view.widget());
 
         let root_content_view = adw::ToolbarView::new();
         root_content_view.add_top_bar(&header_bar);
@@ -344,7 +340,6 @@ impl MainWindow {
             ui,
             is_compact: Cell::new(false),
             sidebar_explicitly_opened: Cell::new(false),
-            prev_transition: Cell::new((gtk::StackTransitionType::SlideLeftRight, 300)),
             search_timer: RefCell::new(None),
             own_channel: RefCell::new(None),
             upload_progress,
@@ -810,6 +805,13 @@ impl MainWindow {
                 w.on_expand_requested();
             }
         });
+        // Desktop only: the bar pulls the player view up after the pointer.
+        let weak = Rc::downgrade(self);
+        self.player_bar.set_on_drag(move |drag| {
+            if let Some(w) = weak.upgrade().filter(|w| !w.is_compact.get()) {
+                w.main_stack.drag(drag, false);
+            }
+        });
     }
 
     fn wire_player_views(self: &Rc<Self>) {
@@ -817,6 +819,12 @@ impl MainWindow {
         self.cover_view.set_on_dismiss(move || {
             if let Some(w) = weak.upgrade() {
                 w.dismiss_player();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.cover_view.set_on_drag(move |drag| {
+            if let Some(w) = weak.upgrade().filter(|w| !w.is_compact.get()) {
+                w.main_stack.drag(drag, true);
             }
         });
         let weak = Rc::downgrade(self);
@@ -843,8 +851,10 @@ impl MainWindow {
             }
         });
         let weak = Rc::downgrade(self);
-        self.main_stack.connect_visible_child_name_notify(move |_| {
+        self.main_stack.connect_open_changed(move |open| {
             if let Some(w) = weak.upgrade() {
+                // A drag opens and closes the sheet too, so the chevron follows from here.
+                w.player_bar.set_expanded(open);
                 w.sync_player_bar_visibility();
                 w.update_back_button();
             }
@@ -867,20 +877,11 @@ impl MainWindow {
     /// Chevron, tap or drag-up on the bar: cover view on desktop, sheet on phones.
     fn on_expand_requested(&self) {
         if !self.is_compact.get() {
-            if self.main_stack.visible_child_name().as_deref() == Some("cover") {
+            if self.main_stack.is_open() {
                 self.dismiss_player();
                 return;
             }
-            self.prev_transition.set((
-                self.main_stack.transition_type(),
-                self.main_stack.transition_duration(),
-            ));
-            self.main_stack.set_transition_duration(200);
-            self.main_stack
-                .set_transition_type(gtk::StackTransitionType::Crossfade);
-            self.main_stack.set_visible_child_name("cover");
-            self.back_btn.set_visible(true);
-            self.player_bar.set_expanded(true);
+            self.main_stack.set_open(true, true);
             return;
         }
         if self.bottom_sheet.sheet().is_none() {
@@ -895,17 +896,7 @@ impl MainWindow {
         if self.is_compact.get() {
             self.bottom_sheet.set_open(false);
         } else {
-            let was_cover = self.main_stack.visible_child_name().as_deref() == Some("cover");
-            if was_cover {
-                self.main_stack
-                    .set_transition_type(gtk::StackTransitionType::Crossfade);
-            }
-            self.main_stack.set_visible_child_name("browser");
-            if was_cover {
-                let (kind, duration) = self.prev_transition.get();
-                self.main_stack.set_transition_type(kind);
-                self.main_stack.set_transition_duration(duration);
-            }
+            self.main_stack.set_open(false, true);
             self.update_back_button();
         }
         self.player_bar.set_expanded(false);
@@ -913,7 +904,7 @@ impl MainWindow {
 
     fn dismiss_cover_if_open(&self) {
         if !self.is_compact.get()
-            && self.main_stack.visible_child_name().as_deref() == Some("cover")
+            && self.main_stack.is_open()
         {
             self.dismiss_player();
         }
@@ -921,12 +912,24 @@ impl MainWindow {
 
     fn sync_player_bar_visibility(&self) {
         let has_queue = self.ui.player.state().queue_length() > 0;
-        let cover_shown = self.main_stack.visible_child_name().as_deref() == Some("cover");
+        let cover_shown = self.main_stack.is_open();
         if has_queue && !self.is_compact.get() && cover_shown {
             self.player_bar_revealer.set_reveal_child(false);
             return;
         }
-        self.player_bar_revealer.set_reveal_child(has_queue);
+        if has_queue && !self.player_bar_revealer.reveals_child() {
+            // The first play is the busiest moment the window has. A slide started inside
+            // that frame is over by the time the next one is drawn, so it starts with the next.
+            let player = self.ui.player.clone();
+            self.player_bar_revealer.add_tick_callback(move |revealer, _| {
+                if player.state().queue_length() > 0 {
+                    revealer.set_reveal_child(true);
+                }
+                glib::ControlFlow::Break
+            });
+        } else {
+            self.player_bar_revealer.set_reveal_child(has_queue);
+        }
         self.bottom_sheet
             .set_can_open(has_queue && self.is_compact.get());
         if !has_queue {
@@ -952,7 +955,7 @@ impl MainWindow {
     fn update_back_button(&self) {
         self.update_refresh_button();
         if !self.is_compact.get()
-            && self.main_stack.visible_child_name().as_deref() == Some("cover")
+            && self.main_stack.is_open()
         {
             self.back_btn.set_visible(true);
             return;
@@ -969,7 +972,7 @@ impl MainWindow {
 
     fn on_back_clicked(&self) {
         if !self.is_compact.get()
-            && self.main_stack.visible_child_name().as_deref() == Some("cover")
+            && self.main_stack.is_open()
         {
             self.dismiss_player();
             return;
@@ -1126,15 +1129,9 @@ impl MainWindow {
             }
         });
         let page_c = page.clone();
-        let downloads = self.ui.downloads.clone();
         nav_page.connect_shown(move |_| {
             let page = page_c.clone();
-            let downloads = downloads.clone();
-            glib::idle_add_local_once(move || {
-                let tracks: Vec<Track> = downloads.all().iter().map(|entry| entry.track()).collect();
-                let meta = format!("{} {} available offline", tracks.len(), if tracks.len() == 1 { "song" } else { "songs" });
-                page.show_virtual("Downloaded Songs", tracks, &meta);
-            });
+            glib::idle_add_local_once(move || page.show_downloads());
         });
         unsafe { nav_page.set_data("pushed", PushedPage::Playlist(page)) };
         self.push_page(nav_page);
@@ -1775,13 +1772,8 @@ impl MainWindow {
         self.ui.set_compact(compact);
         // No `compact` class on the window, a class this high restyles every widget. Pages scope it themselves.
         if compact {
-            if self.main_stack.visible_child_name().as_deref() == Some("cover") {
-                let prev = self.main_stack.transition_type();
-                self.main_stack
-                    .set_transition_type(gtk::StackTransitionType::None);
-                self.main_stack.set_visible_child_name("browser");
-                self.main_stack.set_transition_type(prev);
-                self.player_bar.set_expanded(false);
+            if self.main_stack.is_open() {
+                self.main_stack.set_open(false, false);
             }
             self.title_bin.set_child(Some(&self.title_widget));
             self.player_bar.set_compact(true);

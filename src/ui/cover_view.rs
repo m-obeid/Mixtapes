@@ -13,6 +13,7 @@ use crate::ui::context::{NavRequest, UiContext};
 use crate::ui::like_button::LikeButton;
 use crate::ui::marquee::MarqueeLabel;
 use crate::ui::widgets::cover_picture::CoverPicture;
+use crate::ui::widgets::sheet_stack::{watch_drag, SheetDrag};
 use crate::ui::widgets::lyrics_view::LyricsView;
 use crate::ui::widgets::transport::Transport;
 use crate::ui::widgets::visualizer::Visualizer;
@@ -40,6 +41,7 @@ pub struct DesktopCoverView {
     lyrics_intent: Cell<bool>,
     suppress_sync: Cell<bool>,
     on_dismiss: RefCell<Option<Rc<dyn Fn()>>>,
+    on_drag: RefCell<Option<Rc<dyn Fn(SheetDrag)>>>,
     on_queue_click: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
@@ -56,8 +58,7 @@ impl DesktopCoverView {
         let toggle_nav = adw::ToggleGroup::builder()
             .css_classes(["round"])
             .halign(gtk::Align::Center)
-            .margin_top(8)
-            .margin_bottom(8)
+            .valign(gtk::Align::Center)
             .build();
         toggle_nav.add(
             adw::Toggle::builder()
@@ -73,7 +74,6 @@ impl DesktopCoverView {
                 .icon_name("format-justify-fill-symbolic")
                 .build(),
         );
-        toolbar.add_top_bar(&toggle_nav);
 
         // -- cover with the hover-revealed lyrics toggle -----------------
         let cover = CoverPicture::new(ctx.net.clone());
@@ -202,7 +202,7 @@ impl DesktopCoverView {
             .orientation(gtk::Orientation::Vertical)
             .hexpand(true)
             .vexpand(true)
-            .margin_bottom(32)
+            .margin_bottom(16)
             .margin_start(48)
             .margin_end(48)
             .build();
@@ -214,7 +214,7 @@ impl DesktopCoverView {
             .hexpand(true)
             .vexpand(true)
             .margin_top(16)
-            .margin_bottom(32)
+            .margin_bottom(16)
             .margin_end(24)
             .build();
         let lyrics_view = LyricsView::new(ctx.clone());
@@ -231,38 +231,40 @@ impl DesktopCoverView {
             .max_sidebar_width(900.0)
             .build();
 
+        // -- bottom row: the switcher in the middle, queue and collapse at the end --
         // Flat and square-cornered, both of them, like the player bar's buttons.
         let collapse_btn = gtk::Button::builder()
             .icon_name("go-down-symbolic")
             .css_classes(["flat"])
-            .valign(gtk::Align::End)
-            .halign(gtk::Align::End)
+            .valign(gtk::Align::Center)
             .tooltip_text("Collapse player")
-            .margin_end(24)
-            .margin_bottom(24)
             .build();
         // A toggle, so it lights up while the queue is open, as the player bar's does.
         let queue_btn = gtk::ToggleButton::builder()
             .icon_name("music-queue-symbolic")
             .css_classes(["flat"])
-            .valign(gtk::Align::End)
-            .halign(gtk::Align::End)
+            .valign(gtk::Align::Center)
             .tooltip_text("Queue")
-            .margin_end(66)
-            .margin_bottom(24)
             .build();
-        let view_overlay = gtk::Overlay::builder()
-            .hexpand(true)
-            .vexpand(true)
-            .child(&split)
+        let end_buttons = gtk::Box::builder().spacing(6).build();
+        end_buttons.append(&queue_btn);
+        end_buttons.append(&collapse_btn);
+        // Margins put both buttons where the player bar has its own two: 12px from
+        // the side, centered 36px above the window edge.
+        let bottom_row = gtk::CenterBox::builder()
+            .margin_start(12)
+            .margin_end(12)
+            .margin_top(8)
+            .margin_bottom(19)
             .build();
-        view_overlay.add_overlay(&collapse_btn);
-        view_overlay.add_overlay(&queue_btn);
+        bottom_row.set_center_widget(Some(&toggle_nav));
+        bottom_row.set_end_widget(Some(&end_buttons));
+        toolbar.add_bottom_bar(&bottom_row);
 
         let bp_bin = adw::BreakpointBin::builder()
             .width_request(150)
             .height_request(150)
-            .child(&view_overlay)
+            .child(&split)
             .build();
         let collapse_bp = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
             adw::BreakpointConditionLengthType::MaxWidth,
@@ -292,8 +294,20 @@ impl DesktopCoverView {
             lyrics_intent: Cell::new(false),
             suppress_sync: Cell::new(false),
             on_dismiss: RefCell::new(None),
+            on_drag: RefCell::new(None),
             on_queue_click: RefCell::new(None),
         });
+
+        // The cover side pulls the view down after the pointer. The lyrics side scrolls.
+        {
+            let weak = Rc::downgrade(&this);
+            watch_drag(&cover_outer, |dy| dy > 0.0, move |drag| {
+                let handler = weak.upgrade().and_then(|v| v.on_drag.borrow().clone());
+                if let Some(f) = handler {
+                    f(drag);
+                }
+            });
+        }
 
         {
             let weak = Rc::downgrade(&this);
@@ -333,6 +347,11 @@ impl DesktopCoverView {
 
     pub fn widget(&self) -> &adw::Bin {
         &self.root
+    }
+
+    /// A downward drag on the cover side, for the window to pull the view down with.
+    pub fn set_on_drag(&self, f: impl Fn(SheetDrag) + 'static) {
+        self.on_drag.replace(Some(Rc::new(f)));
     }
 
     pub fn set_on_dismiss(&self, f: impl Fn() + 'static) {

@@ -295,7 +295,10 @@ impl Engine {
 
         // Our own sink, so `clear_remembered_device` has something to reach.
         // What playbin would have built on its own is this same element.
-        let audio_sink = match gst::ElementFactory::make("autoaudiosink").name("audio-sink").build() {
+        // A demo run can play into nothing, at the real pace, for measuring with the speakers off.
+        let silent = std::env::var("MIXTAPES_DEMO_SILENT").ok().as_deref() == Some("1");
+        let sink = if silent { gst::ElementFactory::make("fakesink").name("audio-sink").property("sync", true).build() } else { gst::ElementFactory::make("autoaudiosink").name("audio-sink").build() };
+        let audio_sink = match sink {
             Ok(sink) => {
                 playbin.set_property("audio-sink", &sink);
                 Some(sink)

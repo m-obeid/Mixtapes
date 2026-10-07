@@ -11,6 +11,7 @@ use gtk::{gdk, gio, glib};
 use regex::Regex;
 use std::sync::LazyLock;
 
+use crate::queue::QueueSource;
 use crate::model::{ItemKind, MediaItem, Person, Track, VideoId};
 use crate::net::artist::{self, ArtistData, CardSection, SongSection};
 use crate::net::playlists;
@@ -125,11 +126,20 @@ impl ArtistPage {
         banner_wrapper.append(avatar.widget());
         banner_overlay.set_child(Some(&banner_wrapper));
         // The fade follows the window's blur mode, read off the root's classes.
+        // Blur starts with the first cover, which can load after the page is on screen.
         {
-            let wrapper = banner_wrapper.clone();
+            let hooked = Cell::new(false);
             banner_wrapper.connect_map(move |w| {
-                let active = w.root().is_some_and(|r| r.has_css_class("cover-bg-active"));
-                wrapper.set_fade_active(active);
+                let Some(root) = w.root() else { return };
+                w.set_fade_active(root.has_css_class("cover-bg-active"));
+                if !hooked.replace(true) {
+                    let weak = w.downgrade();
+                    root.connect_notify_local(Some("css-classes"), move |root, _| {
+                        if let Some(wrapper) = weak.upgrade() {
+                            wrapper.set_fade_active(root.has_css_class("cover-bg-active"));
+                        }
+                    });
+                }
             });
         }
         let scrim = gtk::Box::builder()
@@ -334,7 +344,7 @@ impl ArtistPage {
             if let Some(p) = weak.upgrade() {
                 let tracks = p.build_queue_tracks();
                 if !tracks.is_empty() {
-                    p.ctx.player.play_tracks(tracks, 0, false, None, false);
+                    p.ctx.player.play_tracks(tracks, 0, false, p.queue_source(), false);
                 }
             }
         });
@@ -345,7 +355,7 @@ impl ArtistPage {
                 if !tracks.is_empty() {
                     p.ctx
                         .player
-                        .play_tracks(tracks, usize::MAX, true, None, false);
+                        .play_tracks(tracks, usize::MAX, true, p.queue_source(), false);
                 }
             }
         });
@@ -799,7 +809,13 @@ impl ArtistPage {
             .unwrap_or(0);
         self.ctx
             .player
-            .play_tracks(queue, start, false, None, false);
+            .play_tracks(queue, start, false, self.queue_source(), false);
+    }
+
+    /// The top songs as a queue source: the artist's name for the queue header.
+    fn queue_source(&self) -> Option<QueueSource> {
+        let channel_id = self.channel_id.borrow().clone();
+        (!channel_id.is_empty()).then(|| QueueSource::new(channel_id, self.artist_name.borrow().clone()))
     }
 
     /// Port of _build_queue_tracks: the top songs with the page's artist
@@ -1066,8 +1082,9 @@ impl ArtistPage {
 
     fn on_radio_clicked(&self) {
         let radio_id = self.data.borrow().as_ref().and_then(|d| d.radio_id.clone());
+        let name = self.data.borrow().as_ref().map(|d| d.name.clone()).unwrap_or_default();
         match radio_id {
-            Some(id) => self.ctx.player.start_radio(None, Some(id)),
+            Some(id) => self.ctx.player.start_radio(None, Some(id), &name),
             None => {
                 // Fall back to a radio from the first top song.
                 let first = self
@@ -1079,7 +1096,7 @@ impl ArtistPage {
                     .map(|t| t.video_id.0.clone())
                     .filter(|v| !v.is_empty());
                 if let Some(vid) = first {
-                    self.ctx.player.start_radio(Some(vid), None);
+                    self.ctx.player.start_radio(Some(vid), None, &name);
                 }
             }
         }

@@ -4,10 +4,12 @@
 
 use std::rc::Rc;
 
-use gtk::{gdk, gio, glib, prelude::*};
+use adw::prelude::*;
+use gtk::{gdk, gio, glib};
 
 use crate::model::{ItemKind, MediaItem, Track};
 use crate::player::Player;
+use crate::queue::QueueSource;
 use crate::ui::context::{NavRequest, Navigator, UiContext};
 use crate::ui::{copy_to_clipboard, toast};
 
@@ -154,9 +156,9 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
     if let Some(ctx) = opts.ctx.clone() {
         if !vid.is_empty() && online && !multi && !hidden("start_radio") {
             let anchor = anchor.clone();
-            let (player, vid_c) = (player.clone(), vid.clone());
+            let (player, vid_c, title) = (player.clone(), vid.clone(), track.title.clone());
             builder.add(Section::Actions, "Start Radio", "start-radio", false, Rc::new(move || {
-                player.start_radio(Some(vid_c.clone()), None);
+                player.start_radio(Some(vid_c.clone()), None, &title);
                 toast(&anchor, "Starting radio...");
             }));
         }
@@ -176,6 +178,13 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
             let (album_title, album_id) = opts.album.clone().unwrap_or_default();
             let pending: Vec<Track> = tracks.iter().filter(|t| !ctx.downloads.is_downloaded(&t.video_id.0)).cloned().collect();
             let downloaded_single = !multi && !vid.is_empty() && ctx.downloads.is_downloaded(&vid);
+            // A selection can hold both kinds: the rest to fetch and files to remove.
+            let downloaded: Vec<String> = if multi { tracks.iter().map(|t| t.video_id.0.clone()).filter(|id| ctx.downloads.is_downloaded(id)).collect() } else { Vec::new() };
+            if !downloaded.is_empty() {
+                let label = format!("Remove {} Downloads", downloaded.len());
+                let (ctx, anchor) = (ctx.clone(), anchor.clone());
+                builder.add(Section::Actions, &label, "remove-downloads", false, Rc::new(move || confirm_remove_downloads(&ctx, &anchor, downloaded.clone())));
+            }
             if multi && !pending.is_empty() && online {
                 let label = format!("Download {} Songs", pending.len());
                 let ctx = ctx.clone();
@@ -220,6 +229,28 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
 }
 
 /// Port of _add_to_playlist: pick a playlist in the popover, then add it where it belongs.
+/// Ask, then delete the files of these songs. One song goes without asking, a selection is easy to misjudge.
+fn confirm_remove_downloads(ctx: &Rc<UiContext>, anchor: &gtk::Widget, ids: Vec<String>) {
+    let count = ids.len();
+    let dialog = adw::AlertDialog::builder().heading(format!("Remove {count} Downloads?")).body("The files are deleted from this device. The songs stay in your library and playlists.").build();
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("remove", "Remove");
+    dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    let (ctx, toast_anchor) = (ctx.clone(), anchor.clone());
+    dialog.connect_response(None, move |_, response| {
+        if response != "remove" {
+            return;
+        }
+        for id in &ids {
+            ctx.downloads.delete(id);
+        }
+        toast(&toast_anchor, &format!("Removed {count} downloads"));
+    });
+    dialog.present(Some(anchor));
+}
+
 pub fn add_to_playlist_via_popover(ctx: &Rc<UiContext>, anchor: &gtk::Widget, tracks: Vec<Track>) {
     let ctx_c = ctx.clone();
     let anchor_c = anchor.clone();
@@ -348,7 +379,7 @@ fn load_collection(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem, 
     let api = ctx.net.client().api();
     let wanted = item.clone();
     let handle = ctx.net.spawn(async move { collection_tracks(&*api, &wanted).await.0 });
-    let (ctx, anchor, source) = (ctx.clone(), anchor.clone(), item.id.clone());
+    let (ctx, anchor, source) = (ctx.clone(), anchor.clone(), QueueSource::new(item.id.clone(), item.title.clone()));
     glib::spawn_future_local(async move {
         let tracks: Vec<Track> = handle.await.unwrap_or_default().into_iter().filter(|t| !t.video_id.0.is_empty() && t.is_available).collect();
         if tracks.is_empty() {
@@ -377,16 +408,16 @@ fn collection_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem)
     let known = item.playlist_id.clone().or_else(|| (!item.id.starts_with("MPRE")).then(|| item.id.trim_start_matches("VL").to_owned()));
     let seed = |playlist_id: &str| if playlist_id.starts_with("RD") { playlist_id.to_owned() } else { format!("RDAMPL{playlist_id}") };
     if let Some(playlist_id) = known {
-        ctx.player.start_radio(None, Some(seed(&playlist_id)));
+        ctx.player.start_radio(None, Some(seed(&playlist_id)), &item.title);
         return;
     }
     let api = ctx.net.client().api();
     let wanted = item.clone();
     let handle = ctx.net.spawn(async move { collection_tracks(&*api, &wanted).await.1 });
-    let (ctx, anchor) = (ctx.clone(), anchor.clone());
+    let (ctx, anchor, title) = (ctx.clone(), anchor.clone(), item.title.clone());
     glib::spawn_future_local(async move {
         match handle.await.ok().flatten() {
-            Some(playlist_id) => ctx.player.start_radio(None, Some(seed(&playlist_id))),
+            Some(playlist_id) => ctx.player.start_radio(None, Some(seed(&playlist_id)), &title),
             None => toast(&anchor, "Radio unavailable"),
         }
     });
@@ -406,8 +437,8 @@ fn artist_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, channel_id: &str) {
         };
         let top_song = artist.songs.as_ref().and_then(|s| s.results.first()).map(|t| t.video_id.0.clone()).filter(|id| !id.is_empty());
         match (artist.radio_id, top_song) {
-            (Some(radio), _) => ctx.player.start_radio(None, Some(radio)),
-            (None, Some(seed)) => ctx.player.start_radio(Some(seed), None),
+            (Some(radio), _) => ctx.player.start_radio(None, Some(radio), &artist.name),
+            (None, Some(seed)) => ctx.player.start_radio(Some(seed), None, &artist.name),
             (None, None) => toast(&anchor, "Radio unavailable"),
         }
     });

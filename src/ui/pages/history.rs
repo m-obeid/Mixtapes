@@ -10,6 +10,7 @@ use gtk::{glib, prelude::*};
 
 use crate::model::{ItemKind, MediaItem, Track};
 use crate::net::history::{self, HistoryEntry};
+use crate::queue::QueueSource;
 use crate::ui::context::UiContext;
 use crate::ui::context_menu::{MenuAction, Section};
 use crate::ui::widgets::song_row::SongRow;
@@ -36,8 +37,29 @@ pub struct HistoryPage {
     entries: RefCell<Vec<HistoryEntry>>,
     rows: RefCell<Vec<Rc<SongRow>>>,
     loading: Cell<bool>,
+    /// Counts renders, so rows still being built for an earlier one stop.
+    render_generation: Cell<u32>,
     on_title: RefCell<Option<TitleListener>>,
 }
+
+/// Where a render stands: the sections to build and the next row to add.
+struct Build {
+    sections: Vec<(String, Vec<usize>)>,
+    section: usize,
+    row: usize,
+    /// The list of the section being filled, once its first row is due.
+    list: Option<gtk::ListBox>,
+}
+
+enum Budget {
+    Rows(usize),
+    Time(std::time::Duration),
+}
+
+/// Rows built before the page first shows: more than a tall window holds.
+const FIRST_ROWS: usize = 24;
+/// How long one idle turn builds rows, short enough to leave the frame its time.
+const BATCH_TIME: std::time::Duration = std::time::Duration::from_millis(4);
 
 impl HistoryPage {
     pub fn new(ctx: Rc<UiContext>) -> Rc<Self> {
@@ -78,6 +100,7 @@ impl HistoryPage {
             entries: RefCell::new(Vec::new()),
             rows: RefCell::new(Vec::new()),
             loading: Cell::new(false),
+            render_generation: Cell::new(0),
             on_title: RefCell::new(None),
         });
 
@@ -171,7 +194,14 @@ impl HistoryPage {
             match outcome {
                 Ok(Ok(entries)) => {
                     history::cache_history(page.ctx.downloads.store(), &entries);
-                    page.render(entries);
+                    // The cache was rendered a moment ago. The same plays need no second build,
+                    // only the fresh removal tokens.
+                    let shown = page.entries.borrow().iter().map(|e| (&e.track, &e.played)).eq(entries.iter().map(|e| (&e.track, &e.played)));
+                    if shown {
+                        page.entries.replace(entries);
+                    } else {
+                        page.render(entries);
+                    }
                 }
                 Ok(Err(err)) => {
                     tracing::warn!(%err, "history fetch failed");
@@ -205,6 +235,9 @@ impl HistoryPage {
 
     fn render(self: &Rc<Self>, entries: Vec<HistoryEntry>) {
         self.loading_wrap.set_visible(false);
+        // Rows an earlier render is still adding would land in the emptied page.
+        let generation = self.render_generation.get().wrapping_add(1);
+        self.render_generation.set(generation);
         clear_children(&self.sections_box);
         self.rows.borrow_mut().clear();
         if entries.is_empty() {
@@ -222,35 +255,49 @@ impl HistoryPage {
                 _ => sections.push((entry.played.clone(), vec![index])),
             }
         }
-        for (title, indexes) in sections {
-            self.sections_box.append(&self.build_section(&title, &indexes, &entries));
-        }
         self.entries.replace(entries);
+
+        // A few hundred rows built in one go froze the page for half a second. The
+        // first screenful goes up now, the rest a few milliseconds at a time.
+        let mut build = Build { sections, section: 0, row: 0, list: None };
+        if self.build_rows(&mut build, Budget::Rows(FIRST_ROWS)) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        glib::idle_add_local(move || {
+            let Some(page) = weak.upgrade().filter(|p| p.render_generation.get() == generation) else { return glib::ControlFlow::Break };
+            if page.build_rows(&mut build, Budget::Time(BATCH_TIME)) { glib::ControlFlow::Break } else { glib::ControlFlow::Continue }
+        });
     }
 
-    fn build_section(self: &Rc<Self>, title: &str, indexes: &[usize], entries: &[HistoryEntry]) -> gtk::Box {
+    /// Build rows from where `build` stands until the budget runs out. True once every row exists.
+    fn build_rows(self: &Rc<Self>, build: &mut Build, budget: Budget) -> bool {
+        let started = std::time::Instant::now();
+        let mut built = 0;
+        loop {
+            let Some((title, indexes)) = build.sections.get(build.section) else { return true };
+            let spent = match budget {
+                Budget::Rows(rows) => built >= rows,
+                Budget::Time(time) => built > 0 && started.elapsed() >= time,
+            };
+            if spent {
+                return false;
+            }
+            let list = build.list.get_or_insert_with(|| self.add_section(title, indexes));
+            self.add_row(list, indexes[build.row]);
+            built += 1;
+            build.row += 1;
+            if build.row == indexes.len() {
+                (build.section, build.row, build.list) = (build.section + 1, 0, None);
+            }
+        }
+    }
+
+    /// A heading with an empty list under it, which `add_row` fills.
+    fn add_section(self: &Rc<Self>, title: &str, indexes: &[usize]) -> gtk::ListBox {
         let section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
         section.append(&gtk::Label::builder().label(title).css_classes(["title-3"]).halign(gtk::Align::Start).build());
         let list = gtk::ListBox::builder().css_classes(["boxed-list", "songs-list"]).selection_mode(gtk::SelectionMode::None).build();
-
-        for &index in indexes {
-            let entry = &entries[index];
-            let item = as_item(&entry.track);
-            let row = SongRow::new(self.ctx.clone());
-            row.set_list_style(subtitle(&entry.track));
-            row.bind(&item, None);
-            let weak = Rc::downgrade(self);
-            row.set_on_activate(move |_| {
-                if let Some(page) = weak.upgrade() {
-                    page.play_from(index);
-                }
-            });
-            let weak = Rc::downgrade(self);
-            row.set_menu_extras(move || weak.upgrade().map(|page| page.row_menu_extras(index)).unwrap_or_default());
-            list.append(row.widget());
-            self.rows.borrow_mut().push(row);
-        }
-
         let weak = Rc::downgrade(self);
         let indexes = indexes.to_vec();
         list.connect_row_activated(move |_, row| {
@@ -259,7 +306,27 @@ impl HistoryPage {
             }
         });
         section.append(&list);
-        section
+        self.sections_box.append(&section);
+        list
+    }
+
+    fn add_row(self: &Rc<Self>, list: &gtk::ListBox, index: usize) {
+        let entries = self.entries.borrow();
+        let Some(entry) = entries.get(index) else { return };
+        let item = as_item(&entry.track);
+        let row = SongRow::new(self.ctx.clone());
+        row.set_list_style(subtitle(&entry.track));
+        row.bind(&item, None);
+        let weak = Rc::downgrade(self);
+        row.set_on_activate(move |_| {
+            if let Some(page) = weak.upgrade() {
+                page.play_from(index);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        row.set_menu_extras(move || weak.upgrade().map(|page| page.row_menu_extras(index)).unwrap_or_default());
+        list.append(row.widget());
+        self.rows.borrow_mut().push(row);
     }
 
     /// Port of _on_row_activated: play from here through the rest of the
@@ -269,7 +336,7 @@ impl HistoryPage {
         if index >= tracks.len() {
             return;
         }
-        self.ctx.player.play_tracks(tracks, index, false, Some(QUEUE_SOURCE.to_owned()), false);
+        self.ctx.player.play_tracks(tracks, index, false, Some(QueueSource::new(QUEUE_SOURCE, "History")), false);
     }
 
     /// The two entries history.py adds to a row's song menu.
@@ -332,6 +399,7 @@ impl HistoryPage {
 
     fn show_empty(&self, message: &str) {
         self.loading_wrap.set_visible(false);
+        self.render_generation.set(self.render_generation.get().wrapping_add(1));
         clear_children(&self.sections_box);
         self.rows.borrow_mut().clear();
         self.empty_label.set_label(message);
