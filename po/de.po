@@ -3186,7 +3186,7 @@ msgstr "Einstellungen"
 
 #: src/ui/window.rs:2229
 msgid "About Mixtapes"
-msgstr "Info zu Mixtapes"
+msgstr "Über Mixtapes"
 
 #: src/ui/window.rs:2239
 msgid "Main Menu"
