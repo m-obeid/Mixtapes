@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use gtk::{gdk, glib, prelude::*};
 
-use crate::model::{ItemKind, MediaItem, VideoId};
+use crate::model::{ItemKind, MediaItem};
 use crate::ui::context::UiContext;
 use crate::ui::context_menu::{MenuAction, SongMenuOptions, show_song_menu};
 use crate::ui::cover::CoverImage;
@@ -211,8 +211,8 @@ impl SongRow {
 
         let playable = item.kind.is_playable() && !item.id.is_empty();
         self.inner.set_sensitive(playable);
-        if playable {
-            self.like.set_data(Some(VideoId(item.id.clone())), item.like_status);
+        if let Some(track) = item.to_track().filter(|_| playable) {
+            self.like.set_track(&track, item.like_status);
         } else {
             self.like.set_data(None, None);
         }

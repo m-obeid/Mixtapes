@@ -124,6 +124,9 @@ impl YtDlpResolver {
 impl StreamResolver for YtDlpResolver {
     fn resolve(&self, video_id: VideoId, auth: Option<HttpAuth>) -> BoxFuture<'_, Result<StreamInfo, ResolveError>> {
         Box::pin(async move {
+            if crate::net::offline::sealed() {
+                return Err(ResolveError::Unavailable(crate::net::offline::REFUSAL.to_owned()));
+            }
             if let Some(uri) = self.cache.get(&video_id).await {
                 return Ok(StreamInfo { uri, from_cache: true, ..StreamInfo::default() });
             }

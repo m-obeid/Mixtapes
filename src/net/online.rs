@@ -61,6 +61,8 @@ impl Online {
             return value;
         }
         let value = self.paths.read_prefs().get("force_offline").and_then(|v| v.as_bool()).unwrap_or(false);
+        // The pref is the truth, and the seal under every request follows it.
+        crate::net::offline::set_sealed(value);
         self.force_offline.set((value, Some(Instant::now() + FORCE_OFFLINE_TTL)));
         value
     }
@@ -109,7 +111,12 @@ impl Online {
 
     fn start_probe(self: &Rc<Self>) {
         self.in_flight.set(true);
-        let handle = self.net.spawn(async {
+        // In offline mode the answer is known, and asking would open a connection.
+        let forced = self.force_offline();
+        let handle = self.net.spawn(async move {
+            if forced {
+                return false;
+            }
             match tokio::time::timeout(PROBE_TIMEOUT, tokio::net::TcpStream::connect(PROBE_HOST)).await {
                 Ok(Ok(_)) => true,
                 Ok(Err(_)) | Err(_) => false,

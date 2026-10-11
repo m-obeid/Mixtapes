@@ -115,6 +115,7 @@ fn main() -> glib::ExitCode {
         }
     };
 
+    net::offline::init(&paths);
     let mut net = match net::NetHandle::new(runtime.handle().clone(), &paths) {
         Ok(net) => net,
         Err(err) => {
@@ -136,11 +137,12 @@ fn main() -> glib::ExitCode {
         }
     };
 
-    let (downloads, download_events) = downloads::Downloads::new(paths.clone(), net.clone());
+    net::twins::init(&paths);
+    let lyrics = lyrics::Lyrics::new(&paths, net.client().http().clone(), net.client().clone());
+    let (downloads, download_events) = downloads::Downloads::new(paths.clone(), net.clone(), lyrics.clone());
     // A demo run plays scratch tracks. MIXTAPES_DEMO_PRESENCE=1 lets them through on purpose.
     let publish = demo.is_none() || std::env::var_os("MIXTAPES_DEMO_PRESENCE").is_some();
     let scrobbler = scrobbler::Scrobbler::start(&paths, runtime.handle());
-    let lyrics = lyrics::Lyrics::new(&paths, net.client().http().clone(), net.client().clone());
     scrobbler.set_muted(!publish);
     let local = local_library::LocalLibrary::open(&paths);
     let app_ctx = Rc::new(App {
@@ -226,6 +228,9 @@ fn on_startup(ctx: &Rc<App>) {
     // Event pumps must attach to the running GTK main context.
     ctx.player.start();
     let prefs = ctx.paths.read_prefs();
+    if !prefs.get("force_offline").and_then(|v| v.as_bool()).unwrap_or(false) {
+        ctx.player.fill_liked_stubs();
+    }
     ctx.player.restore_session(prefs.get("autoplay_on_start").and_then(|v| v.as_bool()).unwrap_or(false));
     ctx.mpris.replace(Some(Mpris::start(ctx)));
     tray::start(ctx);

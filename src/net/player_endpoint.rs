@@ -133,12 +133,15 @@ pub struct PlayerEndpointResolver {
 
 impl PlayerEndpointResolver {
     pub fn new(paths: &Paths, fallback: Arc<dyn StreamResolver>) -> Self {
-        let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).gzip(true).build().unwrap_or_default();
+        let http = crate::net::offline::client_builder().timeout(REQUEST_TIMEOUT).gzip(true).build().unwrap_or_default();
         Self { http, fallback, cache: StreamCache::new(paths.stream_cache_dir.clone()), visitor: Mutex::new(None) }
     }
 
     /// Fetch the visitor id ahead of the first play.
     pub async fn warm(&self) {
+        if crate::net::offline::sealed() {
+            return;
+        }
         if let Err(err) = self.visitor_data().await {
             tracing::debug!(%err, "visitor data not warmed");
         }
@@ -238,6 +241,10 @@ impl PlayerEndpointResolver {
 impl StreamResolver for PlayerEndpointResolver {
     fn resolve(&self, video_id: VideoId, auth: Option<HttpAuth>) -> BoxFuture<'_, Result<StreamInfo, ResolveError>> {
         Box::pin(async move {
+            // A cached address is a stream from the network too.
+            if crate::net::offline::sealed() {
+                return Err(ResolveError::Unavailable(crate::net::offline::REFUSAL.to_owned()));
+            }
             if let Some(uri) = self.cache.get(&video_id).await {
                 // A live broadcast's segment endpoint plays one fragment and stops. Older
                 // builds cached those. A cached playlist is fine but is not kept either.

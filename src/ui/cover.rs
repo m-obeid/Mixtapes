@@ -511,6 +511,9 @@ pub async fn fetch_cover_bytes(http: &reqwest::Client, auth: Option<&HttpAuth>, 
     if let Some(path) = local_path(url) {
         return tokio::fs::read(path).await.ok().filter(|b| !b.is_empty());
     }
+    if crate::net::offline::sealed() {
+        return None;
+    }
     for candidate in fallback_chain(url, target) {
         let mut request = http.get(&candidate);
         // Private covers on YouTube's hosts need the session cookie.

@@ -370,6 +370,23 @@ fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup 
     group.add(&restore_row);
     group.add(&autoplay_row);
 
+    let queue_row = switch_row(&tr!("Open Queue When Playback Starts"), &tr!("Show the queue sidebar when you start a song, an album or a playlist"), pref_bool(ctx, "auto_open_queue", false));
+    {
+        let ctx = ctx.clone();
+        queue_row.connect_active_notify(move |row| save(&ctx, "auto_open_queue", row.is_active()));
+    }
+    group.add(&queue_row);
+
+    let songs_row = switch_row(&tr!("Prefer Song Versions"), &tr!("Play, queue and download the song in place of its music video when one is found by title and artist"), pref_bool(ctx, crate::net::twins::PREF, true));
+    {
+        let ctx = ctx.clone();
+        songs_row.connect_active_notify(move |row| {
+            save(&ctx, crate::net::twins::PREF, row.is_active());
+            crate::net::twins::set_enabled(row.is_active());
+        });
+    }
+    group.add(&songs_row);
+
     let current = pref_str(ctx, "history_mode", "immediate");
     let labels: Vec<String> = HISTORY_MODES.iter().map(|(_, label)| crate::i18n::gettext(label)).collect();
     let selected = HISTORY_MODES.iter().position(|(key, _)| *key == current).unwrap_or(0);
@@ -392,6 +409,7 @@ fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup 
         let win = Rc::downgrade(win);
         offline_row.connect_active_notify(move |row| {
             save(&ctx, "force_offline", row.is_active());
+            crate::net::offline::set_sealed(row.is_active());
             if let Some(win) = win.upgrade() {
                 win.force_offline_changed();
             }

@@ -42,7 +42,11 @@ impl<T: Browse + ?Sized> Browse for std::sync::Arc<T> {
 
 impl Browse for YTMusicClient {
     fn post<'a>(&'a self, endpoint: &'a str, body: Value) -> Response<'a> {
-        Box::pin(async move { Ok(self.send_request(endpoint, body).await?) })
+        Box::pin(async move {
+            // The crate keeps its own HTTP client, so this check is the only thing between it and the network.
+            crate::net::offline::check()?;
+            Ok(self.send_request(endpoint, body).await?)
+        })
     }
 }
 

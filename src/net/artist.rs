@@ -338,6 +338,23 @@ mod tests {
         assert!(a.singles.as_ref().is_some_and(|s| !s.results.is_empty() && s.results.len() <= ARTIST_PAGE_ALBUMS));
     }
 
+    /// A "Release - Topic" channel: one Videos carousel whose View All is a grid of songs (issue #124).
+    #[tokio::test]
+    #[ignore]
+    async fn live_topic_channel_video_grid() {
+        let paths = crate::paths::Paths::discover();
+        let api = crate::net::ytmusic::YtMusic::new(&paths).unwrap().api();
+        let a = get_artist(api.clone(), "UCq2QEFMPDXTQaVC9Nk2uMJg").await.unwrap();
+        let videos = a.videos.expect("a videos carousel");
+        println!("videos: {} browse={:?} params={}", videos.results.len(), videos.browse_id, videos.params.is_some());
+        let all = playlists::artist_albums(&api, videos.browse_id.as_deref().unwrap(), videos.params.as_deref(), None).await.unwrap();
+        println!("view all through the client: {}", all.len());
+        let http = reqwest::Client::new();
+        let all = playlists::channel_grid_as_visitor(&http, videos.browse_id.as_deref().unwrap(), "Videos").await.unwrap();
+        println!("view all as a visitor: {} first={:?}", all.len(), all.first().map(|i| (&i.title, &i.id, i.kind)));
+        assert!(all.len() >= videos.results.len());
+    }
+
     #[tokio::test]
     #[ignore]
     async fn live_artist() {

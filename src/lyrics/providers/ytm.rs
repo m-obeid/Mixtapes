@@ -40,6 +40,7 @@ impl MobileClient {
 impl Browse for MobileClient {
     fn post<'a>(&'a self, endpoint: &'a str, mut body: Value) -> Response<'a> {
         Box::pin(async move {
+            crate::net::offline::check()?;
             body["context"] = json!({"client": {"clientName": MOBILE_CLIENT, "clientVersion": MOBILE_VERSION, "hl": "en"}, "user": {}});
             // SOCS=CAI is the consent cookie the crate client adds to every request.
             let request = self.http.post(format!("{API}{endpoint}?alt=json")).timeout(TIMEOUT).header("User-Agent", USER_AGENT).header("Accept", "*/*").header("Origin", ORIGIN).header("Cookie", "SOCS=CAI").json(&body);

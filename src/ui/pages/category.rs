@@ -251,8 +251,8 @@ impl CategoryPage {
             list.append(row.widget());
             self.rows.borrow_mut().push(row);
         }
-        let (ctx, shelf) = (self.ctx.clone(), title.to_owned());
-        let shown = showing.to_vec();
+        let ctx = self.ctx.clone();
+        let (shown, shelf) = (showing.to_vec(), title.to_owned());
         list.connect_row_activated(move |_, row| {
             if let Some(item) = shown.get(row.index().max(0) as usize) {
                 activate_item(&ctx, item, &pool, &shelf);

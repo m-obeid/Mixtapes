@@ -395,6 +395,35 @@ impl MediaItem {
     }
 }
 
+impl Track {
+    /// This row as its audio twin: the id, the type and what the listener
+    /// reads move over, the rest stays. A playlist row keeps its place this way.
+    pub fn as_audio_version(&self, twin: Track) -> Track {
+        let mut swapped = self.clone();
+        swapped.video_id = twin.video_id;
+        swapped.video_type = Some(AUDIO_VIDEO_TYPE.to_owned());
+        if !twin.title.is_empty() {
+            swapped.title = twin.title;
+        }
+        if !twin.artist.is_empty() {
+            swapped.artist = twin.artist;
+            swapped.artists = twin.artists;
+        }
+        if twin.thumb.is_some() {
+            swapped.thumb = twin.thumb;
+        }
+        swapped
+    }
+
+    /// Whether a lookup for an audio twin makes sense: a video that is not an upload, an episode or a live stream.
+    pub fn may_have_audio_version(&self) -> bool {
+        !self.video_id.0.is_empty() && self.entity_id.is_none() && !self.is_episode() && !self.is_live && self.video_type.as_deref().is_some_and(|t| t != AUDIO_VIDEO_TYPE)
+    }
+}
+
+/// What YouTube Music calls a song, as opposed to a music video.
+pub const AUDIO_VIDEO_TYPE: &str = "MUSIC_VIDEO_TYPE_ATV";
+
 /// What YouTube Music calls a podcast episode's video type.
 pub const EPISODE_VIDEO_TYPE: &str = "MUSIC_VIDEO_TYPE_PODCAST_EPISODE";
 

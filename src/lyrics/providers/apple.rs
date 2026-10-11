@@ -211,7 +211,7 @@ pub fn paxsenix_to_lines(data: &Value) -> Option<LyricsResult> {
                 line.bg = bg_parts;
             }
         }
-        let side = |key: &str| Some(text_at(entry, key).trim()).filter(|v| !v.is_empty() && *v != line.text).map(str::to_owned);
+        let side = |key: &str| Some(text_at(entry, key).trim()).filter(|v| !v.is_empty() && !crate::lyrics::matching::repeats_line(v, &line.text)).map(str::to_owned);
         line.translation = side("translation");
         line.romanization = side("romanization").or_else(|| side("transliteration"));
         lines.push(line);

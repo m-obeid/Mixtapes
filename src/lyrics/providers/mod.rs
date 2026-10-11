@@ -155,6 +155,9 @@ impl From<reqwest::Error> for HttpError {
 
 /// GET with a query string, a header set and the per-provider timeout client.py used.
 pub async fn get_text(http: &reqwest::Client, url: &str, query: &[(&str, &str)], headers: &[(&str, &str)], timeout: Duration) -> Result<String, HttpError> {
+    if crate::net::offline::sealed() {
+        return Err(HttpError::Other(crate::net::offline::REFUSAL.to_owned()));
+    }
     let url = reqwest::Url::parse_with_params(url, query).map_err(|e| HttpError::Other(e.to_string()))?;
     let mut request = http.get(url).timeout(timeout);
     for (name, value) in headers {

@@ -141,6 +141,11 @@ struct Due {
     scrobble: Option<Entry>,
 }
 
+/// In offline mode a submission fails like a dropped connection, so the listen waits in the backlog.
+fn refuse_offline() -> Result<(), ScrobbleError> {
+    if crate::net::offline::sealed() { Err(Transient(crate::net::offline::REFUSAL.to_owned())) } else { Ok(()) }
+}
+
 fn threshold(duration: f64) -> f64 {
     if duration <= 0.0 { UNKNOWN_DURATION_THRESHOLD } else { (duration / 2.0).min(SCROBBLE_CAP_SECONDS) }
 }
@@ -217,7 +222,7 @@ impl Scrobbler {
         let (tx, rx) = unbounded_channel();
         let prefs = paths.read_prefs();
         let flag = |key: &str| prefs.get(key).and_then(Value::as_bool).unwrap_or(true);
-        let http = reqwest::Client::builder().user_agent(USER_AGENT).timeout(NETWORK_TIMEOUT).pool_max_idle_per_host(2).build().unwrap_or_default();
+        let http = crate::net::offline::client_builder().user_agent(USER_AGENT).timeout(NETWORK_TIMEOUT).pool_max_idle_per_host(2).build().unwrap_or_default();
         let this = Arc::new(Self {
             inner: Mutex::new(Inner {
                 creds: read_object(&creds_path(paths)),
@@ -550,6 +555,7 @@ impl Scrobbler {
         payload.insert("api_sig".into(), sign(&payload, &self.api_secret));
         payload.insert("format".into(), "json".into());
 
+        refuse_offline()?;
         let request = if post { self.http.post(LASTFM_API_ROOT).form(&payload) } else { self.http.get(LASTFM_API_ROOT).query(&payload) };
         let response = request.send().await.map_err(|e| Transient(e.to_string()))?;
         let status = response.status().as_u16();
@@ -628,6 +634,7 @@ impl Scrobbler {
 
     async fn listenbrainz_post(&self, body: Value) -> Result<(), ScrobbleError> {
         let token = self.credential(Service::ListenBrainz);
+        refuse_offline()?;
         let response = self
             .http
             .post(format!("{LISTENBRAINZ_API_ROOT}/1/submit-listens"))
@@ -668,6 +675,7 @@ impl Scrobbler {
         if token.is_empty() {
             return Err(Permanent(tr!("Enter your ListenBrainz user token")));
         }
+        refuse_offline()?;
         let response = self
             .http
             .get(format!("{LISTENBRAINZ_API_ROOT}/1/validate-token"))

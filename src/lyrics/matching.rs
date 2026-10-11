@@ -46,6 +46,11 @@ pub fn norm_for_match(text: &str) -> String {
     text.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
+/// Whether a second line only repeats the line above it. Sources pad lines already in the target language with a copy, often in another case or punctuation.
+pub fn repeats_line(second: &str, line: &str) -> bool {
+    norm_for_match(second) == norm_for_match(line)
+}
+
 /// True when two titles plausibly name the same song. Containment either way, so `Lemon` matches `Lemon (Special Edition)`.
 pub fn titles_match(expected: &str, found: &str) -> bool {
     contains_either_way(&norm_for_match(expected), &norm_for_match(found))

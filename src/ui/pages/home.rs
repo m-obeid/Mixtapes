@@ -290,7 +290,7 @@ impl HomePage {
             return false;
         };
         tracing::info!(title = %item.title, id = %item.id, pool = pool.len(), "activating the first home row");
-        activate_item_with_radio(&self.ctx, &item, &pool, "");
+        activate_item_with_radio(&self.ctx, &item, &pool, &tr!("Home"));
         true
     }
 
@@ -322,9 +322,9 @@ impl HomePage {
             section_box.append(&self.section_header(&section.title, &section.shown_title(), section.shown_strapline().as_deref(), section.strapline_thumb.as_deref()));
             // A shelf that is mostly songs reads better as a list than as cards.
             if songs >= 3.max((section.items.len() as f64 * 0.66) as usize) {
-                self.add_song_list(&section_box, &section.items, &section.shown_title());
+                self.add_song_list(&section_box, &section.shown_title(), &section.items);
             } else {
-                self.add_card_strip(&section_box, &section.items, &section.shown_title());
+                self.add_card_strip(&section_box, &section.shown_title(), &section.items);
             }
             self.feed_box.append(&section_box);
         }
@@ -482,7 +482,7 @@ impl HomePage {
 
     // -- sections ---------------------------------------------------------
 
-    fn add_song_list(self: &Rc<Self>, section_box: &gtk::Box, items: &[MediaItem], shelf: &str) {
+    fn add_song_list(self: &Rc<Self>, section_box: &gtk::Box, shelf: &str, items: &[MediaItem]) {
         let list = gtk::ListBox::builder().css_classes(["boxed-list", "songs-list"]).selection_mode(gtk::SelectionMode::None).build();
         let pool: Vec<MediaItem> = items.iter().filter(|i| i.kind.is_playable()).cloned().collect();
         for item in items {
@@ -509,7 +509,7 @@ impl HomePage {
         self.compact_scopes.borrow_mut().push(widget.clone());
     }
 
-    fn add_card_strip(self: &Rc<Self>, section_box: &gtk::Box, items: &[MediaItem], shelf: &str) {
+    fn add_card_strip(self: &Rc<Self>, section_box: &gtk::Box, shelf: &str, items: &[MediaItem]) {
         let scroll_box = HorizontalScrollBox::new();
         scroll_box.widget().set_margin_bottom(16);
         let compact = self.ctx.compact.get();

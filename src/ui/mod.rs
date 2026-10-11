@@ -161,12 +161,15 @@ pub fn load_css() {
     }
 }
 
-/// "m:ss" for the timings label.
+/// "m:ss" for the timings label, "h:mm:ss" from an hour up.
 pub fn format_time(seconds: f64) -> String {
     if seconds.is_nan() || seconds <= 0.0 {
         return "0:00".to_owned();
     }
     let total = seconds as u64;
+    if total >= 3600 {
+        return format!("{}:{:02}:{:02}", total / 3600, (total % 3600) / 60, total % 60);
+    }
     format!("{}:{:02}", total / 60, total % 60)
 }
 
@@ -275,6 +278,43 @@ pub fn style_only_while_shown(host: &impl IsA<gtk::Widget>, content: &impl IsA<g
     });
 }
 
+/// Call `on_click` for a click that lands on nothing of its own: the
+/// background, a cover, a label. A button, a slider, a text field, a list row
+/// and whatever scrolls keep their clicks, and a drag is not a click.
+pub fn on_background_click(root: &impl IsA<gtk::Widget>, on_click: impl Fn() + 'static) {
+    let click = gtk::GestureClick::builder().button(gdk::BUTTON_PRIMARY).propagation_phase(gtk::PropagationPhase::Bubble).build();
+    let root_w = root.upcast_ref::<gtk::Widget>().downgrade();
+    click.connect_released(move |gesture, presses, x, y| {
+        let Some(root) = root_w.upgrade() else { return };
+        if presses != 1 {
+            return;
+        }
+        // A click inside an open menu belongs to the menu, wherever under it the pointer is.
+        let focus = root.root().and_then(|window| window.focus());
+        if focus.is_some_and(|f| f.ancestor(gtk::Popover::static_type()).is_some()) {
+            return;
+        }
+        let mut at = root.pick(x, y, gtk::PickFlags::DEFAULT);
+        while let Some(widget) = at.filter(|w| *w != root) {
+            let taken = widget.is::<gtk::Button>()
+                || widget.is::<gtk::MenuButton>()
+                || widget.is::<gtk::Range>()
+                || widget.is::<gtk::Editable>()
+                || widget.is::<gtk::Switch>()
+                || widget.is::<gtk::ListBoxRow>()
+                || widget.is::<gtk::ScrolledWindow>()
+                || widget.is::<gtk::Popover>();
+            if taken {
+                return;
+            }
+            at = widget.parent();
+        }
+        gesture.set_state(gtk::EventSequenceState::Claimed);
+        on_click();
+    });
+    root.add_controller(click);
+}
+
 pub fn copy_to_clipboard(text: &str) {
     if let Some(display) = gdk::Display::default() {
         display.clipboard().set_text(text);
@@ -284,7 +324,8 @@ pub fn copy_to_clipboard(text: &str) {
 /// Toast through the nearest ToastOverlay above `widget`. Popovers count as descendants of their parent.
 pub fn toast(widget: &impl IsA<gtk::Widget>, message: &str) {
     if let Some(overlay) = widget.ancestor(adw::ToastOverlay::static_type()).and_downcast::<adw::ToastOverlay>() {
-        overlay.add_toast(adw::Toast::new(message));
+        // Plain text: a title with an ampersand is not valid markup, and the toast came up blank.
+        overlay.add_toast(adw::Toast::builder().title(message).use_markup(false).build());
     } else {
         tracing::info!(message, "toast without overlay");
     }
@@ -293,6 +334,13 @@ pub fn toast(widget: &impl IsA<gtk::Widget>, message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_time_past_the_hour_shows_hours() {
+        assert_eq!(format_time(59.9), "0:59");
+        assert_eq!(format_time(3599.0), "59:59");
+        assert_eq!(format_time(7477.0), "2:04:37");
+    }
 
     #[test]
     fn a_cover_address_is_resized_and_loses_its_signature() {

@@ -107,7 +107,8 @@ pub fn is_non_latin(text: &str) -> bool {
 pub fn second_line_for<'a>(line: &'a LyricLine, mode: &str) -> (Option<&'a str>, Option<&'a [LyricPart]>) {
     let clean = |value: &'a Option<String>| value.as_deref().map(str::trim).filter(|t| !t.is_empty());
     let roman = clean(&line.romanization);
-    let translation = clean(&line.translation);
+    // Lyrics cached before the sources dropped these still carry a copy of the line.
+    let translation = clean(&line.translation).filter(|t| !crate::lyrics::matching::repeats_line(t, &line.text));
     let bg_text = clean(&line.bg_text);
     match mode {
         "off" => (None, None),
@@ -1246,6 +1247,9 @@ mod tests {
         assert!(second_line_for(&l, "background").1.is_some());
         l.text = "latin text".into();
         assert_eq!(second_line_for(&l, "auto").0, Some("ooh"), "a romanization of latin text adds nothing");
+        l.text = "Pulse, Pulse, Pulse".into();
+        l.translation = Some("Pulse, pulse, pulse".into());
+        assert_eq!(second_line_for(&l, "translation").0, None, "a copy of the line in another case is no translation");
     }
 
     #[test]

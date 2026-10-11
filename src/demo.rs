@@ -67,6 +67,7 @@
 //! MIXTAPES_DEMO_ARTIST=id    open an artist page 1.5 s in
 //! MIXTAPES_DEMO_CLICK=ms,text[,tab]  click the mapped button with that tooltip or label, then optionally show a tab
 //! MIXTAPES_DEMO_ARTIST_RADIO=1  press the artist page's radio button six seconds in
+//! MIXTAPES_DEMO_STEPS="ms:step;ms:step"  timed steps: tab=name, type=text, esc, hide, show, minimize, state, expand, queue, next, results=tab, like-row, playlist=id, album=id[,mode], list=id|local[,mode], click=label, action=name, bottom, snap=name
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -954,6 +955,19 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_STEPS") {
+        for step in spec.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            let Some((ms, step)) = step.split_once(':') else { continue };
+            let (name, arg) = step.split_once('=').unwrap_or((step, ""));
+            let (name, arg, ctx_w, prefix) = (name.to_owned(), arg.to_owned(), ctx.clone(), demo.snapshot.clone());
+            glib::timeout_add_local_once(Duration::from_millis(ms.trim().parse().unwrap_or(3000)), move || {
+                let Some(mw) = ctx_w.window.borrow().clone() else { return };
+                tracing::info!(step = %name, arg = %arg, "demo: step");
+                run_step(&mw, &ctx_w, &name, &arg, prefix.as_deref());
+            });
+        }
+    }
+
     if std::env::var("MIXTAPES_DEMO_QUEUE").ok().as_deref() == Some("1") {
         // Open after the first layout pass, like a user click would.
         let win = window.downgrade();
@@ -993,6 +1007,98 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
+}
+
+/// One step of MIXTAPES_DEMO_STEPS.
+fn run_step(mw: &Rc<MainWindow>, ctx: &Rc<App>, name: &str, arg: &str, prefix: Option<&Path>) {
+    let window = mw.window().clone();
+    let root = window.upcast_ref::<gtk::Widget>();
+    match name {
+        "tab" => mw.select_tab(arg),
+        "type" => {
+            mw.start_search();
+            mw.search_entry_for_demo().set_text(arg);
+        }
+        "esc" => mw.search_entry_for_demo().emit_by_name::<()>("stop-search", &[]),
+        // The close button, which hides the window while something is queued.
+        "hide" => window.close(),
+        "show" => {
+            window.unminimize();
+            window.present();
+        }
+        "minimize" => window.minimize(),
+        "state" => {
+            let suspended = window.surface().and_then(|s| s.downcast::<gtk::gdk::Toplevel>().ok()).map(|t| t.state().contains(gtk::gdk::ToplevelState::SUSPENDED));
+            tracing::info!(mapped = window.is_mapped(), ?suspended, "demo: window state");
+        }
+        "expand" => mw.expand_player(),
+        "queue" => mw.show_queue(true),
+        "next" => ctx.player.next(),
+        "results" => {
+            if let Some(group) = find_mapped::<adw::ToggleGroup>(root, "round") {
+                group.set_active_name(Some(arg));
+            }
+        }
+        "like-row" => {
+            let button = find_mapped::<gtk::ListBox>(root, "songs-list").and_then(|list| find_button(list.upcast_ref(), "Like (Hold or right-click for Dislike)"));
+            tracing::info!(found = button.is_some(), "demo: like on a result row");
+            if let Some(button) = button {
+                button.emit_clicked();
+            }
+        }
+        "playlist" => mw.open_playlist_for_demo(arg),
+        "album" | "list" => {
+            let (id, mode) = arg.split_once(',').unwrap_or((arg, "queue"));
+            let id = if id == "local" { ctx.local.playlist_items().first().map(|p| p.id.clone()).unwrap_or_default() } else { id.to_owned() };
+            let kind = if name == "album" { crate::model::ItemKind::Album } else { crate::model::ItemKind::Playlist };
+            let item = crate::model::MediaItem { kind, id, title: "Demo".to_owned(), ..Default::default() };
+            let anchor = find_mapped::<adw::ViewStack>(root, "").map(|s| s.upcast::<gtk::Widget>()).unwrap_or_else(|| root.clone());
+            crate::ui::context_menu::collection_action_for_demo(mw.ui(), &anchor, &item, mode);
+        }
+        // An action of the visible page, such as page.save_to_library, sent from its Play button.
+        "action" => {
+            let sent = find_button(root, "Play").map(|button| button.activate_action(arg, None).is_ok());
+            tracing::info!(?sent, "demo: page action");
+        }
+        "click" => {
+            let button = find_button(root, arg);
+            tracing::info!(found = button.is_some(), "demo: click");
+            if let Some(button) = button {
+                button.emit_clicked();
+            }
+        }
+        "bottom" => {
+            let mut scrollers = Vec::new();
+            collect_scrollers(root, &mut scrollers);
+            for scroller in scrollers.iter().filter(|s| s.is_mapped()) {
+                let adj = scroller.vadjustment();
+                adj.set_value((adj.upper() - adj.page_size()).max(0.0));
+            }
+        }
+        "snap" => {
+            if let Some(prefix) = prefix {
+                snapshot(&window, &with_suffix(prefix, arg));
+            }
+        }
+        other => tracing::warn!(step = other, "demo: unknown step"),
+    }
+}
+
+/// The first mapped widget of this type, carrying this CSS class unless it is empty.
+fn find_mapped<T: IsA<gtk::Widget>>(widget: &gtk::Widget, class: &str) -> Option<T> {
+    if widget.is_mapped() && (class.is_empty() || widget.has_css_class(class)) {
+        if let Some(found) = widget.downcast_ref::<T>() {
+            return Some(found.clone());
+        }
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if let Some(found) = find_mapped::<T>(&c, class) {
+            return Some(found);
+        }
+        child = c.next_sibling();
+    }
+    None
 }
 
 /// Widget type, classes and state down to `max` levels, for spotting what a toggle changes.

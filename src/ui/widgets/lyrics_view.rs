@@ -644,21 +644,31 @@ impl LyricsView {
 
         let request = self.fetch_gen.get();
         let lyrics = self.lyrics.clone();
-        let handle = self.ctx.net.spawn(async move { lyrics.get_lyrics(&query).await });
+        // Offline, or with offline mode on, only what is saved is shown and no provider is asked.
+        let offline = !self.ctx.online.is_online();
+        let handle = self.ctx.net.spawn(async move {
+            match offline {
+                true => lyrics.cached_lyrics(&query).await,
+                false => lyrics.get_lyrics(&query).await,
+            }
+        });
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let result = handle.await.ok().flatten();
             if let Some(view) = weak.upgrade().filter(|v| v.fetch_gen.get() == request) {
-                view.apply_fetch_result(result);
+                view.apply_fetch_result(result, offline);
             }
         });
     }
 
-    fn apply_fetch_result(self: &Rc<Self>, result: Option<LyricsResult>) {
+    fn apply_fetch_result(self: &Rc<Self>, result: Option<LyricsResult>, offline: bool) {
         let Some(result) = result.filter(|r| !r.lines.is_empty()) else {
             self.lines.borrow_mut().clear();
             self.synced.set(false);
-            self.render_status(&tr!("No lyrics"), Some(&tr!("Nothing matched automatically. Try another source, or search by name.")));
+            match offline {
+                true => self.render_status(&tr!("No lyrics"), Some(&tr!("No lyrics are saved for this song. They load once you are back online."))),
+                false => self.render_status(&tr!("No lyrics"), Some(&tr!("Nothing matched automatically. Try another source, or search by name."))),
+            }
             self.picker_btn.set_visible(true);
             return;
         };

@@ -119,7 +119,7 @@ pub const CHANNEL_PREF: &str = "account_page_id";
 
 impl YtMusic {
     pub fn new(paths: &Paths) -> anyhow::Result<Arc<Self>> {
-        let http = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).gzip(true).build()?;
+        let http = crate::net::offline::client_builder().timeout(std::time::Duration::from_secs(30)).gzip(true).build()?;
         let (auth, _) = watch::channel(AuthState::Anonymous);
         let anonymous = YTMusicClient::builder().build()?;
         let page_id = paths.read_prefs().get(CHANNEL_PREF).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned);
@@ -361,6 +361,7 @@ impl YtMusic {
             LikeStatus::Dislike => ytmusicapi::LikeStatus::Dislike,
             LikeStatus::Indifferent => ytmusicapi::LikeStatus::Indifferent,
         };
+        crate::net::offline::check()?;
         self.api().rate_song(video_id, rating).await?;
         Ok(())
     }
@@ -369,6 +370,7 @@ impl YtMusic {
 
     /// POST to an InnerTube endpoint through the crate, context merged in.
     pub async fn post(&self, endpoint: &str, body: Value) -> Result<Value, NetError> {
+        crate::net::offline::check()?;
         Ok(self.api().send_request(endpoint, body).await?)
     }
 

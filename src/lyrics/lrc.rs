@@ -79,7 +79,7 @@ pub fn attach_secondary_lrc(lines: &mut [LyricLine], lrc: &str, key: Secondary) 
         let Some(best) = best else { continue };
         let text = best.text.trim();
         // A "translation" identical to the original is padding: NetEase does this for lines already in the target language.
-        if text.is_empty() || text == line.text.trim() {
+        if text.is_empty() || crate::lyrics::matching::repeats_line(text, &line.text) {
             continue;
         }
         match key {

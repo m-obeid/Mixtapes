@@ -35,7 +35,7 @@ pub enum AudioCommand {
     /// Tear down the current stream and start `uri`. `auth` rides along for souphttpsrc.
     Load { uri: String, generation: u64, auth: Option<HttpAuth> },
     /// Pre-set the next URI for gapless playback under a fresh generation.
-    ArmNext { uri: String, generation: u64 },
+    ArmNext { uri: String, generation: u64, auth: Option<HttpAuth> },
     /// Forget any armed URI. Sent on every queue mutation.
     DisarmNext,
     Play,
@@ -494,8 +494,12 @@ impl Engine {
                     self.set_status(PlaybackStatus::Stopped);
                 }
             }
-            AudioCommand::ArmNext { uri, generation } => {
+            AudioCommand::ArmNext { uri, generation, auth } => {
                 if !self.shared.live.load(Ordering::Acquire) && !is_live_uri(&uri) {
+                    // A downloaded file loads with no session, and the stream armed after it still needs one: googlevideo answers some URLs with 403 without the user agent.
+                    if auth.is_some() {
+                        *self.shared.http_auth.lock().unwrap() = auth;
+                    }
                     *self.shared.armed_next.lock().unwrap() = Some((uri, generation));
                 }
             }

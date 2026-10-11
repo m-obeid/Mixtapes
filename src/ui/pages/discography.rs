@@ -157,6 +157,7 @@ impl DiscographyPage {
         self.is_loading.set(true);
         self.loading_wrap.set_visible(true);
         let api = self.ctx.net.client().api();
+        let http = self.ctx.net.client().http().clone();
         let browse_id = self.browse_id.borrow().clone();
         let params = self.params.borrow().clone();
         let title = self.title.borrow().clone();
@@ -166,7 +167,17 @@ impl DiscographyPage {
                 (Some(_), _) if title.contains("Top Songs") => Vec::new(),
                 (Some(b), Some(p)) => {
                     has_more = false;
-                    playlists::artist_albums(&api, &b, Some(&p), None).await.unwrap_or_default()
+                    let items = playlists::artist_albums(&api, &b, Some(&p), None).await.unwrap_or_default();
+                    if items.is_empty() {
+                        // A list whose token only answers the visitor it was made for. The page is titled "Artist - Section".
+                        let section = title.rsplit(" - ").next().unwrap_or(&title);
+                        playlists::channel_grid_as_visitor(&http, &b, section).await.unwrap_or_else(|err| {
+                            tracing::warn!(%err, "channel list did not load");
+                            Vec::new()
+                        })
+                    } else {
+                        items
+                    }
                 }
                 (Some(b), None) => {
                     has_more = false;
@@ -237,7 +248,7 @@ impl DiscographyPage {
         match item.kind {
             ItemKind::Song | ItemKind::Video => {
                 if let Some(track) = item.to_track() {
-                    self.ctx.player.play_tracks(vec![track], 0, false, None, false);
+                    self.ctx.player.play_tracks(vec![track], 0, false, crate::queue::QueueSource::shelf(&self.title.borrow()), false);
                 }
             }
             ItemKind::Album => self.ctx.nav.go(NavRequest::Album { id: item.id.clone(), title: item.title.clone(), thumb: item.thumb.clone() }),

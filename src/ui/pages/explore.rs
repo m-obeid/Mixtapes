@@ -11,10 +11,10 @@ use gtk::glib;
 
 use crate::model::{ItemKind, MediaItem};
 use crate::net::explore::{self, Category, ChartArtist, Charts, ExploreData, Trend};
-use crate::net::search::{SearchResults, search_all};
+use crate::net::search::{SearchFilter, SearchResults, search_all, search_more};
 use crate::ui::context::{NavRequest, UiContext};
 use crate::ui::cover::CoverImage;
-use crate::ui::pages::{activate_item, attach_item_menu, clear_children, loading_box};
+use crate::ui::pages::{activate_item, attach_item_menu, clear_children, loading_box, section_header};
 use crate::ui::toast;
 use crate::ui::widgets::media_card::{CardOptions, MediaCard};
 use crate::ui::widgets::scroll_box::HorizontalScrollBox;
@@ -292,14 +292,19 @@ impl ExplorePage {
         self.set_compact(self.ctx.compact.get());
     }
 
-    /// A scrolling row of pills. Past twenty it ends with View All, which
-    /// opens the full list on its own page.
+    /// A scrolling row of pills. Past twenty its heading offers View All,
+    /// which opens the full list on its own page.
     fn add_pill_section(self: &Rc<Self>, title: &str, categories: &[Category]) {
         if categories.is_empty() {
             return;
         }
         let section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
-        section.append(&heading(title));
+        let on_view_all = (categories.len() > PILL_LIMIT).then(|| {
+            let ctx = self.ctx.clone();
+            let (title, items) = (title.to_owned(), categories.to_vec());
+            Box::new(move || ctx.nav.go(NavRequest::AllMoods { title: title.clone(), items: items.clone() })) as Box<dyn Fn()>
+        });
+        section.append(&section_header(title, on_view_all));
         let scroll_box = HorizontalScrollBox::new();
         // Outside the scrolled window: a margin within it is empty space for
         // the overlay scrollbar to draw a line in.
@@ -312,13 +317,6 @@ impl ExplorePage {
             button.connect_clicked(move |_| ctx.nav.go(NavRequest::Category { title: category.title.clone(), params: category.params.clone() }));
             strip.append(&button);
         }
-        if categories.len() > PILL_LIMIT {
-            let view_all = gtk::Button::builder().label(tr!("View All")).css_classes(["pill", "flat"]).build();
-            let ctx = self.ctx.clone();
-            let (title, items) = (title.to_owned(), categories.to_vec());
-            view_all.connect_clicked(move |_| ctx.nav.go(NavRequest::AllMoods { title: title.clone(), items: items.clone() }));
-            strip.append(&view_all);
-        }
         scroll_box.set_content(&strip);
         section.append(scroll_box.widget());
         self.explore_box.append(&section);
@@ -330,7 +328,7 @@ impl ExplorePage {
         if items.is_empty() {
             return;
         }
-        self.add_song_list(&self.explore_box, title, items, &self.explore_rows);
+        self.add_song_list(&self.explore_box, title, title, items, &self.explore_rows);
     }
 
     /// Demo hook: pick a chart country through the menu itself, so the
@@ -351,7 +349,7 @@ impl ExplorePage {
         true
     }
 
-    /// Demo hook: the View All at the end of the genre row.
+    /// Demo hook: the View All beside the genre row's heading.
     pub fn open_all_moods_for_demo(&self) -> bool {
         let data = self.data.borrow();
         let Some(items) = data.as_ref().map(|d| if d.genres.is_empty() { d.moods.clone() } else { d.genres.clone() }) else { return false };
@@ -514,7 +512,7 @@ impl ExplorePage {
         // Port of _search_local: without a network, search what is on disk.
         if !self.ctx.online.is_online() {
             let items = local_results(&self.ctx.downloads.all(), &query);
-            self.render_results(&query, SearchResults { top_result: None, items });
+            self.render_results(&query, SearchResults { items, ..SearchResults::default() });
             return;
         }
         self.stack.set_visible_child_name("loading");
@@ -551,6 +549,8 @@ impl ExplorePage {
 
         let mut all: Vec<MediaItem> = Vec::new();
         let has_top = results.top_result.is_some();
+        let more = |filter| results.more_for(filter);
+        let (more_songs, more_artists, more_playlists, more_albums) = (more(SearchFilter::Songs), more(SearchFilter::Artists), more(SearchFilter::CommunityPlaylists), more(SearchFilter::Albums));
         if let Some(top) = &results.top_result {
             all.push(top.clone());
         }
@@ -585,38 +585,38 @@ impl ExplorePage {
         let main = make_tab(&tr!("Main"), "main", &tr!("Main"));
         // Only a card YouTube sent as the top result earns the heading.
         let rest = if has_top {
-            self.add_result_section(&main, &tr!("Top Result"), &all[..1]);
+            self.add_result_section(&main, &tr!("Top Result"), query, &all[..1]);
             &all[1..]
         } else {
             &all[..]
         };
         if !rest.is_empty() {
-            self.add_result_section(&main, &tr!("Relevant Results"), rest);
+            self.add_result_section(&main, &tr!("Relevant Results"), query, rest);
         }
         if !songs.is_empty() {
             let tab = make_tab(&tr!("Songs"), "songs", &tr!("Songs"));
-            self.add_result_section(&tab, &tr!("Songs"), &songs);
+            self.add_paged_section(&tab, &tr!("Songs"), query, &songs, SearchFilter::Songs, more_songs);
         }
         if !artists.is_empty() {
             let tab = make_tab(&tr!("Artists"), "artists", &tr!("Artists"));
-            self.add_result_section(&tab, &tr!("Artists"), &artists);
+            self.add_paged_section(&tab, &tr!("Artists"), query, &artists, SearchFilter::Artists, more_artists);
         }
         if !playlists.is_empty() {
             let tab = make_tab(&tr!("Community Playlists"), "playlists", &tr!("Playlists"));
-            self.add_result_section(&tab, &tr!("Playlists"), &playlists);
+            self.add_paged_section(&tab, &tr!("Playlists"), query, &playlists, SearchFilter::CommunityPlaylists, more_playlists);
         }
         if !albums.is_empty() || !videos.is_empty() {
             let tab = make_tab(&tr!("Other results"), "others", &tr!("Other"));
             if !albums.is_empty() {
-                self.add_result_section(&tab, &tr!("Albums"), &albums);
+                self.add_paged_section(&tab, &tr!("Albums"), query, &albums, SearchFilter::Albums, more_albums);
             }
             // Episodes sit apart from music videos, under the heading Python gave them.
             let (episodes, videos): (Vec<MediaItem>, Vec<MediaItem>) = videos.into_iter().partition(|v| v.item_type.as_deref() == Some("Episode"));
             if !videos.is_empty() {
-                self.add_result_section(&tab, &tr!("Videos"), &videos);
+                self.add_result_section(&tab, &tr!("Videos"), query, &videos);
             }
             if !episodes.is_empty() {
-                self.add_result_section(&tab, &tr!("More results"), &episodes);
+                self.add_result_section(&tab, &tr!("More results"), query, &episodes);
             }
         }
 
@@ -640,22 +640,104 @@ impl ExplorePage {
         match pool.first() {
             Some(item) => {
                 tracing::info!(title = %item.title, id = %item.id, "activating first search result");
-                activate_item(&self.ctx, item, &pool, "");
+                activate_item(&self.ctx, item, &pool, &search_queue_title(self.current_query.borrow().as_deref().unwrap_or_default()));
                 true
             }
             None => false,
         }
     }
 
-    fn add_result_section(self: &Rc<Self>, parent: &gtk::Box, title: &str, items: &[MediaItem]) {
-        self.add_song_list(parent, title, items, &self.song_rows);
+    fn add_result_section(self: &Rc<Self>, parent: &gtk::Box, title: &str, query: &str, items: &[MediaItem]) {
+        self.add_song_list(parent, title, &search_queue_title(query), items, &self.song_rows);
+    }
+
+    /// A section of one kind of result: the first page YouTube sent, about
+    /// twenty rows, and Show More under them for as long as it has another page.
+    fn add_paged_section(self: &Rc<Self>, parent: &gtk::Box, title: &str, query: &str, items: &[MediaItem], filter: SearchFilter, more: Option<String>) {
+        let section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
+        section.append(&heading(title));
+        let list = gtk::ListBox::builder().css_classes(["boxed-list", "songs-list"]).selection_mode(gtk::SelectionMode::None).build();
+        // Shared with the row click: a song from a later page queues every row above it too.
+        let shown = Rc::new(RefCell::new(Vec::<MediaItem>::new()));
+        let append = {
+            let (weak, list, shown) = (Rc::downgrade(self), list.clone(), shown.clone());
+            move |items: Vec<MediaItem>| -> usize {
+                let Some(page) = weak.upgrade() else { return 0 };
+                let mut added = 0;
+                for item in items {
+                    if shown.borrow().iter().any(|s| s.id == item.id) {
+                        continue;
+                    }
+                    if item.kind.is_playable() {
+                        let row = SongRow::new(page.ctx.clone());
+                        row.set_search_style(true);
+                        row.bind(&item, None);
+                        list.append(row.widget());
+                        page.song_rows.borrow_mut().push(row);
+                    } else {
+                        let subtitle = search_subtitle(&item);
+                        let (row, _) = song_row_with_subtitle(&page.ctx, &item, Some(&subtitle));
+                        attach_item_menu(&page.ctx, &row, item.clone());
+                        list.append(&row);
+                    }
+                    shown.borrow_mut().push(item);
+                    added += 1;
+                }
+                added
+            }
+        };
+        append(items.to_vec());
+        {
+            let (ctx, shown, from) = (self.ctx.clone(), shown.clone(), search_queue_title(query));
+            list.connect_row_activated(move |_, row| {
+                let shown = shown.borrow().clone();
+                if let Some(item) = shown.get(row.index().max(0) as usize) {
+                    let pool: Vec<MediaItem> = shown.iter().filter(|i| i.kind.is_playable()).cloned().collect();
+                    activate_item(&ctx, item, &pool, &from);
+                }
+            });
+        }
+        section.append(&list);
+
+        let button = gtk::Button::builder().label(tr!("Show More")).css_classes(["pill"]).halign(gtk::Align::Center).margin_top(12).visible(more.is_some()).build();
+        let token = Rc::new(RefCell::new(more));
+        let (weak, query) = (Rc::downgrade(self), query.to_owned());
+        button.connect_clicked(move |button| {
+            let (Some(page), Some(next)) = (weak.upgrade(), token.borrow_mut().take()) else { return };
+            button.set_sensitive(false);
+            button.set_label(&tr!("Loading…"));
+            let api = page.ctx.net.client().api();
+            let wanted = query.clone();
+            let retry = next.clone();
+            let handle = page.ctx.net.spawn(async move { search_more(&*api, &wanted, filter, &next).await });
+            let (button, token, append) = (button.clone(), token.clone(), append.clone());
+            glib::spawn_future_local(async move {
+                let more = match handle.await {
+                    // A page of rows already shown is the end, whatever token came with it.
+                    Ok(Ok(results)) => results.more_for(filter).filter(|_| append(results.items) > 0),
+                    // The same page can be asked for again.
+                    Ok(Err(err)) => {
+                        tracing::warn!(%err, "more search results failed");
+                        toast(&button, &tr!("Could not load more results"));
+                        Some(retry)
+                    }
+                    Err(_) => Some(retry),
+                };
+                token.replace(more);
+                button.set_visible(token.borrow().is_some());
+                button.set_sensitive(true);
+                button.set_label(&tr!("Show More"));
+            });
+        });
+        section.append(&button);
+        parent.append(&section);
     }
 
     /// A boxed list: SongRow for songs and videos, the simple row for
     /// collections. Activating a song queues every playable row of the
     /// section, like on_row_activated. The feed and the result tabs keep
     /// their rows in separate sinks, so reloading one leaves the other alone.
-    fn add_song_list(self: &Rc<Self>, parent: &gtk::Box, title: &str, items: &[MediaItem], rows: &RefCell<Vec<Rc<SongRow>>>) {
+    fn add_song_list(self: &Rc<Self>, parent: &gtk::Box, title: &str, queue_title: &str, items: &[MediaItem], rows: &RefCell<Vec<Rc<SongRow>>>) {
         let section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
         section.append(&heading(title));
         let list = gtk::ListBox::builder().css_classes(["boxed-list", "songs-list"]).selection_mode(gtk::SelectionMode::None).build();
@@ -674,16 +756,22 @@ impl ExplorePage {
                 list.append(&row);
             }
         }
-        let (ctx, shelf) = (self.ctx.clone(), title.to_owned());
-        let items_c = items.to_vec();
+        let ctx = self.ctx.clone();
+        let (items_c, from) = (items.to_vec(), queue_title.to_owned());
         list.connect_row_activated(move |_, row| {
             if let Some(item) = items_c.get(row.index().max(0) as usize) {
-                activate_item(&ctx, item, &pool, &shelf);
+                activate_item(&ctx, item, &pool, &from);
             }
         });
         section.append(&list);
         parent.append(&section);
     }
+}
+
+/// What the queue header says for songs started from the results of a search.
+fn search_queue_title(query: &str) -> String {
+    // Translators: the name of a queue started from the search results, {query} is what was searched for.
+    tr!("Search: {query}", query = query.trim())
 }
 
 fn heading(title: &str) -> gtk::Label {

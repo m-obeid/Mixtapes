@@ -101,6 +101,15 @@ impl Lyrics {
         Some(result)
     }
 
+    /// The lyrics already on disk for a track, asking no provider. This is what an offline listener gets.
+    ///
+    /// Falls back to the richest cached result when none of the queued providers is cached.
+    pub async fn cached_lyrics(&self, track: &TrackQuery) -> Option<LyricsResult> {
+        let order = self.inner.prefs.provider_order();
+        let queued = self.inner.cache.get_result(&track.video_id, Some(&order), self.inner.chain.accept_rank());
+        queued.or_else(|| self.inner.cache.get_alternatives(&track.video_id).into_iter().map(|(_, result)| result).find(|r| !r.lines.is_empty()))
+    }
+
     /// Every provider already cached for this video, richest first. Use `fetch_alternatives` to fill in the ones that are not.
     pub async fn alternatives(&self, video_id: &str) -> Vec<(String, LyricsResult)> {
         self.inner.cache.get_alternatives(video_id)
@@ -227,6 +236,16 @@ mod tests {
             async move { lyrics.get_lyrics(&track()).await }
         });
         assert_eq!(spawned.await.unwrap().unwrap().source, "LRCLIB");
+    }
+
+    #[tokio::test]
+    async fn an_offline_read_asks_nobody() {
+        let (_dir, source, lyrics) = service();
+        source.answer(Provider::Lrclib, "Song", synced("LRCLIB", "la"));
+        assert!(lyrics.cached_lyrics(&track()).await.is_none());
+        assert!(source.calls.lock().unwrap().is_empty());
+        lyrics.get_lyrics(&track()).await.unwrap();
+        assert_eq!(lyrics.cached_lyrics(&track()).await.unwrap().source, "LRCLIB");
     }
 
     #[tokio::test]

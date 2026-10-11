@@ -189,8 +189,8 @@ pub fn ttml_to_lines(ttml: &str) -> Vec<LyricLine> {
 
         let key = attr(elem, "key");
         let from_meta = |map: &HashMap<String, String>| key.and_then(|k| map.get(k)).cloned();
-        line.translation = parsed.translation.filter(|t| !t.is_empty()).or_else(|| from_meta(&meta_translations)).filter(|t| *t != line.text);
-        line.romanization = parsed.romanization.filter(|r| !r.is_empty()).or_else(|| from_meta(&meta_transliterations)).filter(|r| *r != line.text);
+        line.translation = parsed.translation.filter(|t| !t.is_empty()).or_else(|| from_meta(&meta_translations)).filter(|t| !crate::lyrics::matching::repeats_line(t, &line.text));
+        line.romanization = parsed.romanization.filter(|r| !r.is_empty()).or_else(|| from_meta(&meta_transliterations)).filter(|r| !crate::lyrics::matching::repeats_line(r, &line.text));
         lines.push(line);
     }
     lines

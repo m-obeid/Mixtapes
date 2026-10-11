@@ -53,6 +53,10 @@ impl PoTokens {
         if let Some(token) = self.cached(video_id) {
             return Some(token);
         }
+        // Minting runs a helper that talks to YouTube.
+        if crate::net::offline::sealed() {
+            return None;
+        }
         let (reply, answer) = oneshot::channel();
         self.minter().send((video_id.to_owned(), reply)).ok()?;
         let (value, expires) = answer.await.ok()??;

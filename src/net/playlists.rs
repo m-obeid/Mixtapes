@@ -16,6 +16,7 @@ use crate::net::cache::{LibraryIds, SortMetric};
 use crate::net::items::*;
 use crate::net::library::{self, parse_two_row};
 use crate::net::search::{SearchFilter, search};
+use crate::net::twins;
 use crate::net::ytmusic::NetError;
 
 const HEADER_SECTION: &str = "/contents/twoColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0";
@@ -62,9 +63,41 @@ pub struct PlaylistDetails {
 }
 
 impl PlaylistDetails {
+    /// The card a YouTube playlist or album makes in a library kept on this
+    /// device, under the id its page opens with. A playlist is the same list
+    /// with or without its browse prefix, so it is saved without.
+    pub fn library_card(&self, page_id: &str) -> MediaItem {
+        let is_album = page_id.starts_with("MPRE");
+        MediaItem {
+            // An album opened through its OLAK playlist is a playlist page, and comes back as one.
+            kind: if is_album { ItemKind::Album } else { ItemKind::Playlist },
+            id: saved_id(page_id).to_owned(),
+            title: self.title.clone(),
+            artists: self.author.clone(),
+            thumb: self.thumbnails.last().cloned(),
+            year: self.year.clone().filter(|y| !y.is_empty()),
+            item_type: is_album.then(|| self.track_count.map(crate::net::cache::Caches::release_kind).unwrap_or("Album").to_owned()),
+            count: self.track_count.or(Some(self.tracks.len() as u32).filter(|n| *n > 0)).map(|count| count.to_string()),
+            playlist_id: self.audio_playlist_id.clone(),
+            ..MediaItem::default()
+        }
+    }
+
     fn sum_duration(&mut self) {
         self.duration_seconds = Some(self.tracks.iter().filter_map(|t| t.duration_seconds).sum());
     }
+}
+
+/// The id a list is saved under on this device.
+pub fn saved_id(playlist_id: &str) -> &str {
+    playlist_id.strip_prefix("VL").unwrap_or(playlist_id)
+}
+
+/// Whether a page id names a YouTube list that can be kept in the library:
+/// not a radio, the account's likes, a podcast, an upload or a list made here.
+pub fn is_savable(page_id: &str) -> bool {
+    let id = saved_id(page_id);
+    !(id.is_empty() || id == "LM" || id.starts_with("RD") || id.starts_with("FEmusic") || id.starts_with("UPLOAD") || id == "DOWNLOADS" || id == "HISTORY" || is_podcast(id) || crate::local_library::is_local(id))
 }
 
 // -- playlists ------------------------------------------------------------
@@ -80,6 +113,7 @@ pub async fn get_playlist(api: &dyn Browse, playlist_id: &str, limit: Option<usi
     }
     let collaborative = details.collaborators.is_some();
     details.tracks = playlist_rows(api, &response, limit, collaborative).await?;
+    apply_known_audio_versions(&mut details.tracks);
     details.sum_duration();
     if playlist_id == "LM" {
         // English here, since the page caches these. The page passes them to i18n::gettext where they are shown.
@@ -217,6 +251,7 @@ pub async fn get_album(api: &dyn Browse, browse_id: &str) -> Result<PlaylistDeta
             track.artist = details.author.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", ");
         }
     }
+    apply_known_audio_versions(&mut tracks);
     details.tracks = tracks;
     details.sum_duration();
     Ok(details)
@@ -268,6 +303,18 @@ pub struct WatchPlaylist {
     pub playlist_id: Option<String>,
 }
 
+impl WatchPlaylist {
+    /// Song versions for the videos in the panel: the twin YouTube paired with a row when it sent one, and the ones already known.
+    pub fn apply_known_audio_versions(&mut self) {
+        for row in &mut self.tracks {
+            if let Some(twin) = row.counterpart.as_ref().filter(|c| row.track.may_have_audio_version() && c.video_type.as_deref() == Some(crate::model::AUDIO_VIDEO_TYPE)) {
+                twins::remember(row.track.video_id.as_str(), Some(twin.clone()));
+            }
+            apply_known_audio_versions(std::slice::from_mut(&mut row.track));
+        }
+    }
+}
+
 /// Port of get_watch_playlist: the panel YouTube Music shows when a track
 /// plays, or a radio for `radio`. Follows continuations until `limit`.
 pub async fn get_watch_playlist(api: &dyn Browse, video_id: Option<&str>, playlist_id: Option<&str>, limit: usize, radio: bool) -> Result<WatchPlaylist, NetError> {
@@ -316,13 +363,42 @@ pub async fn get_watch_playlist(api: &dyn Browse, video_id: Option<&str>, playli
 }
 
 /// Port of Player.start_radio's fetch: 50 radio tracks for a song or a playlist.
+///
+/// A radio grown from a music video is fifty music videos, so the seed is its song version when it has one.
 pub async fn radio_tracks(api: &dyn Browse, video_id: Option<&str>, playlist_id: Option<&str>) -> Result<WatchPlaylist, NetError> {
-    get_watch_playlist(api, video_id, playlist_id, 50, true).await
+    let seed = match video_id {
+        Some(video_id) => Some(find_audio_version(api, video_id).await.ok().flatten().map(|twin| twin.video_id.0).unwrap_or_else(|| video_id.to_owned())),
+        None => None,
+    };
+    // A radio playlist named after the video is the video's radio too.
+    let playlist_id = match (video_id, seed.as_deref(), playlist_id) {
+        (Some(video), Some(seed), Some(list)) if video != seed && list.ends_with(video) => Some(format!("{}{seed}", &list[..list.len() - video.len()])),
+        (_, _, list) => list.map(str::to_owned),
+    };
+    let mut watch = get_watch_playlist(api, seed.as_deref(), playlist_id.as_deref(), 50, true).await?;
+    watch.apply_known_audio_versions();
+    Ok(watch)
+}
+
+/// The song twin of a music video, asked about once: the answer is kept in `twins`.
+pub async fn find_audio_version(api: &dyn Browse, video_id: &str) -> Result<Option<Track>, NetError> {
+    if !twins::enabled() {
+        return Ok(None);
+    }
+    if let Some(known) = twins::known(video_id) {
+        return Ok(known);
+    }
+    let found = look_up_audio_version(api, video_id).await?;
+    twins::remember(video_id, found.clone());
+    if found.is_some() {
+        twins::save();
+    }
+    Ok(found)
 }
 
 /// Port of MusicClient.find_audio_version: the song twin of a music video,
 /// from YouTube Music's own pairing first, then a conservative song search.
-pub async fn find_audio_version(api: &dyn Browse, video_id: &str) -> Result<Option<Track>, NetError> {
+async fn look_up_audio_version(api: &dyn Browse, video_id: &str) -> Result<Option<Track>, NetError> {
     let watch = get_watch_playlist(api, Some(video_id), None, 1, false).await.unwrap_or_default();
     let Some(current) = watch.tracks.first() else { return Ok(None) };
     let cur_type = current.track.video_type.clone().unwrap_or_default().to_uppercase();
@@ -336,25 +412,128 @@ pub async fn find_audio_version(api: &dyn Browse, video_id: &str) -> Result<Opti
     }
     let title = current.track.title.clone();
     let artists: Vec<String> = current.track.artists.iter().map(|a| a.name.to_lowercase()).collect();
+    search_audio_version(api, &title, &artists, current.track.duration_seconds).await
+}
+
+/// A song with this title by one of these artists, lowercased. Anything looser picks covers and remixes.
+///
+/// A title that differs only in who it features still counts when the lengths agree: a video says "feat. GUMI" where the song says "feat. Megpoid".
+async fn search_audio_version(api: &dyn Browse, title: &str, artists: &[String], duration: Option<u32>) -> Result<Option<Track>, NetError> {
+    let title = without_artist_prefix(title, artists);
     if title.is_empty() {
         return Ok(None);
     }
     let query = match artists.first() {
         Some(a) => format!("{title} {a}"),
-        None => title.clone(),
+        None => title.to_owned(),
     };
     let results = search(api, &query, Some(SearchFilter::Songs)).await?;
-    let wanted = normalize_title(&title);
-    for item in results.items.iter().filter(|i| i.kind == ItemKind::Song) {
-        if normalize_title(&item.title) != wanted {
-            continue;
-        }
+    let by_artist = |item: &&MediaItem| {
         let names: Vec<String> = item.artists.iter().map(|a| a.name.to_lowercase()).collect();
-        if artists.is_empty() || artists.iter().any(|a| names.contains(a)) {
-            return Ok(item.to_track());
-        }
+        item.kind == ItemKind::Song && (artists.is_empty() || artists.iter().any(|a| names.contains(a)))
+    };
+    let wanted = normalize_title(title);
+    if let Some(item) = results.items.iter().filter(by_artist).find(|i| normalize_title(&i.title) == wanted) {
+        return Ok(item.to_track());
+    }
+    let same_length = |item: &&MediaItem| matches!((duration, item.duration_seconds), (Some(a), Some(b)) if a.abs_diff(b) <= FEATURING_LENGTH_SLACK);
+    let wanted = normalize_title(without_featuring(title));
+    if !artists.is_empty() && let Some(item) = results.items.iter().filter(by_artist).filter(same_length).find(|i| normalize_title(without_featuring(&i.title)) == wanted) {
+        return Ok(item.to_track());
     }
     Ok(None)
+}
+
+/// How far apart, in seconds, a video and a song may run and still be one recording when only the featured name differs.
+const FEATURING_LENGTH_SLACK: u32 = 20;
+
+/// The title up to its "(feat. X)" part.
+fn without_featuring(title: &str) -> &str {
+    let lowered = title.to_lowercase();
+    let cut = ["(feat", "[feat", "(ft.", " feat. ", " ft. "].iter().filter_map(|mark| lowered.find(mark)).min();
+    // The lowercase copy can differ in byte length, so the cut is only taken where it lands on a character.
+    match cut.filter(|at| *at > 0 && title.is_char_boundary(*at)) {
+        Some(at) => title[..at].trim_end(),
+        None => title,
+    }
+}
+
+/// A video is often titled "Artist - Song", where the song is only "Song".
+fn without_artist_prefix<'a>(title: &'a str, artists: &[String]) -> &'a str {
+    let Some((lead, rest)) = title.split_once(" - ") else { return title };
+    let lead = lead.trim().to_lowercase();
+    if artists.iter().any(|a| *a == lead) && !rest.trim().is_empty() { rest.trim() } else { title }
+}
+
+/// Lookups one list may start, so a playlist made of videos does not turn into hundreds of searches.
+const TWIN_LOOKUPS: usize = 120;
+const TWIN_LOOKUPS_AT_ONCE: usize = 6;
+
+/// Whether a row is a music video a song version may replace. A row of the listener's own playlist is left alone: its id is what removes it.
+fn convertible(track: &Track) -> bool {
+    track.may_have_audio_version() && track.set_video_id.is_none() && track.is_available
+}
+
+/// Turn the music videos whose song version is already known into it. Asks nobody, so a list shows at once. Answers how many rows changed.
+pub fn apply_known_audio_versions(tracks: &mut [Track]) -> usize {
+    if !twins::enabled() {
+        return 0;
+    }
+    let mut changed = 0;
+    for track in tracks.iter_mut().filter(|t| convertible(t)) {
+        if let Some(Some(twin)) = twins::known(track.video_id.as_str()) {
+            *track = track.as_audio_version(twin);
+            changed += 1;
+        }
+    }
+    changed
+}
+
+/// Find the song versions nobody has asked about yet, one song search per video from the row's own title and artists. Answers how many were found.
+///
+/// This is the slow half, so a page runs it behind a list that is already showing and applies the answers after.
+pub async fn learn_audio_versions(api: &dyn Browse, tracks: &[Track]) -> usize {
+    if !twins::enabled() {
+        return 0;
+    }
+    let unknown: Vec<&Track> = tracks.iter().filter(|t| convertible(t) && twins::known(t.video_id.as_str()).is_none()).take(TWIN_LOOKUPS).collect();
+    let mut found = 0;
+    for batch in unknown.chunks(TWIN_LOOKUPS_AT_ONCE) {
+        let lookups = batch.iter().map(|track| {
+            let artists: Vec<String> = track.artists.iter().map(|a| a.name.to_lowercase()).collect();
+            async move { search_audio_version(api, &track.title, &artists, track.duration_seconds).await }
+        });
+        let answers = join_all(lookups.collect()).await;
+        for (track, answer) in batch.iter().zip(answers) {
+            // A failed search is asked again next time.
+            let Ok(twin) = answer else { continue };
+            let twin = twin.filter(|t| t.video_id != track.video_id);
+            found += usize::from(twin.is_some());
+            twins::remember(track.video_id.as_str(), twin);
+        }
+    }
+    if found > 0 {
+        twins::save();
+    }
+    found
+}
+
+/// Run futures that borrow side by side, answers in the order given.
+async fn join_all<F: Future>(futures: Vec<F>) -> Vec<F::Output> {
+    let mut futures: Vec<_> = futures.into_iter().map(Box::pin).collect();
+    let mut answers: Vec<Option<F::Output>> = futures.iter().map(|_| None).collect();
+    std::future::poll_fn(|cx| {
+        let mut waiting = false;
+        for (future, answer) in futures.iter_mut().zip(answers.iter_mut()).filter(|(_, a)| a.is_none()) {
+            match future.as_mut().poll(cx) {
+                std::task::Poll::Ready(value) => *answer = Some(value),
+                std::task::Poll::Pending => waiting = true,
+            }
+        }
+        if waiting { std::task::Poll::Pending } else { std::task::Poll::Ready(()) }
+    })
+    .await;
+    answers.into_iter().flatten().collect()
 }
 
 fn normalize_title(title: &str) -> String {
@@ -440,7 +619,8 @@ pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: 
                 Err(err) => tracing::warn!(%err, vid, "audio-version swap failed"),
             }
         }
-        ids.push(vid);
+        // A bulk add asks nobody, and still uses the twins already known.
+        ids.push(twins::preferred_id(&vid));
     }
     if ids.is_empty() {
         return Ok(());
@@ -555,15 +735,20 @@ pub async fn delete_playlist(api: &dyn Browse, playlist_id: &str) -> Result<(), 
 pub async fn fetch_library_ids(api: Arc<dyn Browse>) -> Result<(LibraryIds, Vec<MediaItem>), NetError> {
     let playlists = library::library_playlists(api.clone()).await.unwrap_or_default();
     let albums = library::library_albums(api).await.unwrap_or_default();
+    Ok((library_ids_of(&playlists, &albums), playlists))
+}
+
+/// The ids a library's playlists and albums go by, for the "is this saved" lookup.
+pub fn library_ids_of(playlists: &[MediaItem], albums: &[MediaItem]) -> LibraryIds {
     let mut ids = LibraryIds::default();
     ids.playlists.extend(playlists.iter().map(|p| p.id.clone()));
-    for album in &albums {
+    for album in albums {
         ids.albums.insert(album.id.clone());
         if let Some(pid) = &album.playlist_id {
             ids.albums.insert(pid.clone());
         }
     }
-    Ok((ids, playlists))
+    ids
 }
 
 /// Port of get_editable_playlists: owned or collaborative playlists only.
@@ -834,6 +1019,47 @@ pub async fn artist_albums(api: &dyn Browse, channel_id: &str, params: Option<&s
     raw_parse_channel_content(api, channel_id, params).await
 }
 
+/// The web client version the visitor request names. YouTube takes old ones, the date is not checked.
+const VISITOR_CLIENT_VERSION: &str = "1.20260101.01.00";
+
+/// The grid behind the View All of a channel carousel, asked for as one visitor.
+///
+/// A "Release - Topic" channel hands out a View All token made for the visitor
+/// its page was served to. The `ytmusicapi` client sends no visitor id when
+/// signed out, so the token came back as "no public content" and the page
+/// stayed empty. Here the channel page is fetched for its visitor id and its
+/// fresh token, and the grid is asked for with both.
+pub async fn channel_grid_as_visitor(http: &reqwest::Client, channel_id: &str, section: &str) -> Result<Vec<MediaItem>, NetError> {
+    async fn browse(http: &reqwest::Client, mut body: Value, visitor: Option<&str>) -> Result<Value, NetError> {
+        let mut client = json!({ "clientName": "WEB_REMIX", "clientVersion": VISITOR_CLIENT_VERSION, "hl": "en" });
+        if let Some(visitor) = visitor {
+            client["visitorData"] = json!(visitor);
+        }
+        body["context"] = json!({ "client": client, "user": {} });
+        let response = http.post("https://music.youtube.com/youtubei/v1/browse?alt=json").header("Origin", "https://music.youtube.com").json(&body).send().await?.error_for_status()?;
+        Ok(response.json().await?)
+    }
+    let page = browse(http, json!({ "browseId": channel_id }), None).await?;
+    let visitor = owned_at(&page, "/responseContext/visitorData").ok_or_else(|| message("no visitor id on the channel page"))?;
+    let wanted = section.trim().to_lowercase();
+    let headers = array_at(&page, SINGLE_SECTIONS).iter().filter_map(|s| s.pointer("/musicCarouselShelfRenderer/header/musicCarouselShelfBasicHeaderRenderer"));
+    let endpoint = headers
+        .filter(|h| str_at(h, "/title/runs/0/text").is_some_and(|t| t.to_lowercase() == wanted))
+        .find_map(|h| h.pointer("/title/runs/0/navigationEndpoint/browseEndpoint").or_else(|| h.pointer("/moreContentButton/buttonRenderer/navigationEndpoint/browseEndpoint")))
+        .ok_or_else(|| message(format!("the channel has no \"{section}\" list")))?;
+    let body = json!({ "browseId": endpoint.get("browseId").cloned().unwrap_or(json!(channel_id)), "params": endpoint.get("params").cloned().unwrap_or_default() });
+    let grid = browse(http, body, Some(&visitor)).await?;
+    let mut items = Vec::new();
+    for section in array_at(&grid, SINGLE_SECTIONS) {
+        for key in ["gridRenderer", "musicShelfRenderer", "musicCarouselShelfRenderer"] {
+            let Some(renderer) = section.get(key) else { continue };
+            let entries = if renderer.get("items").is_some() { array_at(renderer, "/items") } else { array_at(renderer, "/contents") };
+            items.extend(entries.iter().filter_map(parse_channel_item));
+        }
+    }
+    Ok(items)
+}
+
 /// Title, artist and album text of a track lowercased, what the filters match on.
 pub fn track_search_text(track: &Track) -> (String, String, String) {
     (track.title.to_lowercase(), track.artist.to_lowercase(), track.album.as_ref().map(|a| a.name.to_lowercase()).unwrap_or_default())
@@ -842,6 +1068,48 @@ pub fn track_search_text(track: &Track) -> (String, String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A service that must not be asked.
+    struct Silent;
+
+    impl Browse for Silent {
+        fn post<'a>(&'a self, endpoint: &'a str, _: Value) -> crate::net::browse::Response<'a> {
+            panic!("asked {endpoint}")
+        }
+    }
+
+    #[tokio::test]
+    async fn a_known_twin_replaces_the_video_without_a_request() {
+        let video = |id: &str, kind: &str| Track { video_id: crate::model::VideoId(id.into()), title: format!("Artist - {id}"), video_type: Some(kind.into()), ..Track::default() };
+        let twin = Track { title: "Song".into(), ..video("twin-song", "MUSIC_VIDEO_TYPE_ATV") };
+        twins::remember("twin-video", Some(twin));
+        twins::remember("twin-less", None);
+        let mut owned = video("twin-video", "MUSIC_VIDEO_TYPE_OMV");
+        owned.set_video_id = Some("row".into());
+        let mut rows = vec![video("twin-video", "MUSIC_VIDEO_TYPE_OMV"), video("twin-less", "MUSIC_VIDEO_TYPE_OMV"), owned, video("twin-song", "MUSIC_VIDEO_TYPE_ATV")];
+        assert_eq!(apply_known_audio_versions(&mut rows), 1);
+        assert_eq!(learn_audio_versions(&Silent, &rows).await, 0, "nothing is left to ask about");
+        assert_eq!(rows.iter().map(|t| t.video_id.as_str()).collect::<Vec<_>>(), ["twin-song", "twin-less", "twin-video", "twin-song"]);
+        assert_eq!(rows[0].title, "Song");
+        assert_eq!(twins::preferred_id("twin-video"), "twin-song");
+        assert_eq!(find_audio_version(&Silent, "twin-video").await.unwrap().unwrap().video_id.as_str(), "twin-song");
+    }
+
+    #[test]
+    fn a_title_is_cut_at_who_it_features() {
+        assert_eq!(without_featuring("Cosmos (feat. GUMI)"), "Cosmos");
+        assert_eq!(without_featuring("Cosmos feat. Megpoid"), "Cosmos");
+        assert_eq!(without_featuring("Cosmos"), "Cosmos");
+        assert_eq!(without_featuring("(feat. nobody)"), "(feat. nobody)");
+    }
+
+    #[test]
+    fn a_video_title_loses_its_artist_prefix() {
+        let artists = ["deathbrain".to_owned()];
+        assert_eq!(without_artist_prefix("Deathbrain - voxel winds", &artists), "voxel winds");
+        assert_eq!(without_artist_prefix("Someone - voxel winds", &artists), "Someone - voxel winds");
+        assert_eq!(without_artist_prefix("voxel winds", &artists), "voxel winds");
+    }
     use ytmusicapi::YTMusicClient;
 
     // -- fixtures ---------------------------------------------------------
