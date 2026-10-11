@@ -35,7 +35,7 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesDialog {
     general.add(&playback_group(win, ctx));
     general.add(&downloads_group(win, ctx));
     general.add(&updates_group(ctx));
-    if let Some(group) = language_group(ctx) {
+    if let Some(group) = language_group(win, ctx) {
         general.add(&group);
     }
     dialog.add(&general);
@@ -425,7 +425,7 @@ fn updates_group(ctx: &Rc<App>) -> adw::PreferencesGroup {
 // -- language ------------------------------------------------------------------
 
 /// The language choice. None while no translation is compiled in.
-fn language_group(ctx: &Rc<App>) -> Option<adw::PreferencesGroup> {
+fn language_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::PreferencesGroup> {
     let languages = crate::i18n::languages();
     if languages.is_empty() {
         return None;
@@ -437,11 +437,24 @@ fn language_group(ctx: &Rc<App>) -> Option<adw::PreferencesGroup> {
     let selected = languages.iter().position(|(code, _)| *code == current).map_or(0, |at| at + 1);
     let language_row = combo_row(&tr!("Language"), &tr!("Applies on next launch."), &labels, selected);
     {
-        let ctx = ctx.clone();
+        let (win, ctx) = (win.clone(), ctx.clone());
         language_row.connect_selected_notify(move |row| {
             // An empty code follows the system.
             let code = (row.selected() as usize).checked_sub(1).and_then(|at| languages.get(at)).map(|(code, _)| *code).unwrap_or("");
             save(&ctx, crate::i18n::LANGUAGE_PREF, code);
+            // The catalog is picked once, at startup, so the choice shows after a restart.
+            let dialog = adw::AlertDialog::builder().heading(tr!("Restart Mixtapes?")).body(tr!("The language changes after a restart. Playback stops.")).build();
+            dialog.add_responses(&[("later", &tr!("Later")), ("restart", &tr!("Restart Now"))]);
+            dialog.set_response_appearance("restart", adw::ResponseAppearance::Suggested);
+            dialog.set_default_response(Some("restart"));
+            dialog.set_close_response("later");
+            let win = win.clone();
+            dialog.connect_response(Some("restart"), move |_, _| {
+                if !relaunch(&win) {
+                    win.add_toast(&tr!("Could not restart. Start Mixtapes again to apply the language."));
+                }
+            });
+            dialog.present(Some(row));
         });
     }
     let group = adw::PreferencesGroup::new();
@@ -541,18 +554,26 @@ fn reset_and_restart(win: &Rc<MainWindow>, ctx: &Rc<App>) {
         let _ = std::fs::remove_dir_all(&paths.cache_dir);
         tracing::info!("profile reset, relaunching");
         // The new process starts as a fresh install and opens the wizard.
-        match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).spawn()) {
-            Ok(_) => {
-                if let Some(app) = win.window().application() {
-                    app.quit();
-                }
-            }
-            Err(err) => {
-                tracing::warn!(%err, "relaunch failed");
-                win.add_toast(&tr!("Reset done. Start Mixtapes again to run the setup."));
-            }
+        if !relaunch(&win) {
+            win.add_toast(&tr!("Reset done. Start Mixtapes again to run the setup."));
         }
     });
+}
+
+/// Start a second copy of the app and quit this one, the way the menu quits. False when the copy did not start.
+fn relaunch(win: &Rc<MainWindow>) -> bool {
+    match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).spawn()) {
+        Ok(_) => {
+            if let Some(app) = win.window().application() {
+                app.quit();
+            }
+            true
+        }
+        Err(err) => {
+            tracing::warn!(%err, "relaunch failed");
+            false
+        }
+    }
 }
 
 // -- appearance -------------------------------------------------------------------

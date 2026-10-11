@@ -74,7 +74,7 @@ impl MediaCard {
         main_box.append(&wrapper);
 
         let title = gtk::Label::builder()
-            .label(&item.title)
+            .label(item.shown_title())
             .halign(gtk::Align::Start)
             .xalign(0.0)
             .hexpand(true)
@@ -85,7 +85,7 @@ impl MediaCard {
             .wrap_mode(gtk::pango::WrapMode::WordChar)
             .lines(opts.title_lines)
             .justify(gtk::Justification::Left)
-            .tooltip_text(&item.title)
+            .tooltip_text(item.shown_title())
             .build();
         main_box.append(&title);
 
@@ -187,13 +187,13 @@ fn resolve_subtitle(item: &MediaItem, known_kind: Option<&str>) -> String {
     // ytmusicapi files that author under `author`, which _resolve_subtitle
     // never reads, so the description is what it falls through to.
     if item.kind == ItemKind::Playlist {
-        if let Some(description) = item.description.clone().filter(|d| !d.is_empty()) {
-            return description;
+        if let Some(description) = item.description.as_deref().filter(|d| !d.is_empty()) {
+            return crate::i18n::youtube(description);
         }
     }
     let artists = item.artists_text();
     if !artists.is_empty() {
         return artists;
     }
-    item.description.clone().or_else(|| item.subscribers.clone()).unwrap_or_default()
+    item.description.as_deref().or(item.subscribers.as_deref()).map(crate::i18n::youtube).unwrap_or_default()
 }

@@ -146,12 +146,15 @@ impl CategoryPage {
         }
         self.loading_wrap.set_visible(true);
         let api = self.ctx.net.client().api();
+        let labels = self.ctx.net.client().localized_api();
         let params = params.to_owned();
         let handle = self.ctx.net.spawn(async move {
             if params == explore::PODCASTS_KEY {
-                explore::get_podcasts_page(&api).await
-            } else {
-                explore::get_category_page(&api, &params).await
+                return explore::get_podcasts_page(&api).await;
+            }
+            match labels {
+                Some(labels) => explore::get_localized_category_page(&api, &labels, &params).await,
+                None => explore::get_category_page(&api, &params).await,
             }
         });
         let weak = Rc::downgrade(self);
@@ -189,10 +192,13 @@ impl CategoryPage {
     fn render_sections(self: &Rc<Self>) {
         self.clear_sections();
         for section in self.sections.borrow().iter() {
+            // The catalog first, then YouTube's own wording. A shelf of other playlists than the English one has neither.
+            let title = crate::i18n::translated(&section.title).or_else(|| section.shown_title.clone()).unwrap_or_else(|| section.title.clone());
+            let title = title.as_str();
             if is_song_section(section) {
-                self.add_songs_list(&section.title, &section.items);
+                self.add_songs_list(title, &section.items);
             } else {
-                self.add_carousel(&section.title, &section.items);
+                self.add_carousel(title, &section.items);
             }
         }
         self.set_compact_mode(self.ctx.compact.get());
@@ -211,8 +217,8 @@ impl CategoryPage {
         for item in items {
             let card = MediaCard::new(&self.ctx, item.clone(), CardOptions { title_lines: 1, ..CardOptions::default() });
             let ctx = self.ctx.clone();
-            let pool_c = pool.clone();
-            card.connect_clicked(move |item| activate_item(&ctx, item, &pool_c));
+            let (pool_c, shelf) = (pool.clone(), title.to_owned());
+            card.connect_clicked(move |item| activate_item(&ctx, item, &pool_c, &shelf));
             self.attach_card_menu(card.widget(), item);
             strip.append(card.widget());
             self.cards.borrow_mut().push(card);
@@ -245,11 +251,11 @@ impl CategoryPage {
             list.append(row.widget());
             self.rows.borrow_mut().push(row);
         }
-        let ctx = self.ctx.clone();
+        let (ctx, shelf) = (self.ctx.clone(), title.to_owned());
         let shown = showing.to_vec();
         list.connect_row_activated(move |_, row| {
             if let Some(item) = shown.get(row.index().max(0) as usize) {
-                activate_item(&ctx, item, &pool);
+                activate_item(&ctx, item, &pool, &shelf);
             }
         });
         section.append(&list);

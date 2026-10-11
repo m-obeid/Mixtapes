@@ -491,7 +491,8 @@ impl ArtistPage {
             // Translators: {count} is a short number YouTube sends, like 1.2M
             subs = tr!("{count} subscribers", count = subs);
         }
-        if let Some(views) = data.views.as_ref().filter(|v| !v.is_empty()) {
+        // "25,210,842 views" as YouTube sent it.
+        if let Some(views) = data.views.as_deref().filter(|v| !v.is_empty()).map(crate::i18n::youtube) {
             if subs.is_empty() {
                 subs = views.clone()
             } else {
@@ -810,13 +811,21 @@ impl ArtistPage {
             .unwrap_or(0);
         self.ctx
             .player
-            .play_tracks(queue, start, false, self.queue_source(), false);
+            .play_tracks(queue, start, false, self.shelf_source("Top Songs"), false);
     }
 
     /// The top songs as a queue source: the artist's name for the queue header.
     fn queue_source(&self) -> Option<QueueSource> {
         let channel_id = self.channel_id.borrow().clone();
         (!channel_id.is_empty()).then(|| QueueSource::new(channel_id, self.artist_name.borrow().clone()))
+    }
+
+    /// The queue started from one of the page's shelves: "Artist - Shelf" in the header.
+    /// `shelf` is the English name, as the sections are keyed.
+    fn shelf_source(&self, shelf: &str) -> Option<QueueSource> {
+        let mut source = self.queue_source()?;
+        source.title = format!("{} - {}", source.title, crate::i18n::gettext(shelf));
+        Some(source)
     }
 
     /// Port of _build_queue_tracks: the top songs with the page's artist
@@ -955,7 +964,7 @@ impl ArtistPage {
 
         let limit = self.limit_for(title, 10);
         for item in section.results.iter().take(limit) {
-            let card = self.make_grid_card(item);
+            let card = self.make_grid_card(item, title);
             strip.append(card.widget());
             self.cards.borrow_mut().push(card);
         }
@@ -984,7 +993,8 @@ impl ArtistPage {
         }
     }
 
-    fn make_grid_card(self: &Rc<Self>, item: &MediaItem) -> Rc<MediaCard> {
+    /// `title` is the English name of the shelf the card sits in.
+    fn make_grid_card(self: &Rc<Self>, item: &MediaItem, title: &str) -> Rc<MediaCard> {
         let card = MediaCard::new(
             &self.ctx,
             item.clone(),
@@ -994,9 +1004,10 @@ impl ArtistPage {
             },
         );
         let weak = Rc::downgrade(self);
+        let title = title.to_owned();
         card.connect_clicked(move |item| {
             if let Some(p) = weak.upgrade() {
-                p.on_grid_child_activated(item);
+                p.on_grid_child_activated(item, &title);
             }
         });
         let weak = Rc::downgrade(self);
@@ -1053,13 +1064,13 @@ impl ArtistPage {
     }
 
     /// Port of on_grid_child_activated: videos play, artists open, the rest opens as a playlist.
-    fn on_grid_child_activated(&self, item: &MediaItem) {
+    fn on_grid_child_activated(&self, item: &MediaItem, shelf: &str) {
         match item.kind {
             ItemKind::Song | ItemKind::Video => {
                 if let Some(track) = item.to_track() {
                     self.ctx
                         .player
-                        .play_tracks(vec![track], 0, false, None, false);
+                        .play_tracks(vec![track], 0, false, self.shelf_source(shelf), false);
                 }
             }
             ItemKind::Artist => self.ctx.nav.go(NavRequest::Artist {

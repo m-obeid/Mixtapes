@@ -19,17 +19,19 @@ use crate::model::{ItemKind, MediaItem, Track};
 use crate::ui::context::{NavRequest, UiContext};
 
 /// Port of home.py _activate_item: play songs and videos, navigate for the rest.
-pub fn activate_item(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem]) {
+/// `shelf` is the name of the shelf the item sits in, which the queue takes. Empty for none.
+pub fn activate_item(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem], shelf: &str) {
     match item.kind {
         ItemKind::Song | ItemKind::Video => {
+            let source = || (!shelf.is_empty()).then(|| crate::queue::QueueSource::new(format!("shelf:{shelf}"), shelf));
             let tracks: Vec<_> = pool.iter().filter_map(MediaItem::to_track).collect();
             let index = tracks.iter().position(|t| t.video_id.as_str() == item.id).unwrap_or(0);
             if tracks.is_empty() {
                 if let Some(track) = item.to_track() {
-                    ctx.player.play_tracks(vec![track], 0, false, None, false);
+                    ctx.player.play_tracks(vec![track], 0, false, source(), false);
                 }
             } else {
-                ctx.player.play_tracks(tracks, index, false, None, false);
+                ctx.player.play_tracks(tracks, index, false, source(), false);
             }
         }
         ItemKind::Album => {
@@ -47,9 +49,9 @@ pub fn activate_item(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem]) 
 /// Home's variant: a song or video plays the whole shelf it was in and then
 /// keeps going with a radio seeded from the shelf's last track, like
 /// _play_with_radio. Everything else navigates as usual.
-pub fn activate_item_with_radio(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem]) {
+pub fn activate_item_with_radio(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem], shelf: &str) {
     if !item.kind.is_playable() {
-        activate_item(ctx, item, pool);
+        activate_item(ctx, item, pool, shelf);
         return;
     }
     let mut tracks: Vec<Track> = pool.iter().filter_map(MediaItem::to_track).collect();
@@ -60,7 +62,7 @@ pub fn activate_item_with_radio(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[M
         index = 0;
     }
     let seed = tracks.last().map(|t| t.video_id.0.clone()).unwrap_or_default();
-    ctx.player.play_then_radio(tracks, index, &seed);
+    ctx.player.play_then_radio(tracks, index, &seed, shelf);
 }
 
 /// Right-click and long-press on a widget open the item menu.

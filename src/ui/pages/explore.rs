@@ -190,7 +190,8 @@ impl ExplorePage {
 
         let api = self.ctx.net.client().api();
         let country = self.charts_country.borrow().clone();
-        let handle = self.ctx.net.spawn(explore::load_explore(api, country));
+        let labels = self.ctx.net.client().localized_api().map(|labels| labels as std::sync::Arc<dyn crate::net::browse::Browse>);
+        let handle = self.ctx.net.spawn(explore::load_explore(api, labels, country));
         self.explore_inflight.replace(Some(handle.abort_handle()));
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -428,8 +429,8 @@ impl ExplorePage {
         let strip = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(CHART_STRIP_SPACING).build();
         for item in items {
             let card = MediaCard::new(&self.ctx, item.clone(), CardOptions { title_lines: 2, ..CardOptions::default() });
-            let ctx = self.ctx.clone();
-            card.connect_clicked(move |item| activate_item(&ctx, item, &[]));
+            let (ctx, shelf) = (self.ctx.clone(), title.to_owned());
+            card.connect_clicked(move |item| activate_item(&ctx, item, &[], &shelf));
             attach_item_menu(&self.ctx, card.widget(), item.clone());
             strip.append(card.widget());
             self.cards.borrow_mut().push(card);
@@ -639,7 +640,7 @@ impl ExplorePage {
         match pool.first() {
             Some(item) => {
                 tracing::info!(title = %item.title, id = %item.id, "activating first search result");
-                activate_item(&self.ctx, item, &pool);
+                activate_item(&self.ctx, item, &pool, "");
                 true
             }
             None => false,
@@ -673,11 +674,11 @@ impl ExplorePage {
                 list.append(&row);
             }
         }
-        let ctx = self.ctx.clone();
+        let (ctx, shelf) = (self.ctx.clone(), title.to_owned());
         let items_c = items.to_vec();
         list.connect_row_activated(move |_, row| {
             if let Some(item) = items_c.get(row.index().max(0) as usize) {
-                activate_item(&ctx, item, &pool);
+                activate_item(&ctx, item, &pool, &shelf);
             }
         });
         section.append(&list);

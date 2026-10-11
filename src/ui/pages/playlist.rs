@@ -1078,6 +1078,10 @@ impl PlaylistPage {
         let is_podcast = playlists::is_podcast(playlist_id) || playlists::is_podcast(&details.id);
         let song_count = count_text(track_len, is_podcast);
 
+        // YouTube's own lists (LM, SS, SE) come named in English. The net layer and the cache keep them so.
+        if playlist_id.len() == 2 {
+            details.title = crate::i18n::gettext(&details.title);
+        }
         let (count_str, is_owned, author, album_type) = if is_local {
             // The likes list is yours but not something to rename or delete.
             let owned = playlist_id != crate::local_library::LIKED_ID;
@@ -1088,8 +1092,7 @@ impl PlaylistPage {
         } else if playlist_id == "LM" {
             // Liked Music shows no year, as the Python branch set year = None.
             details.year = None;
-            // The net layer and the cache keep these two in English.
-            details.title = crate::i18n::gettext(&details.title);
+            // The net layer and the cache keep this in English.
             details.description = crate::i18n::gettext(&details.description);
             // Translators: the owner shown on the Liked Music list, meaning the listener
             (song_count.clone(), false, tr!("You"), None)

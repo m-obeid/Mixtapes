@@ -85,3 +85,17 @@ msgstr[2] "{n} utworów"
             assert!(raw.plural_forms.is_empty() || Plural::parse(raw.plural_forms).is_some(), "{} has a broken plural rule", raw.lang);
         }
     }
+
+    #[test]
+    fn the_pseudolocale_lengthens_text_and_keeps_placeholders() {
+        assert_eq!(po::pseudo_text("Queue"), "[Qüüééüüéé]");
+        assert_eq!(po::pseudo_text("Now using {name}"), "[Nööw üüsííng {name}]");
+        assert_eq!(po::pseudo_text("{n} of {total} selected"), "[{n} ööf {total} séélééctééd]");
+    }
+
+    #[test]
+    fn the_pseudolocale_covers_the_template() {
+        let raw = CATALOGS.iter().find(|raw| raw.lang == po::PSEUDO).expect("pseudolocale");
+        let at = raw.entries.binary_search_by(|(key, _)| (*key).cmp("{n} song")).expect("a plural message");
+        assert_eq!(raw.entries[at].1, &["[{n} sööng]", "[{n} sööngs]"]);
+    }

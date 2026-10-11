@@ -295,6 +295,11 @@ impl MediaItem {
         }
     }
 
+    /// The title as shown. YouTube's own lists ("Liked Music", id "LM") reach the app named in English.
+    pub fn shown_title(&self) -> String {
+        if self.kind == ItemKind::Playlist && self.id.len() == 2 { crate::i18n::gettext(&self.title) } else { self.title.clone() }
+    }
+
     /// "3:45", or "1:59:59" past an hour, as a long mix reads. Nothing for a live stream.
     pub fn duration_text(&self) -> Option<String> {
         if self.is_live {
@@ -312,7 +317,7 @@ impl MediaItem {
             ItemKind::Album => join(vec![self.artists_text(), self.year.clone().unwrap_or_default()]),
             ItemKind::Artist => match self.subscribers.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
                 // "12M" alone is a count; "12M monthly listeners" says so itself.
-                Some(subs) if subs.chars().any(char::is_alphabetic) => subs.to_owned(),
+                Some(subs) if subs.chars().any(char::is_alphabetic) => crate::i18n::youtube(subs),
                 // Translators: {subs} is a short count as YouTube words it, for example "12M".
                 Some(subs) => tr!("{subs} subscribers", subs),
                 None => String::new(),
@@ -334,10 +339,10 @@ impl MediaItem {
                 return description.split('\u{2022}').next().unwrap_or(description).trim().to_owned();
             }
             if let Some(unit) = PLAYLIST_UNIT_RE.find(description) {
-                return unit.as_str().to_owned();
+                return crate::i18n::youtube(unit.as_str());
             }
             if let Some(last) = description.rsplit(['\u{2022}', '\u{b7}']).map(str::trim).find(|part| !part.is_empty()) {
-                return last.to_owned();
+                return crate::i18n::youtube(last);
             }
         }
         match self.count.as_deref().filter(|c| !c.is_empty()) {

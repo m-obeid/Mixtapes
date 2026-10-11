@@ -894,3 +894,9 @@ gridview.queue-list > child {
   padding-left: 0;
   padding-right: 0;
 }
+
+/* The page toggles of the phone player: icons only, sized for a thumb. */
+toggle-group.sheet-toggles > toggle {
+  min-width: 56px;
+  min-height: 40px;
+}

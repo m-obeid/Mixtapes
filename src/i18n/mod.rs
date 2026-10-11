@@ -13,7 +13,8 @@
 //! - `tr_noop!("Never")` in a const table, with `i18n::gettext` where it is shown
 //!   (`trc_noop!` and `i18n::pgettext` when it needs a context)
 //!
-//! Text YouTube sends (shelf titles, "Album", "Single") is not ours to translate.
+//! Text YouTube sends reaches the app in English. `youtube` translates the
+//! wording it uses for everyone ("Liked Music", "58 songs") where it is shown.
 
 mod plural;
 mod po;
@@ -100,6 +101,7 @@ pub struct RawCatalog {
 include!(concat!(env!("OUT_DIR"), "/catalogs.rs"));
 
 struct Catalog {
+    lang: &'static str,
     plural: Plural,
     entries: HashMap<&'static str, &'static [&'static str]>,
 }
@@ -112,7 +114,7 @@ impl Catalog {
             }
             Plural::default()
         });
-        Catalog { plural, entries: raw.entries.iter().copied().collect() }
+        Catalog { lang: raw.lang, plural, entries: raw.entries.iter().copied().collect() }
     }
 
     fn get(&self, key: &str) -> Option<&'static str> {
@@ -136,7 +138,9 @@ fn active() -> Option<&'static Catalog> {
 /// Pick the language. Call from main before GTK starts and before any thread exists.
 pub fn init(paths: &Paths) {
     let prefs = paths.read_prefs();
-    let chosen = prefs.get(LANGUAGE_PREF).and_then(|v| v.as_str()).unwrap_or_default();
+    // MIXTAPES_LANGUAGE is for testing a language without touching the pref.
+    let forced = std::env::var("MIXTAPES_LANGUAGE").unwrap_or_default();
+    let chosen = if forced.is_empty() { prefs.get(LANGUAGE_PREF).and_then(|v| v.as_str()).unwrap_or_default() } else { forced.as_str() };
     if !chosen.is_empty() {
         // GTK and libadwaita translate their own text (the About window, the
         // shortcuts) from this variable, and glib reads it for the list below.
@@ -169,15 +173,18 @@ fn pick<'a>(names: impl Iterator<Item = &'a str>, catalogs: &'static [RawCatalog
 
 /// The languages a listener is able to pick, as (code, name in that language), sorted by name.
 /// English is the source text and joins the list once a translation exists. Empty until then.
+///
+/// The pseudolocale is for testing. A debug build lists it, and `MIXTAPES_LANGUAGE=en_XA` picks it in any build.
 pub fn languages() -> Vec<(&'static str, String)> {
-    if CATALOGS.is_empty() {
+    let listed: Vec<&RawCatalog> = CATALOGS.iter().filter(|raw| raw.lang != po::PSEUDO || cfg!(debug_assertions)).collect();
+    if listed.iter().all(|raw| raw.lang == po::PSEUDO) {
         return Vec::new();
     }
     // Translators: the name of your language in your language, for example "Deutsch". Do not translate it as the word "English".
     let (context, msgid) = trc_noop!("language-name", "English");
     let name_key = po::key(Some(context), msgid);
-    let mut languages: Vec<(&'static str, String)> = CATALOGS
-        .iter()
+    let mut languages: Vec<(&'static str, String)> = listed
+        .into_iter()
         .map(|raw| {
             let name = raw.entries.binary_search_by(|(key, _)| (*key).cmp(name_key.as_str())).ok().and_then(|at| raw.entries[at].1.first().copied());
             (raw.lang, name.unwrap_or(raw.lang).to_owned())
@@ -186,6 +193,11 @@ pub fn languages() -> Vec<(&'static str, String)> {
     languages.push(("en", msgid.to_owned()));
     languages.sort_by_key(|(_, name)| name.to_lowercase());
     languages
+}
+
+/// The translation of a text that came from elsewhere, when the catalog has one.
+pub fn translated(text: &str) -> Option<String> {
+    active().and_then(|catalog| catalog.get(text)).map(str::to_owned)
 }
 
 /// The translation of a message. `tr!` is the usual way in.
@@ -203,6 +215,85 @@ pub fn pgettext(context: &str, msgid: &str) -> String {
 pub fn ngettext(msgid: &str, msgid_plural: &str, n: u64) -> String {
     let english = if n == 1 { msgid } else { msgid_plural };
     active().and_then(|catalog| catalog.get_plural(msgid, n)).unwrap_or(english).to_owned()
+}
+
+/// The active language as YouTube names it ("de", "pt-BR"), for requests whose text is only shown.
+/// None while the app runs in English.
+pub fn youtube_language() -> Option<String> {
+    // The pseudolocale is no language YouTube knows.
+    active().filter(|catalog| catalog.lang != po::PSEUDO).map(|catalog| catalog.lang.replace('_', "-"))
+}
+
+/// Text YouTube words the same way for everyone, which the app reads in English and shows translated.
+/// Listed here so po/update.sh puts it in the template. `youtube` looks it up.
+#[allow(dead_code)]
+const YOUTUBE_TEXT: &[&str] = &[
+    // The lists every library has.
+    tr_noop!("Liked Music"),
+    tr_noop!("Sounds from Shorts"),
+    tr_noop!("Episodes for Later"),
+    tr_noop!("Auto playlist"),
+    tr_noop!("Your queued episodes"),
+    // Home shelves.
+    tr_noop!("From your library"),
+    tr_noop!("New releases"),
+    tr_noop!("Forgotten favorites"),
+    tr_noop!("Albums for you"),
+    tr_noop!("Your daily discover"),
+    tr_noop!("Fresh finds, old favorites"),
+    tr_noop!("Mixed for you"),
+    tr_noop!("Featured playlists for you"),
+    tr_noop!("From the community"),
+    tr_noop!("Long listens"),
+    tr_noop!("Recommended albums"),
+    tr_noop!("Recommended music videos"),
+    tr_noop!("Music videos for you"),
+    tr_noop!("Covers and remixes"),
+    tr_noop!("Keep listening"),
+    tr_noop!("Trending community playlists"),
+    tr_noop!("Live performances"),
+    tr_noop!("Trending songs for you"),
+    tr_noop!("Listen together"),
+    // Shelves of a mood or genre page.
+    tr_noop!("Community playlists"),
+    tr_noop!("Featured playlists"),
+    tr_noop!("Music videos"),
+    // The small line over a shelf title. YouTube sends these in capitals.
+    tr_noop!("Station"),
+    // A mood YouTube translates itself. An entry here replaces its wording, for a language where that one is off.
+    tr_noop!("Feel good"),
+];
+
+/// Translate a line YouTube sent in English: its parts between bullets, each a
+/// known text ("Auto playlist") or a count ("58 songs"). A part with no
+/// translation, a name for one, stays as it came.
+pub fn youtube(text: &str) -> String {
+    if active().is_none() {
+        return text.to_owned();
+    }
+    text.split(" \u{2022} ").map(|part| youtube_count(part.trim()).unwrap_or_else(|| gettext(part))).collect::<Vec<_>>().join(" \u{2022} ")
+}
+
+/// "58 songs" or "1.2M subscribers" in the active language. The count stays as YouTube wrote it.
+fn youtube_count(text: &str) -> Option<String> {
+    let (count, unit) = text.split_once(' ')?;
+    if !count.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    // A short count like "12K" is many. The plural form follows the number where it is a plain one.
+    let n = count.replace([',', '.'], "").parse::<u64>().unwrap_or(1000);
+    Some(match unit.to_ascii_lowercase().as_str() {
+        // Translators: {count} is a number as YouTube words it, like "1,204" or "12K". The same goes for the counts below.
+        "song" | "songs" => trn!("{count} song", "{count} songs", n, count),
+        "track" | "tracks" => trn!("{count} track", "{count} tracks", n, count),
+        "episode" | "episodes" => trn!("{count} episode", "{count} episodes", n, count),
+        "video" | "videos" => trn!("{count} video", "{count} videos", n, count),
+        "view" | "views" => trn!("{count} view", "{count} views", n, count),
+        "play" | "plays" => trn!("{count} play", "{count} plays", n, count),
+        "subscriber" | "subscribers" => trn!("{count} subscriber", "{count} subscribers", n, count),
+        "monthly listeners" => trn!("{count} monthly listener", "{count} monthly listeners", n, count),
+        _ => return None,
+    })
 }
 
 /// Fill `{name}` placeholders. `{{` and `}}` are literal braces, and a name

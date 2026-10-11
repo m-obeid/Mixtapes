@@ -728,7 +728,7 @@ fn card_style(item: &MediaItem) -> (String, &'static str, Option<&'static str>) 
         ItemKind::Playlist if item.id == DOWNLOADS_ID => (item.description.clone().unwrap_or_default(), "media-playlist-audio-symbolic", Some("folder-download-symbolic")),
         // An empty playlist on this device has no art yet. It gets the tile Downloads wears.
         ItemKind::Playlist if crate::local_library::is_local(&item.id) && item.thumb.is_none() => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", Some("audio-x-generic-symbolic")),
-        ItemKind::Playlist if item.id.len() == 2 || crate::local_library::is_local(&item.id) => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", None),
+        ItemKind::Playlist if item.id.len() == 2 || crate::local_library::is_local(&item.id) => (crate::i18n::youtube(item.description.as_deref().unwrap_or_default()), "folder-music-symbolic", None),
         ItemKind::Playlist => (item.count.as_deref().map(songs_text).unwrap_or_default(), "folder-music-symbolic", None),
         ItemKind::Album => (album_subtitle(item), "media-optical-symbolic", None),
         ItemKind::Artist => (artist_subtitle(item), "avatar-default-symbolic", None),
@@ -771,7 +771,7 @@ fn artist_subtitle(item: &MediaItem) -> String {
         // A bare count is subscribers. An uploaded artist says "5 songs", which already names its unit.
         // Translators: {count} is a short number YouTube sends, like 1.2M
         Some(s) if is_bare_count(s) => tr!("{count} subscribers", count = s),
-        Some(s) => s.clone(),
+        Some(s) => crate::i18n::youtube(s),
         None => String::new(),
     }
 }
@@ -815,7 +815,7 @@ fn list_row(ctx: &Rc<UiContext>, item: &MediaItem) -> gtk::ListBoxRow {
         _ => item.detail(),
     };
     let text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).valign(gtk::Align::Center).hexpand(true).build();
-    text.append(&gtk::Label::builder().label(&item.title).halign(gtk::Align::Start).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).lines(1).width_chars(1).build());
+    text.append(&gtk::Label::builder().label(item.shown_title()).halign(gtk::Align::Start).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).lines(1).width_chars(1).build());
     let subtitle_label = gtk::Label::builder().label(&subtitle).halign(gtk::Align::Start).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).lines(1).width_chars(1).css_classes(["dim-label", "caption"]).visible(!subtitle.is_empty()).build();
     text.append(&subtitle_label);
     inner.append(&text);

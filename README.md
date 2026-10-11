@@ -309,16 +309,18 @@ To add a language:
 1. Add its code (`de`, `pt_BR`, `zh_CN`) on a new line in `po/LINGUAS`.
 2. Run `po/update.sh`. It creates `po/<code>.po` from the template. It needs GNU gettext 0.24 or newer.
 3. Translate `po/<code>.po`. Keep `{placeholders}` as they are; you are free to move them within the sentence.
-4. Try it: `LANGUAGE=<code> cargo run`.
+4. Try it: `MIXTAPES_LANGUAGE=<code> cargo run`. This also wins over a language picked in Preferences.
 5. Open a pull request.
 
 Without gettext installed, copy `po/mixtapes.pot` to `po/<code>.po`, fill in the `Language` and `Plural-Forms` header lines, and add the code to `po/LINGUAS`.
 
 To improve a language already there, edit its `.po` file and open a pull request.
 
-Some text stays in English for now: shelf and section titles YouTube Music sends, and the release notes.
+Some text stays in English for now: shelf titles YouTube Music makes up for your account, chart names, and the release notes.
 
 For developers: wrap user-visible text in `tr!`, `trn!` or `trc!` (see [`src/i18n/mod.rs`](src/i18n/mod.rs)), then run `po/update.sh` to refresh the template and every translation. The build compiles the PO files into the binary, so no gettext tools are needed to build.
+
+To check a change without a translation, run `MIXTAPES_LANGUAGE=en_XA cargo run`. This pseudolocale shows every message as `[Lööngéér téxt]`. Text without brackets is not wrapped or is missing from the template, and text that is cut off has no room for a longer language. Debug builds also list it in the Language row.
 
 ## Star History
 

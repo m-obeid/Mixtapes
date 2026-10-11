@@ -286,3 +286,56 @@ msgstr "Zu {nmae} hinzugefügt"
         assert_eq!(placeholders("{a} and {{b}} and {c}").into_iter().collect::<Vec<_>>(), ["a", "c"]);
     }
 }
+
+/// The code of the pseudolocale, as Android names it. `pseudo` makes its catalog.
+pub const PSEUDO: &str = "en_XA";
+
+/// A catalog out of the template alone, for testing with no translator: every
+/// message accented, longer and in brackets. Text that shows without them never
+/// went through the catalog, and text that is cut off has no room for a longer language.
+pub fn pseudo(entries: &[Entry]) -> Compiled {
+    let mut compiled = Compiled { plural_forms: "nplurals=2; plural=(n != 1);".to_owned(), ..Compiled::default() };
+    for entry in entries.iter().filter(|entry| !entry.id.is_empty()) {
+        let mut strings = vec![pseudo_text(&entry.id)];
+        strings.extend(entry.id_plural.as_deref().map(pseudo_text));
+        compiled.entries.push((key(entry.context.as_deref(), &entry.id), strings));
+    }
+    compiled.entries.sort();
+    compiled.entries.dedup_by(|a, b| a.0 == b.0);
+    compiled
+}
+
+/// One message as the pseudolocale shows it. Vowels are doubled, which adds
+/// the third or so a long language takes. Placeholders stay as they are.
+pub fn pseudo_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 2 + 2);
+    out.push('[');
+    let mut in_placeholder = false;
+    for c in text.chars() {
+        match c {
+            '{' => in_placeholder = true,
+            '}' => in_placeholder = false,
+            _ => {}
+        }
+        let accented = match c {
+            _ if in_placeholder => None,
+            'a' => Some('á'),
+            'e' => Some('é'),
+            'i' => Some('í'),
+            'o' => Some('ö'),
+            'u' => Some('ü'),
+            'A' => Some('Å'),
+            'E' => Some('É'),
+            'I' => Some('Î'),
+            'O' => Some('Ö'),
+            'U' => Some('Û'),
+            _ => None,
+        };
+        match accented {
+            Some(vowel) => out.extend([vowel, vowel]),
+            None => out.push(c),
+        }
+    }
+    out.push(']');
+    out
+}

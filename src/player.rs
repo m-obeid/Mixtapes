@@ -1437,13 +1437,15 @@ impl Player {
     /// The queue is stamped with an id of its own so the reply can tell it is
     /// still the queue that asked; the real radio playlist replaces the stamp
     /// once the tracks land, and the infinite extender takes it from there.
-    pub fn play_then_radio(self: &Rc<Self>, tracks: Vec<Track>, start_index: usize, seed: &str) {
+    ///
+    /// `title` names the queue: the shelf the tracks came from.
+    pub fn play_then_radio(self: &Rc<Self>, tracks: Vec<Track>, start_index: usize, seed: &str, title: &str) {
         if tracks.is_empty() || seed.is_empty() {
             self.play_tracks(tracks, start_index, false, None, false);
             return;
         }
         let stamp = format!("home-radio:{seed}:{}", self.next_stamp());
-        self.play_tracks(tracks, start_index, false, Some(stamp.as_str().into()), false);
+        self.play_tracks(tracks, start_index, false, Some(QueueSource::new(stamp.as_str(), title)), false);
 
         let api = self.net.client().api();
         let seed = seed.to_owned();

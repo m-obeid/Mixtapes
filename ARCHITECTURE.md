@@ -921,6 +921,12 @@ parse is a cargo warning and the language is skipped. The catalogs are in the
 binary because the app installs as one file on every platform, and a
 `share/locale` tree would need a different path on Flatpak, Nix and Windows.
 
+build.rs also makes a pseudolocale, `en_XA`, out of `po/mixtapes.pot`: every
+message accented, with doubled vowels, in brackets (`po::pseudo`). It is a
+catalog like any other, so it tests the same path a translation takes. The
+Language row lists it in debug builds only, and `MIXTAPES_LANGUAGE=en_XA`
+picks it in any build, ahead of the pref.
+
 At startup `i18n::init` runs before GTK. A `language` pref, when set, goes
 into the `LANGUAGE` environment variable, so GTK and libadwaita translate
 their own widgets to match. Then `glib::language_names()` gives the order of
@@ -931,8 +937,14 @@ catalog's `Plural-Forms` C expression, parsed once (`src/i18n/plural.rs`).
 Placeholders are named (`{name}`), filled at run time by `i18n::format`,
 since `format!` takes only literals. A translator is free to reorder them.
 
-Not translated: text YouTube sends. Requests keep `hl=en` because the
-parsers match English headings ("Songs", "Albums", "Singles").
+Text YouTube sends: requests keep `hl=en` because the parsers match English
+headings ("Songs", "Albums", "Singles"). Two paths translate it for display.
+Wording YouTube uses for everyone ("Liked Music", "From your library",
+"58 songs") is in the catalog and looked up by `i18n::youtube` or
+`i18n::gettext` where it is shown. Mood and genre pills and the pages behind
+them are fetched a second time through `YtMusic::localized_api`, a client
+asking in the app's language, and only the titles are taken from that answer,
+paired by params and ids (`net/explore.rs`). Anything else stays English.
 
 ## Stutter, measured with sysprof
 

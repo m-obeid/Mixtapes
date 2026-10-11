@@ -134,12 +134,13 @@ impl HomePage {
             return;
         }
         let api = self.ctx.net.client().api();
+        let labels = self.ctx.net.client().localized_api().map(|labels| labels as std::sync::Arc<dyn crate::net::browse::Browse>);
         // Signed out, YouTube's feed is the same for everyone. Shelves from
         // this device's plays and likes go in front of it.
         let signals = if self.ctx.net.client().is_authenticated() { Default::default() } else { local_feed::Signals::read(&self.ctx.local) };
         let handle = self.ctx.net.spawn(async move {
             if signals.is_empty() {
-                let mut sections = home::get_home(api.clone(), FEED_SECTIONS).await?;
+                let mut sections = home::get_localized_home(api.clone(), labels, FEED_SECTIONS).await?;
                 // YouTube stopped sending Quick picks; without them the dial
                 // borrowed Listen again and showed two or three tiles.
                 if let Some(seeds) = local_feed::quick_pick_seeds(&sections).filter(|s| !s.is_empty()) {
@@ -149,7 +150,7 @@ impl HomePage {
                 }
                 return Ok(sections);
             }
-            let (remote, local) = tokio::join!(home::get_home(api.clone(), FEED_SECTIONS), local_feed::build(api, signals));
+            let (remote, local) = tokio::join!(home::get_localized_home(api.clone(), labels, FEED_SECTIONS), local_feed::build(api, signals));
             match remote {
                 Ok(remote) => Ok(local_feed::merge(local, remote)),
                 Err(err) if !local.is_empty() => {
@@ -289,7 +290,7 @@ impl HomePage {
             return false;
         };
         tracing::info!(title = %item.title, id = %item.id, pool = pool.len(), "activating the first home row");
-        activate_item_with_radio(&self.ctx, &item, &pool);
+        activate_item_with_radio(&self.ctx, &item, &pool, "");
         true
     }
 
@@ -307,23 +308,23 @@ impl HomePage {
         let (dial, ordered) = home::arrange(sections);
         if !dial.is_empty() {
             self.shelves.borrow_mut().push(dial.clone());
-            self.add_speed_dial(QUICK_PICKS, None, None, &dial, SPEED_DIAL_ROWS, SPEED_DIAL_ROWS_COMPACT);
+            self.add_speed_dial(QUICK_PICKS, &crate::i18n::gettext(QUICK_PICKS), None, None, &dial, SPEED_DIAL_ROWS, SPEED_DIAL_ROWS_COMPACT);
         }
         for section in ordered {
             self.shelves.borrow_mut().push(section.items.clone());
             // Hour-long mixes, as tiles like the quick picks so the two rows match.
             if home::is_long_listens(&section.title) {
-                self.add_speed_dial(&section.title, section.strapline.as_deref(), section.strapline_thumb.as_deref(), &section.items, LONG_LISTENS_ROWS, LONG_LISTENS_ROWS);
+                self.add_speed_dial(&section.title, &section.shown_title(), section.shown_strapline().as_deref(), section.strapline_thumb.as_deref(), &section.items, LONG_LISTENS_ROWS, LONG_LISTENS_ROWS);
                 continue;
             }
             let songs = section.items.iter().filter(|i| i.kind == ItemKind::Song).count();
             let section_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).build();
-            section_box.append(&self.section_header(&section.title, section.strapline.as_deref(), section.strapline_thumb.as_deref()));
+            section_box.append(&self.section_header(&section.title, &section.shown_title(), section.shown_strapline().as_deref(), section.strapline_thumb.as_deref()));
             // A shelf that is mostly songs reads better as a list than as cards.
             if songs >= 3.max((section.items.len() as f64 * 0.66) as usize) {
-                self.add_song_list(&section_box, &section.items);
+                self.add_song_list(&section_box, &section.items, &section.shown_title());
             } else {
-                self.add_card_strip(&section_box, &section.items);
+                self.add_card_strip(&section_box, &section.items, &section.shown_title());
             }
             self.feed_box.append(&section_box);
         }
@@ -332,7 +333,8 @@ impl HomePage {
 
     /// The seed's picture on a "Based on ..." row, the matching icon on the
     /// rows that have one, and nothing in front of the rest.
-    fn section_header(&self, title: &str, strapline: Option<&str>, strapline_thumb: Option<&str>) -> gtk::Box {
+    /// `title` is the English name the icon rules read, `shown` the one on the label.
+    fn section_header(&self, title: &str, shown: &str, strapline: Option<&str>, strapline_thumb: Option<&str>) -> gtk::Box {
         let header = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(10).halign(gtk::Align::Start).css_classes(["home-section-header"]).build();
         match strapline_thumb {
             Some(url) => {
@@ -349,8 +351,6 @@ impl HomePage {
                 }
             }
         }
-        // The icon rules read the English name, so only the label is translated. A title YouTube sent has no entry and stays as it came.
-        let shown = crate::i18n::gettext(title);
         let title_label = gtk::Label::builder().label(shown).css_classes(["title-2", "home-section-title"]).halign(gtk::Align::Start).valign(gtk::Align::Center).ellipsize(gtk::pango::EllipsizeMode::End).build();
         match strapline {
             // The web feed's small line above the title, in capitals like there.
@@ -367,9 +367,9 @@ impl HomePage {
 
     // -- quick picks ------------------------------------------------------
 
-    fn add_speed_dial(self: &Rc<Self>, title: &str, strapline: Option<&str>, strapline_thumb: Option<&str>, items: &[MediaItem], rows: i32, rows_compact: i32) {
+    fn add_speed_dial(self: &Rc<Self>, title: &str, shown: &str, strapline: Option<&str>, strapline_thumb: Option<&str>, items: &[MediaItem], rows: i32, rows_compact: i32) {
         let section_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).css_classes(["home-speed-dial"]).build();
-        section_box.append(&self.section_header(title, strapline, strapline_thumb));
+        section_box.append(&self.section_header(title, shown, strapline, strapline_thumb));
 
         let scroll_box = HorizontalScrollBox::new();
         let wrap = adw::WrapBox::builder().orientation(gtk::Orientation::Vertical).line_homogeneous(true).line_spacing(SPEED_DIAL_SPACING).child_spacing(SPEED_DIAL_SPACING).valign(gtk::Align::Start).build();
@@ -378,7 +378,7 @@ impl HomePage {
 
         let mut tiles = Vec::with_capacity(items.len());
         for item in items {
-            let tile = self.build_speed_tile(item, &pool);
+            let tile = self.build_speed_tile(item, &pool, shown);
             heights.add_widget(&tile.tile);
             wrap.append(&tile.tile);
             tiles.push(tile);
@@ -405,7 +405,8 @@ impl HomePage {
         self.sync_speed_dial_height(self.ctx.compact.get());
     }
 
-    fn build_speed_tile(self: &Rc<Self>, item: &MediaItem, pool: &[MediaItem]) -> SpeedTile {
+    /// `shelf` is the shelf's name as shown, which the queue started from a tile takes.
+    fn build_speed_tile(self: &Rc<Self>, item: &MediaItem, pool: &[MediaItem], shelf: &str) -> SpeedTile {
         let tile = gtk::Button::builder().css_classes(["home-speed-tile", "card"]).build();
         let inner = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(10).build();
         tile.set_child(Some(&inner));
@@ -435,8 +436,8 @@ impl HomePage {
         inner.append(&text_col);
 
         let ctx = self.ctx.clone();
-        let (item_c, pool_c) = (item.clone(), pool.to_vec());
-        tile.connect_clicked(move |_| activate_item_with_radio(&ctx, &item_c, &pool_c));
+        let (item_c, pool_c, shelf) = (item.clone(), pool.to_vec(), shelf.to_owned());
+        tile.connect_clicked(move |_| activate_item_with_radio(&ctx, &item_c, &pool_c, &shelf));
         attach_item_menu(&self.ctx, &tile, item.clone());
         if item.kind.is_playable() {
             self.playing.track_styled(&tile, &item.id);
@@ -481,7 +482,7 @@ impl HomePage {
 
     // -- sections ---------------------------------------------------------
 
-    fn add_song_list(self: &Rc<Self>, section_box: &gtk::Box, items: &[MediaItem]) {
+    fn add_song_list(self: &Rc<Self>, section_box: &gtk::Box, items: &[MediaItem], shelf: &str) {
         let list = gtk::ListBox::builder().css_classes(["boxed-list", "songs-list"]).selection_mode(gtk::SelectionMode::None).build();
         let pool: Vec<MediaItem> = items.iter().filter(|i| i.kind.is_playable()).cloned().collect();
         for item in items {
@@ -493,10 +494,10 @@ impl HomePage {
             list.append(&row);
         }
         let ctx = self.ctx.clone();
-        let (items_c, pool_c) = (items.to_vec(), pool);
+        let (items_c, pool_c, shelf) = (items.to_vec(), pool, shelf.to_owned());
         list.connect_row_activated(move |_, row| {
             if let Some(item) = items_c.get(row.index().max(0) as usize) {
-                activate_item_with_radio(&ctx, item, &pool_c);
+                activate_item_with_radio(&ctx, item, &pool_c, &shelf);
             }
         });
         self.add_compact_scope(list.upcast_ref());
@@ -508,7 +509,7 @@ impl HomePage {
         self.compact_scopes.borrow_mut().push(widget.clone());
     }
 
-    fn add_card_strip(self: &Rc<Self>, section_box: &gtk::Box, items: &[MediaItem]) {
+    fn add_card_strip(self: &Rc<Self>, section_box: &gtk::Box, items: &[MediaItem], shelf: &str) {
         let scroll_box = HorizontalScrollBox::new();
         scroll_box.widget().set_margin_bottom(16);
         let compact = self.ctx.compact.get();
@@ -518,8 +519,8 @@ impl HomePage {
         for item in items {
             let card = MediaCard::new(&self.ctx, item.clone(), CardOptions { title_lines: 2, ..CardOptions::default() });
             let ctx = self.ctx.clone();
-            let pool_c = pool.clone();
-            card.connect_clicked(move |item| activate_item_with_radio(&ctx, item, &pool_c));
+            let (pool_c, shelf) = (pool.clone(), shelf.to_owned());
+            card.connect_clicked(move |item| activate_item_with_radio(&ctx, item, &pool_c, &shelf));
             attach_item_menu(&self.ctx, card.widget(), item.clone());
             if item.kind.is_playable() {
                 self.playing.track(card.widget(), &item.id);

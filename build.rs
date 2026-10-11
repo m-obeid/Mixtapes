@@ -33,6 +33,18 @@ fn compile_translations() {
         }
         out.push_str("    ] },\n");
     }
+    // The pseudolocale is made from the template, so it covers every message and nobody maintains it.
+    match std::fs::read_to_string("po/mixtapes.pot").map_err(|err| err.to_string()).and_then(|text| po::parse(&text)) {
+        Ok(entries) => {
+            let compiled = po::pseudo(&entries);
+            let _ = writeln!(out, "    RawCatalog {{ lang: {:?}, plural_forms: {:?}, entries: &[", po::PSEUDO, compiled.plural_forms);
+            for (key, forms) in &compiled.entries {
+                let _ = writeln!(out, "        ({key:?}, &{forms:?}),");
+            }
+            out.push_str("    ] },\n");
+        }
+        Err(err) => println!("cargo:warning=po/mixtapes.pot: {err}"),
+    }
     out.push_str("];\n");
     let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("catalogs.rs");
     std::fs::write(dest, out).unwrap();

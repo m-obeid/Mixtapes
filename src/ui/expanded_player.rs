@@ -60,6 +60,11 @@ pub struct ExpandedPlayer {
     on_dismiss: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
+/// The pages of the sheet: name, tooltip and icon of each toggle.
+fn toggle_pages() -> [(&'static str, String, &'static str); 3] {
+    [("player", tr!("Player"), "folder-music-symbolic"), ("queue", tr!("Queue"), "music-queue-symbolic"), ("lyrics", tr!("Lyrics"), "format-justify-fill-symbolic")]
+}
+
 impl ExpandedPlayer {
     pub fn new(ctx: Rc<UiContext>) -> Rc<Self> {
         let player = ctx.player.clone();
@@ -70,22 +75,20 @@ impl ExpandedPlayer {
         let view_stack = adw::ViewStack::builder().vexpand(true).build();
         root.append(&view_stack);
 
+        // Icons alone, each as wide as the next: the row keeps its shape in every language.
         let toggle_nav = adw::ToggleGroup::builder()
-            .css_classes(["round"])
+            .css_classes(["round", "sheet-toggles"])
+            .homogeneous(true)
             .halign(gtk::Align::Center)
             .margin_top(8)
             .margin_bottom(8)
             .build();
-        for (name, label, icon) in [
-            ("player", tr!("Player"), "folder-music-symbolic"),
-            ("queue", tr!("Queue"), "music-queue-symbolic"),
-            ("lyrics", tr!("Lyrics"), "format-justify-fill-symbolic"),
-        ] {
+        for (name, label, icon) in toggle_pages() {
             toggle_nav.add(
                 adw::Toggle::builder()
                     .name(name)
-                    .label(label)
                     .icon_name(icon)
+                    .tooltip(label)
                     .build(),
             );
         }
