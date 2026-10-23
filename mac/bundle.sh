@@ -152,6 +152,8 @@ cp -R "$icons_tmp/adwaita-icon-theme-$ADWAITA_ICONS/Adwaita" "$R/share/icons/"
 cp "$icons_tmp/adwaita-icon-theme-$ADWAITA_ICONS/index.theme" "$R/share/icons/Adwaita/"
 rm -rf "$R/share/icons/Adwaita/cursors" "$icons_tmp"
 cp -R "$PREFIX/share/icons/hicolor" "$R/share/icons/"
+# Homebrew links its gtk3 demo icons into the Cellar. Dangling copies fail codesign --deep --strict.
+find "$R/share/icons/hicolor" -type l ! -exec test -e {} \; -delete
 cp fonts/*.ttf fonts/LICENSE.adwaita-fonts "$R/share/fonts/"
 
 echo "Libraries"
