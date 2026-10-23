@@ -102,6 +102,11 @@ impl QueuePanel {
         // keep the title centered, which leaves a gap as wide as them on the other side.
         let controls_start = gtk::WindowControls::builder().side(gtk::PackType::Start).visible(false).build();
         let controls_end = gtk::WindowControls::builder().side(gtk::PackType::End).visible(false).build();
+        // The traffic lights, as libadwaita's own header bars show on macOS.
+        #[cfg(target_os = "macos")]
+        for controls in [&controls_start, &controls_end] {
+            controls.set_use_native_controls(true);
+        }
         let title_row = gtk::Box::builder().spacing(6).build();
         title_row.append(&controls_start);
         title_row.append(&title_box);

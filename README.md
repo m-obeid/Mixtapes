@@ -15,6 +15,8 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 [![Flatpak CI](https://img.shields.io/github/actions/workflow/status/m-obeid/Mixtapes/build-flatpak.yml?label=Flatpak%20Build)](https://github.com/m-obeid/Mixtapes/actions/workflows/build-flatpak.yml)
 [![Windows Build](https://img.shields.io/github/actions/workflow/status/m-obeid/Mixtapes/build-windows.yml?label=Windows%20Build)](https://github.com/m-obeid/Mixtapes/actions/workflows/build-windows.yml)
 [![Windows Download](https://img.shields.io/badge/Windows-Download%20Installer-blue?logo=windows)](https://nightly.link/m-obeid/Mixtapes/workflows/build-windows/main/mixtapes-windows-x86_64-setup.zip)
+[![macOS Build](https://img.shields.io/github/actions/workflow/status/m-obeid/Mixtapes/build-macos.yml?label=macOS%20Build)](https://github.com/m-obeid/Mixtapes/actions/workflows/build-macos.yml)
+[![macOS Download](https://img.shields.io/badge/macOS-Download%20DMG-blue?logo=apple)](#macos)
 
 > [!NOTE]
 > This software is in alpha. Expect bugs and missing features.
@@ -64,6 +66,7 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 - **Scrobbling** - Submit your plays to Last.fm and ListenBrainz, with an offline backlog
 - **MPRIS Support** - Control playback from system media controls (Linux)
 - **Windows SMTC** - System media transport controls integration (Windows)
+- **macOS Now Playing** - Control Center, media keys and native window buttons (macOS)
 - **Radio & Mixes** - Start a radio station from any song or artist
 - **Background Playback** - Music keeps playing when the window is closed (system tray on Windows)
 - **Playlist Editing** - Reorder, multi-select edit, change covers, visibility, and metadata
@@ -108,6 +111,19 @@ Get the installer from the
 or the portable folder from the same CI run. The installer adds the Microsoft
 Edge WebView2 Runtime, which the sign-in page needs, where Windows lacks it
 (Windows 10 LTSC, for one).
+
+### macOS
+
+Download the disk image for your Mac from the latest CI build:
+[Apple silicon](https://nightly.link/m-obeid/Mixtapes/workflows/build-macos/main/mixtapes-macos-arm64.zip)
+or [Intel](https://nightly.link/m-obeid/Mixtapes/workflows/build-macos/main/mixtapes-macos-x86_64.zip).
+Open it and drag Mixtapes to Applications. It needs macOS 15 Sequoia or newer.
+
+The app is not notarized. On first launch macOS blocks it: open
+System Settings > Privacy & Security and click **Open Anyway**.
+
+> [!NOTE]
+> The Intel build is tested on real hardware. The Apple silicon build comes from the same CI and is not tested on a Mac yet. Reports welcome.
 
 ### AUR (Arch Linux)
 
@@ -159,6 +175,37 @@ sudo apt install git cargo libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev li
 
 > The build needs Rust 1.85 or newer, GTK 4.18, libadwaita 1.8 and GStreamer 1.24.
 > On Debian/Ubuntu, consider the Flatpak to avoid outdated packages.
+
+</details>
+
+<details>
+<summary>Build on macOS</summary>
+
+Install Rust with [rustup](https://rustup.rs). Sign-in uses the system WKWebView, so WebKitGTK is not needed.
+
+**Apple silicon (Homebrew):**
+
+```bash
+brew install pkgconf gtk4 libadwaita gstreamer glib-networking libsoup yt-dlp node ffmpeg
+```
+
+**Intel (MacPorts):** Homebrew no longer supports Intel Macs.
+
+```bash
+sudo port install gtk4 -x11 +quartz libadwaita glib-networking \
+  gstreamer1-gst-plugins-base gstreamer1-gst-plugins-good \
+  gstreamer1-gst-plugins-bad gstreamer1-gst-plugins-ugly yt-dlp nodejs22 ffmpeg
+```
+
+Then build and run as below. To make a self-contained `Mixtapes.app` and DMG in `dist/`:
+
+```bash
+brew install dylibbundler create-dmg   # or: sudo port install dylibbundler create-dmg
+cargo build --release
+bash mac/bundle.sh
+```
+
+`mac/bundle.sh` finds Homebrew or MacPorts by itself. Set `PREFIX` to point it elsewhere.
 
 </details>
 
@@ -280,14 +327,14 @@ Your desktop sends every `https://` link to the browser and has no way to hand o
 |   ✅️   | **Settings**                 | General, Appearance, Lyrics, Services and Advanced pages                                                                                                                                                                                                                                     |
 |   ✅️   | **Cover Art Tint**           | Tint Libadwaita to match cover art, kinda like Material You, with an optional blurred cover background                                                                                                                                                                                       |
 |   ✅️   | **Scrobbling**               | Submit plays to Last.fm and ListenBrainz<br>✅️ Now Playing<br>✅️ Offline backlog with retries                                                                                                                                                                                                |
-|   ✅️   | **Discord RPC**              | Show your current track on Discord<br>✅️ Linux<br>✅️ Windows                                                                                                                                                                                                                                 |
+|   ✅️   | **Discord RPC**              | Show your current track on Discord<br>✅️ Linux<br>✅️ Windows<br>✅️ macOS                                                                                                                                                                                                                    |
 |   ✅️   | **Lyrics**                   | Synchronized lyrics using a bunch of providers (Apple Music, BetterLyrics, BiniLyrics, NetEase, LRCLIB, native YT Music)<br>✅️ Reorderable provider search queue<br>✅️ Second line: romanization, translation or background vocals<br>✅️ Word-level karaoke timing with duration-aware fades |
 |   ✅️   | **Rust Rewrite**             | Rewritten in Rust for speed and memory use; the Python app is retired                                                                                                                                                                                                                        |
 |   ✅️   | **AUR**                      | Available as `mixtapes-git`                                                                                                                                                                                                                                                                  |
 |   ☑️   | **Flatpak**                  | ✅️ Flatpak build (x86_64 and aarch64)<br>✅️ App icon<br>🔜 Flathub release                                                                                                                                                                                                                    |
 |   ☑️   | **Nix**                      | Flake builds; not extensively tested                                                                                                                                                                                                                                                         |
 |   ✅️   | **Windows**                  | Installer and portable builds from CI, with media controls, tray and sign-in                                                                                                                                                                                                                 |
-|   🔜   | **macOS**                    | Can build it for macOS, just need to test, there's a PR for auto-builds.                                                                                                                                                                                                                     |
+|   ✅️   | **macOS**                    | DMG builds from CI for Apple silicon and Intel, with Now Playing, media keys and sign-in                                                                                                                                                                                                     |
 |   🔜   | **GNOME Circle**             | Still considering it, might not happen                                                                                                                                                                                                                                                       |
 
 Have an idea or found a bug? [Open an issue!](https://github.com/m-obeid/Mixtapes/issues)

@@ -147,6 +147,22 @@ pub fn load_css() {
         provider.load_from_string(css);
         gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
+    // GTK on macOS defaults to the system font at 72 dpi, about a fifth smaller
+    // than GNOME's Adwaita Sans 11 at 96 dpi, which the layout is made for.
+    #[cfg(target_os = "macos")]
+    if let Some(settings) = gtk::Settings::default() {
+        settings.set_gtk_font_name(Some("Adwaita Sans 11"));
+        // 96 dpi, in 1024ths.
+        settings.set_gtk_xft_dpi(96 * 1024);
+    }
+    // macOS draws the window frame: shadow, rounded corners and outline. libadwaita's
+    // own outline and corner radius would draw a second frame inside it.
+    #[cfg(target_os = "macos")]
+    {
+        let provider = gtk::CssProvider::new();
+        provider.load_from_string("window { border-radius: 0; outline: none; box-shadow: none; }");
+        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+    }
     // GTK on Windows defaults to Segoe UI 9 with full hinting. GNOME's 11pt,
     // slight hinting and grayscale antialiasing keep the layout the same size as on Linux.
     #[cfg(windows)]

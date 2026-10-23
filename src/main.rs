@@ -16,9 +16,12 @@ mod discord;
 mod downloads;
 mod local_library;
 mod lyrics;
+#[cfg(target_os = "macos")]
+mod macos;
 mod model;
-// MPRIS on Linux. Elsewhere the same two calls land in smtc.rs.
-#[cfg_attr(not(target_os = "linux"), path = "smtc.rs")]
+// MPRIS on Linux, Now Playing on macOS. Elsewhere the same two calls land in smtc.rs.
+#[cfg_attr(target_os = "macos", path = "now_playing.rs")]
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), path = "smtc.rs")]
 mod mpris;
 mod net;
 mod paths;
@@ -76,6 +79,7 @@ fn main() -> glib::ExitCode {
     bootstrap::cap_malloc_arenas();
     bootstrap::raise_fd_limit();
     bootstrap::prefer_bundled_programs();
+    bootstrap::use_bundled_runtime();
     bootstrap::use_bundled_fonts();
     bootstrap::enable_gpu_rendering();
     bootstrap::set_app_user_model_id();
@@ -83,6 +87,11 @@ fn main() -> glib::ExitCode {
 
     let paths = Paths::discover();
     bootstrap::init_logging(&paths);
+    #[cfg(target_os = "macos")]
+    {
+        macos::use_keychain_roots(&paths.cache_dir);
+        macos::listen_for_links();
+    }
     bootstrap::apply_gsk_renderer_pref(&paths);
 
     // The stylesheet and icons, compiled in by build.rs.
@@ -167,7 +176,14 @@ fn main() -> glib::ExitCode {
     app.connect_startup(glib::clone!(
         #[strong]
         app_ctx,
-        move |_| on_startup(&app_ctx)
+        move |_app| {
+            #[cfg(target_os = "macos")]
+            {
+                macos::install(_app);
+                macos::install_menu(_app, &app_ctx.player);
+            }
+            on_startup(&app_ctx)
+        }
     ));
     app.connect_activate(glib::clone!(
         #[strong]

@@ -7,22 +7,22 @@
 //! headers; those tabs are gone.
 
 use std::cell::{Cell, RefCell};
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 use webkit6::prelude::*;
 
 use crate::ui::context::UiContext;
 
 const LOGIN_URL: &str = "https://accounts.google.com/ServiceLogin?ltmpl=music&service=youtube&uilel=3&passive=true&continue=https%3A%2F%2Fmusic.youtube.com%2Flibrary";
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0";
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub struct LoginDialog {
     window: adw::Window,
     webview: webkit6::WebView,
@@ -33,7 +33,7 @@ pub struct LoginDialog {
     on_success: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 impl LoginDialog {
     pub fn new(ctx: Rc<UiContext>, parent: &impl IsA<gtk::Window>) -> Rc<Self> {
         let window = adw::Window::builder()
@@ -238,11 +238,12 @@ impl LoginDialog {
     }
 }
 
-/// Windows has no WebKitGTK, so the same page runs in WebView2, placed as a
-/// native child window over the empty area under the header bar. It watches
+/// Windows and macOS have no WebKitGTK, so the same page runs in the system
+/// webview (WebView2 or WKWebView), placed as a native child over the empty
+/// area under the header bar. It watches
 /// page loads instead of requests: once music.youtube.com has loaded with a
 /// SAPISID cookie, the cookie jar is the session.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub struct LoginDialog {
     window: adw::Window,
     /// Where the webview sits. It is a native window above GTK's drawing, so
@@ -260,9 +261,14 @@ pub struct LoginDialog {
 /// What the webview sends as its browser. WebView2 is Edge, so the page and
 /// the saved session carry an Edge user agent.
 #[cfg(windows)]
-const WINDOWS_BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0";
+const NATIVE_BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0";
 
-#[cfg(windows)]
+/// WKWebView is Safari's engine. Without the Version and Safari tokens of its
+/// default agent, Google treats it as an embedded browser and refuses sign-in.
+#[cfg(target_os = "macos")]
+const NATIVE_BROWSER_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15";
+
+#[cfg(any(windows, target_os = "macos"))]
 impl LoginDialog {
     pub fn new(ctx: Rc<UiContext>, parent: &impl IsA<gtk::Window>) -> Rc<Self> {
         let window = adw::Window::builder()
@@ -275,7 +281,9 @@ impl LoginDialog {
         let toolbar = adw::ToolbarView::new();
         window.set_content(Some(&toolbar));
         let header = adw::HeaderBar::builder().show_title(true).build();
-        let skip = gtk::Button::builder().label("Skip").build();
+        // Keys typed into the webview reach GTK as well. A focused Skip button
+        // would take the Enter that submits Google's form.
+        let skip = gtk::Button::builder().label("Skip").focusable(false).focus_on_click(false).build();
         header.pack_end(&skip);
         toolbar.add_top_bar(&header);
 
@@ -365,17 +373,18 @@ impl LoginDialog {
             return;
         };
         // WebView2 keeps its profile beside the exe unless told otherwise, and
-        // Program Files is not writable.
+        // Program Files is not writable. WKWebView ignores the folder.
         let mut context = wry::WebContext::new(Some(self.ctx.paths.cache_dir.join("webview2")));
         let weak = Rc::downgrade(self);
         let built = wry::WebViewBuilder::new_with_web_context(&mut context)
             .with_url(LOGIN_URL)
-            .with_user_agent(WINDOWS_BROWSER_UA)
+            .with_user_agent(NATIVE_BROWSER_UA)
             .with_on_page_load_handler(move |event, url| {
+                tracing::debug!(finished = matches!(event, wry::PageLoadEvent::Finished), url, "sign-in page load");
                 if !matches!(event, wry::PageLoadEvent::Finished) || !url.starts_with("https://music.youtube.com") {
                     return;
                 }
-                // Reading cookies waits on WebView2, so not from inside its own callback.
+                // Reading cookies waits on the webview, so not from inside its own callback.
                 let weak = weak.clone();
                 glib::idle_add_local_once(move || {
                     if let Some(d) = weak.upgrade() {
@@ -391,8 +400,9 @@ impl LoginDialog {
                 self.place_webview();
             }
             Err(err) => {
-                tracing::warn!(%err, "webview2 did not start");
-                self.set_status("red", "The sign-in page could not be shown. Is the WebView2 runtime installed?");
+                tracing::warn!(%err, "webview did not start");
+                let hint = if cfg!(windows) { " Is the WebView2 runtime installed?" } else { "" };
+                self.set_status("red", &format!("The sign-in page could not be shown.{hint}"));
             }
         }
     }
@@ -418,7 +428,7 @@ impl LoginDialog {
         if self.finished.get() {
             return;
         }
-        let cookies = match self.webview.borrow().as_ref().map(|w| w.cookies_for_url("https://music.youtube.com")) {
+        let cookies = match self.webview.borrow().as_ref().map(|w| music_cookies(w)) {
             Some(Ok(cookies)) => cookies,
             Some(Err(err)) => {
                 self.set_status("red", &format!("Could not read cookies: {err}"));
@@ -432,7 +442,7 @@ impl LoginDialog {
         }
         self.finished.set(true);
         self.set_status("blue", "Signing in...");
-        let captured = std::collections::BTreeMap::from([("Cookie".to_owned(), cookie), ("User-Agent".to_owned(), WINDOWS_BROWSER_UA.to_owned())]);
+        let captured = std::collections::BTreeMap::from([("Cookie".to_owned(), cookie), ("User-Agent".to_owned(), NATIVE_BROWSER_UA.to_owned())]);
         let json = serde_json::to_string(&captured).unwrap_or_default();
         self.login_with(json, move |d, ok| {
             if ok {
@@ -476,6 +486,28 @@ impl LoginDialog {
     }
 }
 
+/// The cookies a request to music.youtube.com carries. WebView2 matches
+/// domains itself. wry's WKWebView filter wants the cookie's domain to equal
+/// the host, which drops Google's session cookies set on .youtube.com, so on
+/// macOS the jar is read whole and matched here.
+#[cfg(windows)]
+fn music_cookies(webview: &wry::WebView) -> wry::Result<Vec<wry::cookie::Cookie<'static>>> {
+    webview.cookies_for_url("https://music.youtube.com")
+}
+
+#[cfg(target_os = "macos")]
+fn music_cookies(webview: &wry::WebView) -> wry::Result<Vec<wry::cookie::Cookie<'static>>> {
+    const HOST: &str = "music.youtube.com";
+    Ok(webview
+        .cookies()?
+        .into_iter()
+        .filter(|cookie| {
+            let domain = cookie.domain().unwrap_or_default().trim_start_matches('.');
+            HOST == domain || HOST.strip_suffix(domain).is_some_and(|rest| rest.ends_with('.'))
+        })
+        .collect())
+}
+
 /// The GTK window's native handle, in the form wry takes a parent in.
 #[cfg(windows)]
 struct NativeParent(std::num::NonZeroIsize);
@@ -499,6 +531,34 @@ fn native_parent(window: &adw::Window) -> Option<NativeParent> {
     // SAFETY: a realized GdkWin32Surface; the call only reads its HWND.
     let hwnd = unsafe { gdk_win32_surface_get_handle(surface.to_glib_none().0) };
     std::num::NonZeroIsize::new(hwnd as isize).map(NativeParent)
+}
+
+/// The content view of the GTK window's NSWindow, which wry adds the webview to.
+#[cfg(target_os = "macos")]
+struct NativeParent(std::ptr::NonNull<std::ffi::c_void>);
+
+#[cfg(target_os = "macos")]
+impl wry::raw_window_handle::HasWindowHandle for NativeParent {
+    fn window_handle(&self) -> Result<wry::raw_window_handle::WindowHandle<'_>, wry::raw_window_handle::HandleError> {
+        let raw = wry::raw_window_handle::RawWindowHandle::AppKit(wry::raw_window_handle::AppKitWindowHandle::new(self.0));
+        // SAFETY: the view belongs to a window that outlives the webview, which is dropped on close.
+        Ok(unsafe { wry::raw_window_handle::WindowHandle::borrow_raw(raw) })
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn native_parent(window: &adw::Window) -> Option<NativeParent> {
+    use gtk::glib::translate::ToGlibPtr;
+    use objc2_app_kit::NSWindow;
+    unsafe extern "C" {
+        fn gdk_macos_surface_get_native_window(surface: *mut gtk::gdk::ffi::GdkSurface) -> *mut std::ffi::c_void;
+    }
+    let surface = window.surface()?;
+    // SAFETY: a realized GdkMacosSurface; the call only reads its NSWindow.
+    let ns_window = unsafe { gdk_macos_surface_get_native_window(surface.to_glib_none().0) }.cast::<NSWindow>();
+    // SAFETY: GTK keeps the NSWindow alive while the surface exists.
+    let view = unsafe { ns_window.as_ref() }?.contentView()?;
+    std::ptr::NonNull::new(objc2::rc::Retained::as_ptr(&view).cast_mut().cast()).map(NativeParent)
 }
 
 /// Pref set when the listener closed the sign-in without signing in.

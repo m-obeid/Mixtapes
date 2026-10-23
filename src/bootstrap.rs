@@ -100,10 +100,12 @@ fn set_registry_string(key: &str, name: Option<&str>, value: &str) -> windows::c
     }
 }
 
-/// Put the install's own folder first on PATH on Windows.
-/// yt-dlp looks up node.exe and ffmpeg.exe on PATH, and the installer puts them beside mixtapes.exe.
+/// Put the install's own folder first on PATH on Windows and macOS.
+/// yt-dlp looks up node and ffmpeg on PATH, and the installer (or Mixtapes.app's
+/// Contents/MacOS) puts them beside the app. A Finder launch on macOS also has
+/// none of the shell's PATH to find them elsewhere.
 pub fn prefer_bundled_programs() {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(std::path::Path::to_path_buf)) else {
             return;
@@ -117,10 +119,78 @@ pub fn prefer_bundled_programs() {
     }
 }
 
+/// Point GLib, GTK and GStreamer at what Mixtapes.app carries in
+/// Contents/Resources. Homebrew's builds look in Homebrew's prefix, which a
+/// Mac without Homebrew lacks. Variables already set win, and a run outside
+/// a bundle changes nothing.
+pub fn use_bundled_runtime() {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(contents) = std::env::current_exe().ok().and_then(|exe| exe.parent()?.parent().map(std::path::Path::to_path_buf)) else {
+            return;
+        };
+        let resources = contents.join("Resources");
+        if !contents.ends_with("Contents") || !resources.join("lib").is_dir() {
+            return;
+        }
+        let registry = glib::user_cache_dir().join("muse").join("gstreamer-registry.bin");
+        let vars = [
+            ("XDG_DATA_DIRS", resources.join("share")),
+            ("GSETTINGS_SCHEMA_DIR", resources.join("share/glib-2.0/schemas")),
+            ("GIO_MODULE_DIR", resources.join("lib/gio/modules")),
+            // Empty: the built-in PNG and JPEG loaders are all the app needs, and
+            // the default path would load a package manager's loaders on top.
+            ("GDK_PIXBUF_MODULE_FILE", resources.join("lib/gdk-pixbuf-2.0/loaders.cache")),
+            ("GST_PLUGIN_SYSTEM_PATH_1_0", resources.join("lib/gstreamer-1.0")),
+            ("GST_PLUGIN_SCANNER_1_0", contents.join("MacOS/gst-plugin-scanner")),
+            // Apart from a Homebrew GStreamer's registry, which lists other plugin paths.
+            ("GST_REGISTRY_1_0", registry),
+        ];
+        for (key, value) in vars {
+            if std::env::var_os(key).is_none() {
+                // SAFETY: called from main before any other thread exists.
+                unsafe { std::env::set_var(key, value) };
+            }
+        }
+        // GStreamer's soup plugins (souphttpsrc, and the HLS downloader) open
+        // libsoup by its bare file name, which macOS never looks for inside an
+        // app. bundle.sh gives the bundled copy that bare name as its install
+        // name, and a library already loaded answers to its install name.
+        let soup = contents.join("Frameworks/libsoup-3.0.0.dylib");
+        if let Ok(path) = std::ffi::CString::new(soup.to_string_lossy().as_bytes()) {
+            // SAFETY: a NUL-terminated path; the handle is kept for the life of the process.
+            if unsafe { libc::dlopen(path.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) }.is_null() {
+                tracing::warn!(?soup, "bundled libsoup did not load, streaming will fail");
+            }
+        }
+    }
+}
+
 /// Lay text out through fontconfig on Windows, like the Linux build, instead of Pango's win32 backend.
 /// The bundled etc/fonts/fonts.conf adds the install's Adwaita fonts and the Windows font folders.
 /// Both variables are read once when Pango creates its font map, so this runs before GTK loads.
 pub fn use_bundled_fonts() {
+    // macOS lays text out through CoreText, which only knows installed fonts.
+    // Registering the app's copies for this process makes Adwaita Sans and
+    // Mono available without installing them.
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_core_foundation::CFURL;
+        use objc2_core_text::{CTFontManagerRegisterFontsForURL, CTFontManagerScope};
+        let exe = std::env::current_exe().ok();
+        // Mixtapes.app/Contents/Resources/share/fonts, or the repository's fonts/ for a cargo run.
+        let bundled = exe.as_deref().and_then(|e| Some(e.parent()?.parent()?.join("Resources/share/fonts")));
+        let source = cfg!(debug_assertions).then(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts"));
+        let Some(dir) = bundled.into_iter().chain(source).find(|d| d.is_dir()) else { return };
+        let Ok(entries) = std::fs::read_dir(&dir) else { return };
+        for path in entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "ttf")) {
+            let Some(url) = CFURL::from_file_path(&path) else { continue };
+            // SAFETY: a valid file URL; errors are not collected.
+            if !unsafe { CTFontManagerRegisterFontsForURL(&url, CTFontManagerScope::Process, std::ptr::null_mut()) } {
+                tracing::debug!(?path, "font not registered");
+            }
+        }
+    }
     #[cfg(windows)]
     {
         let Some(root) = std::env::current_exe().ok().and_then(|exe| exe.parent()?.parent().map(std::path::Path::to_path_buf)) else {

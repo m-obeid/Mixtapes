@@ -18,6 +18,11 @@ use crate::ui::cover::load_texture;
 use crate::ui::window::{AppearancePref, MainWindow};
 
 const RENDERERS: [(&str, &str); 5] = [("default", "Default (recommended)"), ("ngl", "NGL"), ("gl", "Legacy GL"), ("vulkan", "Vulkan"), ("cairo", "Cairo (Software)")];
+
+/// The renderers this platform's GTK has. Its macOS build has no Vulkan.
+fn renderers() -> Vec<(&'static str, &'static str)> {
+    RENDERERS.into_iter().filter(|(key, _)| !(cfg!(target_os = "macos") && *key == "vulkan")).collect()
+}
 const HISTORY_MODES: [(&str, &str); 3] = [("immediate", "Immediately"), ("after_30s", "After 30 seconds"), ("never", "Never")];
 const FORMAT_LABELS: [&str; 5] = ["Opus (smallest)", "MP3 (universal)", "M4A (Apple)", "FLAC (lossless)", "OGG (Vorbis)"];
 const STRUCTURE_LABELS: [&str; 3] = ["Artist / Album / Song", "Artist / Song", "No folders"];
@@ -443,13 +448,14 @@ fn troubleshooting_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::Preference
 
     // Some GPU and driver pairs crash inside the default renderer. Read at the next launch.
     let current = pref_str(ctx, "gsk_renderer", "default");
-    let labels: Vec<&str> = RENDERERS.iter().map(|(_, label)| *label).collect();
-    let selected = RENDERERS.iter().position(|(key, _)| *key == current).unwrap_or(0);
+    let renderers = renderers();
+    let labels: Vec<&str> = renderers.iter().map(|(_, label)| *label).collect();
+    let selected = renderers.iter().position(|(key, _)| *key == current).unwrap_or(0);
     let renderer_row = combo_row("Renderer", "Switch if you hit GPU-related crashes. Applies on next launch.", &labels, selected);
     {
         let ctx = ctx.clone();
         renderer_row.connect_selected_notify(move |row| {
-            if let Some((key, _)) = RENDERERS.get(row.selected() as usize) {
+            if let Some((key, _)) = renderers.get(row.selected() as usize) {
                 save(&ctx, "gsk_renderer", *key);
             }
         });

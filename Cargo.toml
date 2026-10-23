@@ -61,19 +61,23 @@ pinyin = { version = "0.11", default-features = false, features = ["with_tone"] 
 # Cover decode and PNG encode for ui/cover_effects.rs, what PIL did. 0.25.9 is the newest release on rust-version 1.85.
 image = { version = "0.25.9", default-features = false, features = ["jpeg", "png", "webp"] }
 
-[target.'cfg(not(windows))'.dependencies]
+[target.'cfg(not(any(windows, target_os = "macos")))'.dependencies]
 # Embedded sign-in page, like ui/login_webview.py. WebKitGTK 6.0 (GNOME 48 runtime ships 2.48).
-# Windows has no WebKitGTK; its sign-in window is WebView2.
+# Windows and macOS have no WebKitGTK; their sign-in windows are WebView2 and WKWebView.
 webkit6 = { version = "0.6", features = ["v2_44"] }
+
+[target.'cfg(not(windows))'.dependencies]
 # BotGuard in an embedded V8, for the PO tokens uploaded songs need. V8 has no
 # prebuilt library for windows-gnu, so Windows runs the bundled program instead.
 rustypipe-botguard = "0.1.2"
 # mallopt, setrlimit and pathconf. See bootstrap.rs and downloads/naming.rs.
 libc = "0.2"
 
-[target.'cfg(windows)'.dependencies]
-# The sign-in page in WebView2 (ui/login.rs), where Linux uses WebKitGTK.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+# The sign-in page in WebView2 or WKWebView (ui/login.rs), where Linux uses WebKitGTK.
 wry = { version = "0.57", default-features = false, features = ["os-webview"] }
+
+[target.'cfg(windows)'.dependencies]
 # System Media Transport Controls (smtc.rs), the AppUserModelID and the
 # Discord pipe's read timeout.
 windows = { version = "0.62", features = [
@@ -92,6 +96,21 @@ windows = { version = "0.62", features = [
 ] }
 # SQLite is not a system library on Windows. The Linux builds link the system one.
 rusqlite = { version = "0.40", features = ["bundled"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Now Playing in Control Center and the media keys (now_playing.rs), and the
+# NSWindow under GTK's that the sign-in webview attaches to (ui/login.rs), and
+# the Dock reopen handler GTK lacks (macos.rs).
+objc2 = "0.6"
+block2 = "0.6"
+# GTlsBackend's default database, for the keychain's root certificates (macos.rs).
+gio = { version = "0.22", features = ["v2_60"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSAppleEventDescriptor", "NSAppleEventManager", "NSData", "NSDictionary", "NSObject", "NSString", "NSValue"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes", "CFError", "CFURL"] }
+# The bundled Adwaita fonts, registered for the process (bootstrap.rs).
+objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFontManager", "CTFontManagerErrors"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder", "NSView", "NSWindow"] }
+objc2-media-player = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "MPMediaItem", "MPMediaEntity", "MPNowPlayingInfoCenter", "MPRemoteCommand", "MPRemoteCommandCenter", "MPRemoteCommandEvent"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # MPRIS D-Bus interface. Wired in when player/mpris.py is ported.
