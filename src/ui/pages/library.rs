@@ -757,7 +757,7 @@ fn saved_albums(ctx: &UiContext) -> Vec<MediaItem> {
 /// Subtitle and icons for a grid card, following _rebuild_*_grid.
 fn card_style(item: &MediaItem) -> (String, &'static str, Option<&'static str>) {
     match item.kind {
-        ItemKind::Playlist if item.id == DOWNLOADS_ID => (item.description.clone().unwrap_or_default(), "media-playlist-audio-symbolic", Some("folder-download-symbolic")),
+        ItemKind::Playlist if item.id == DOWNLOADS_ID => (item.description.clone().unwrap_or_default(), "audio-x-generic-symbolic", Some("folder-download-symbolic")),
         // An empty playlist on this device has no art yet. It gets the tile Downloads wears.
         ItemKind::Playlist if crate::local_library::is_local(&item.id) && item.thumb.is_none() => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", Some("audio-x-generic-symbolic")),
         ItemKind::Playlist if item.id.len() == 2 || crate::local_library::is_local(&item.id) => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", None),

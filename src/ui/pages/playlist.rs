@@ -43,7 +43,7 @@ const FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
 /// Longest side of an uploaded playlist cover.
 const COVER_MAX_PIXELS: i32 = 1024;
 const INITIAL_LIMIT: usize = 200;
-const PLACEHOLDER_ICON: &str = "media-playlist-audio-symbolic";
+const PLACEHOLDER_ICON: &str = "audio-x-generic-symbolic";
 
 /// What a card knew about the playlist before the page fetched it.
 #[derive(Clone, Debug, Default)]
