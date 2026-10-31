@@ -685,7 +685,7 @@ impl QueuePanel {
             row.add_controller(long);
         }
 
-        // Drag the handle, drop on another row to reorder.
+        // Drag the handle, drop on the upper or lower half of another row to reorder.
         {
             let source = gtk::DragSource::builder()
                 .actions(gdk::DragAction::MOVE)
@@ -705,7 +705,22 @@ impl QueuePanel {
             let target = gtk::DropTarget::new(glib::Type::STRING, gdk::DragAction::MOVE);
             let entry_for_drop = entry_of.clone();
             let player = self.player.clone();
-            target.connect_drop(move |_, value, _, _| {
+            let row_for_mark = row.clone();
+            target.connect_motion(move |_, _, y| {
+                let below = y >= f64::from(row_for_mark.height()) / 2.0;
+                row_for_mark.remove_css_class(if below { "drop-above" } else { "drop-below" });
+                row_for_mark.add_css_class(if below { "drop-below" } else { "drop-above" });
+                gdk::DragAction::MOVE
+            });
+            let row_for_mark = row.clone();
+            target.connect_leave(move |_| {
+                row_for_mark.remove_css_class("drop-above");
+                row_for_mark.remove_css_class("drop-below");
+            });
+            let row_for_drop = row.clone();
+            target.connect_drop(move |_, value, _, y| {
+                row_for_drop.remove_css_class("drop-above");
+                row_for_drop.remove_css_class("drop-below");
                 let Ok(text) = value.get::<String>() else {
                     return false;
                 };
@@ -715,10 +730,9 @@ impl QueuePanel {
                 let Some(entry) = entry_for_drop() else {
                     return false;
                 };
-                let to = entry.index() as usize;
-                if from != to {
-                    player.move_queue_item(from, to);
-                }
+                // The lower half of a row means after it.
+                let below = y >= f64::from(row_for_drop.height()) / 2.0;
+                player.move_queue_item(from, entry.index() as usize + usize::from(below));
                 true
             });
             row.add_controller(target);

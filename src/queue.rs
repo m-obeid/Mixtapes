@@ -427,10 +427,11 @@ impl Queue {
         }
     }
 
-    /// Drag-and-drop reorder. Returns whether anything moved; the playing
-    /// track keeps playing and its index follows it.
+    /// Drag-and-drop reorder: `to` is the row to land in front of, the queue's length
+    /// for the very end. Returns whether anything moved; the playing track keeps
+    /// playing and its index follows it.
     pub fn move_item(&mut self, from: usize, to: usize) -> bool {
-        if from >= self.tracks.len() || to >= self.tracks.len() || from == to {
+        if from >= self.tracks.len() || to > self.tracks.len() || from == to || from + 1 == to {
             return false;
         }
         let item = self.tracks.remove(from);
@@ -751,6 +752,18 @@ mod tests {
         assert_eq!(q.current(), Some(1), "the playing track kept playing");
         assert!(!q.move_item(0, 0));
         assert!(!q.move_item(9, 0));
+    }
+
+    #[test]
+    fn a_row_moves_one_place_down_and_all_the_way_to_the_end() {
+        let mut q = queue(&["a", "b", "c"], 0);
+        assert!(!q.move_item(0, 1), "in front of the next row is where it already is");
+        assert!(q.move_item(0, 2));
+        assert_eq!(ids(&q), ["b", "a", "c"]);
+        assert!(q.move_item(1, 3));
+        assert_eq!(ids(&q), ["b", "c", "a"]);
+        assert_eq!(q.current(), Some(2));
+        assert!(!q.move_item(0, 4));
     }
 
     #[test]

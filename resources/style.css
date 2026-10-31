@@ -867,6 +867,14 @@ gridview.playlist-view > child,
 .queue-cover > image {
   transition: filter 150ms ease;
 }
+.queue-row.drop-above {
+  box-shadow: inset 0 2px @accent_color;
+}
+
+.queue-row.drop-below {
+  box-shadow: inset 0 -2px @accent_color;
+}
+
 .queue-row:hover .queue-cover > image,
 .queue-row.playing .queue-cover > image {
   filter: brightness(0.55);
