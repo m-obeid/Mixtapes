@@ -22,6 +22,10 @@ use crate::ui::widgets::add_to_playlist::AddToPlaylistPopover;
 /// Side of a row's cover, a little under the 40px of a playlist row: the sidebar is narrow.
 const COVER_SIZE: i32 = 36;
 
+/// How far from the list's edge a drag starts to scroll it, and its top speed in pixels a second.
+const DRAG_SCROLL_ZONE: f64 = 56.0;
+const DRAG_SCROLL_MAX: f64 = 600.0;
+
 pub struct QueuePanel {
     root: gtk::Box,
     controls_start: gtk::WindowControls,
@@ -32,6 +36,9 @@ pub struct QueuePanel {
     player: Rc<Player>,
     ctx: Rc<UiContext>,
     scrolled: gtk::ScrolledWindow,
+    /// Pixels a second the list runs by itself while a drag sits at its edge.
+    drag_scroll: Cell<f64>,
+    drag_scroll_ticking: Cell<bool>,
     /// The round arrow button, up while the playing row is scrolled out of sight.
     jump_revealer: gtk::Revealer,
     jump_icon: gtk::Image,
@@ -240,6 +247,8 @@ impl QueuePanel {
             player: player.clone(),
             ctx,
             scrolled,
+            drag_scroll: Cell::new(0.0),
+            drag_scroll_ticking: Cell::new(false),
             jump_revealer,
             jump_icon,
             following: Cell::new(true),
@@ -263,6 +272,7 @@ impl QueuePanel {
                     panel.centre_current(true);
                 }
             });
+            panel.wire_drag_scroll();
             let adj = panel.scrolled.vadjustment();
             let weak = Rc::downgrade(&panel);
             adj.connect_value_changed(move |_| {
@@ -400,6 +410,53 @@ impl QueuePanel {
                 panel.centre_current(animate);
             }
             glib::ControlFlow::Break
+        });
+    }
+
+    /// Scroll while a dragged row sits near the list's top or bottom edge. GTK's list
+    /// does this on its own, but never stops when the drag ends outside the list.
+    fn wire_drag_scroll(self: &Rc<Self>) {
+        let controllers = self.list.observe_controllers();
+        let built_in: Vec<gtk::DropControllerMotion> = (0..controllers.n_items()).filter_map(|i| controllers.item(i).and_downcast()).collect();
+        for controller in built_in {
+            self.list.remove_controller(&controller);
+        }
+        let motion = gtk::DropControllerMotion::new();
+        let weak = Rc::downgrade(self);
+        motion.connect_motion(move |_, _, y| {
+            if let Some(panel) = weak.upgrade() {
+                panel.set_drag_scroll(drag_scroll_speed(y, f64::from(panel.scrolled.height())));
+            }
+        });
+        let weak = Rc::downgrade(self);
+        motion.connect_leave(move |_| {
+            if let Some(panel) = weak.upgrade() {
+                panel.drag_scroll.set(0.0);
+            }
+        });
+        self.scrolled.add_controller(motion);
+    }
+
+    fn set_drag_scroll(self: &Rc<Self>, speed: f64) {
+        self.drag_scroll.set(speed);
+        if speed == 0.0 || self.drag_scroll_ticking.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        let last = Cell::new(None::<i64>);
+        self.list.add_tick_callback(move |_, clock| {
+            let Some(panel) = weak.upgrade() else { return glib::ControlFlow::Break };
+            let speed = panel.drag_scroll.get();
+            if speed == 0.0 {
+                panel.drag_scroll_ticking.set(false);
+                return glib::ControlFlow::Break;
+            }
+            let now = clock.frame_time();
+            if let Some(before) = last.replace(Some(now)) {
+                let adj = panel.scrolled.vadjustment();
+                adj.set_value(adj.value() + speed * (now - before) as f64 / 1_000_000.0);
+            }
+            glib::ControlFlow::Continue
         });
     }
 
@@ -700,6 +757,12 @@ impl QueuePanel {
                 let paintable = gtk::WidgetPaintable::new(Some(&row_for_icon));
                 source.set_icon(Some(&paintable), 0, 0);
             });
+            let panel = Rc::downgrade(self);
+            source.connect_drag_end(move |_, _, _| {
+                if let Some(panel) = panel.upgrade() {
+                    panel.drag_scroll.set(0.0);
+                }
+            });
             handle.add_controller(source);
 
             let target = gtk::DropTarget::new(glib::Type::STRING, gdk::DragAction::MOVE);
@@ -749,6 +812,21 @@ impl QueuePanel {
     }
 }
 
+/// How fast a drag at height `y` scrolls a list `height` tall, up is negative.
+/// Nothing away from the edges, faster the closer the pointer gets.
+fn drag_scroll_speed(y: f64, height: f64) -> f64 {
+    let zone = DRAG_SCROLL_ZONE.min(height / 3.0);
+    if zone <= 0.0 {
+        0.0
+    } else if y < zone {
+        -DRAG_SCROLL_MAX * (1.0 - y.max(0.0) / zone)
+    } else if y > height - zone {
+        DRAG_SCROLL_MAX * (1.0 - (height - y).max(0.0) / zone)
+    } else {
+        0.0
+    }
+}
+
 /// The header caption: "42 tracks · 2 h 31 min". Tracks of unknown length add nothing to the time.
 fn queue_summary(tracks: u32, seconds: u32) -> String {
     let count = if tracks == 1 { "1 track".to_owned() } else { format!("{tracks} tracks") };
@@ -763,6 +841,15 @@ fn queue_summary(tracks: u32, seconds: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_drag_scrolls_only_near_the_edges() {
+        use super::drag_scroll_speed as speed;
+        assert_eq!(speed(300.0, 600.0), 0.0);
+        assert!(speed(0.0, 600.0) < speed(20.0, 600.0) && speed(20.0, 600.0) < 0.0);
+        assert!(speed(600.0, 600.0) > speed(580.0, 600.0) && speed(580.0, 600.0) > 0.0);
+        assert_eq!(speed(10.0, 0.0), 0.0);
+    }
 
     #[test]
     fn the_caption_drops_the_time_when_no_track_has_a_length() {
