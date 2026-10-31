@@ -614,9 +614,20 @@ pub async fn move_playlist_item(api: &dyn Browse, playlist_id: &str, moved: &str
     Ok(())
 }
 
+/// Which of these tracks the playlist already holds, by their own id or their song version's.
+pub async fn tracks_already_in(api: &dyn Browse, playlist_id: &str, video_ids: &[String]) -> Result<Vec<String>, NetError> {
+    let held = get_playlist(api, playlist_id, None).await?.tracks;
+    Ok(already_held(held.iter().map(|t| t.video_id.as_str()), video_ids))
+}
+
+fn already_held<'a>(held: impl Iterator<Item = &'a str>, wanted: &[String]) -> Vec<String> {
+    let held: std::collections::HashSet<&str> = held.collect();
+    wanted.iter().filter(|id| held.contains(id.as_str()) || held.contains(twins::preferred_id(id).as_str())).cloned().collect()
+}
+
 /// Port of MusicClient.add_playlist_items. Single adds swap a music video
 /// for its song version first, bulk adds do not.
-pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: Vec<String>, swap_to_audio: Option<bool>) -> Result<(), NetError> {
+pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: Vec<String>, swap_to_audio: Option<bool>, allow_duplicates: bool) -> Result<(), NetError> {
     let swap = swap_to_audio.unwrap_or(video_ids.len() == 1);
     let mut ids = Vec::with_capacity(video_ids.len());
     for vid in video_ids {
@@ -638,7 +649,16 @@ pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: 
     }
     // Port of the crate's add_playlist_items body. DEDUPE_OPTION_SKIP is what
     // "allow_duplicates: false" means to YouTube.
-    let actions: Vec<Value> = ids.iter().map(|vid| json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": vid, "dedupeOption": "DEDUPE_OPTION_SKIP" })).collect();
+    let actions: Vec<Value> = ids
+        .iter()
+        .map(|vid| {
+            let mut action = json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": vid });
+            if !allow_duplicates {
+                action["dedupeOption"] = json!("DEDUPE_OPTION_SKIP");
+            }
+            action
+        })
+        .collect();
     api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
     Ok(())
 }
@@ -1104,6 +1124,13 @@ mod tests {
         assert_eq!(rows[0].title, "Song");
         assert_eq!(twins::preferred_id("twin-video"), "twin-song");
         assert_eq!(find_audio_version(&Silent, "twin-video").await.unwrap().unwrap().video_id.as_str(), "twin-song");
+    }
+
+    #[test]
+    fn a_song_counts_as_held_under_its_own_id() {
+        let wanted = ["a".to_owned(), "b".to_owned()];
+        assert_eq!(already_held(["b", "c"].into_iter(), &wanted), ["b"]);
+        assert!(already_held(std::iter::empty(), &wanted).is_empty());
     }
 
     #[test]

@@ -32,7 +32,42 @@ pub fn add_tracks(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: String
     }
     let api = ctx.net.client().api();
     let ids: Vec<String> = tracks.iter().map(|t| t.video_id.0.clone()).collect();
-    let handle = ctx.net.spawn(async move { crate::net::playlists::add_playlist_items(&api, &playlist_id, ids, None).await });
+    let (asked, list) = (ids.clone(), playlist_id.clone());
+    let handle = ctx.net.spawn(async move { crate::net::playlists::tracks_already_in(&api, &list, &asked).await });
+    let (ctx, anchor) = (ctx.clone(), anchor.clone());
+    glib::spawn_future_local(async move {
+        // A list that will not load is no reason to refuse the song. YouTube still skips a duplicate.
+        let held = handle.await.ok().and_then(Result::ok).unwrap_or_default();
+        if held.is_empty() {
+            send_tracks(&ctx, &anchor, playlist_id, ids, false);
+            return;
+        }
+        let fresh: Vec<String> = ids.iter().filter(|id| !held.contains(id)).cloned().collect();
+        let dialog = adw::AlertDialog::builder()
+            .heading(tr!("Already in Playlist"))
+            .body(trn!("{n} song is already in this playlist.", "{n} songs are already in this playlist.", held.len()))
+            .build();
+        dialog.add_response("cancel", &tr!("Cancel"));
+        if !fresh.is_empty() {
+            dialog.add_response("skip", &tr!("Skip Duplicates"));
+        }
+        dialog.add_response("add", &tr!("Add Anyway"));
+        dialog.set_default_response(Some(if fresh.is_empty() { "cancel" } else { "skip" }));
+        dialog.set_close_response("cancel");
+        let toast_anchor = anchor.clone();
+        dialog.connect_response(None, move |_, response| match response {
+            "skip" => send_tracks(&ctx, &toast_anchor, playlist_id.clone(), fresh.clone(), false),
+            "add" => send_tracks(&ctx, &toast_anchor, playlist_id.clone(), ids.clone(), true),
+            _ => {}
+        });
+        dialog.present(Some(&anchor));
+    });
+}
+
+fn send_tracks(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: String, ids: Vec<String>, allow_duplicates: bool) {
+    let count = ids.len();
+    let api = ctx.net.client().api();
+    let handle = ctx.net.spawn(async move { crate::net::playlists::add_playlist_items(&api, &playlist_id, ids, None, allow_duplicates).await });
     let anchor = anchor.clone();
     glib::spawn_future_local(async move {
         match handle.await {
