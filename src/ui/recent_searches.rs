@@ -26,7 +26,8 @@ fn remembered(mut list: Vec<String>, query: &str) -> Vec<String> {
 pub struct RecentSearches {
     paths: Paths,
     popover: gtk::Popover,
-    list: gtk::ListBox,
+    /// A plain box: list rows have a hover of their own, on top of the button's.
+    list: gtk::Box,
     on_pick: Rc<dyn Fn(&str)>,
 }
 
@@ -35,7 +36,7 @@ impl RecentSearches {
         // Not autohide: that takes the keyboard, and the field has to keep it.
         let popover = gtk::Popover::builder().autohide(false).has_arrow(false).position(gtk::PositionType::Bottom).build();
         popover.set_parent(entry);
-        let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["menu"]).build();
+        let list = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).build();
         popover.set_child(Some(&list));
         Rc::new(Self { paths, popover, list, on_pick: Rc::new(on_pick) })
     }
