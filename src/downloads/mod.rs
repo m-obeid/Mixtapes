@@ -406,6 +406,10 @@ impl Downloads {
 
         self.record(&video_id, &details, &final_path, &run.format);
         self.save_lyrics(&video_id, &details, lead_artist);
+        // Measured now: the file may first play with no connection.
+        if !crate::net::loudness::known(&source) {
+            let _ = self.net.resolver().resolve(crate::model::VideoId(source.clone()), None).await;
+        }
         Ok("Downloaded".to_owned())
     }
 

@@ -31,6 +31,16 @@ pub fn init(paths: &Paths) {
     let _ = PATH.set(path);
 }
 
+/// Whether this song or the other upload of it was ever measured.
+pub fn known(video_id: &str) -> bool {
+    measured(video_id).is_some()
+}
+
+fn measured(video_id: &str) -> Option<f64> {
+    let known = KNOWN.lock().unwrap();
+    known.get(video_id).copied().or_else(|| crate::net::twins::other_ids(video_id).iter().find_map(|id| known.get(id).copied()))
+}
+
 pub fn set_enabled(on: bool) {
     ENABLED.store(on, Ordering::Relaxed);
 }
@@ -57,7 +67,7 @@ pub fn gain(video_id: &str) -> f64 {
     if !ENABLED.load(Ordering::Relaxed) {
         return 1.0;
     }
-    KNOWN.lock().unwrap().get(video_id).map_or(1.0, |db| gain_for(*db))
+    measured(video_id).map_or(1.0, gain_for)
 }
 
 fn gain_for(loudness_db: f64) -> f64 {

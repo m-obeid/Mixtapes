@@ -909,6 +909,7 @@ impl Player {
                 false => {
                     self.apply_gain(&track.video_id);
                     self.audio.send(AudioCommand::Load { uri: uri.to_string(), generation, auth: None });
+                    self.measure_download(track.video_id.clone(), generation);
                 }
             }
             return;
@@ -1033,6 +1034,23 @@ impl Player {
                     );
                     player.advance_after_failure();
                 }
+            }
+        });
+    }
+
+    /// A file downloaded before normalization came along has never been measured. The stream's details say how loud it is.
+    fn measure_download(&self, video_id: VideoId, generation: u64) {
+        if crate::net::loudness::known(video_id.as_str()) || crate::net::offline::sealed() || video_id.as_str().contains(':') {
+            return;
+        }
+        let resolver = self.net.resolver().clone();
+        let id = video_id.clone();
+        let handle = self.net.spawn(async move { resolver.resolve(id, None).await.is_ok() });
+        let weak = self.weak_self();
+        glib::spawn_future_local(async move {
+            let (Some(player), Ok(true)) = (weak.upgrade(), handle.await) else { return };
+            if player.current.get() == generation {
+                player.apply_gain(&video_id);
             }
         });
     }
