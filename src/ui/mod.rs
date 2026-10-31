@@ -24,6 +24,7 @@ pub mod playlist_ops;
 pub mod preferences;
 pub mod preferences_lyrics;
 pub mod queue_panel;
+pub mod recent_searches;
 pub mod release_notes;
 pub mod upload_queue;
 pub mod widgets;

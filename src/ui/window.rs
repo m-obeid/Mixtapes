@@ -28,6 +28,7 @@ use crate::ui::pages::all_moods::AllMoodsPage;
 use crate::ui::pages::category::CategoryPage;
 use crate::ui::pages::discography::DiscographyPage;
 use crate::ui::pages::history::HistoryPage;
+use crate::ui::recent_searches::RecentSearches;
 use crate::ui::pages::explore::ExplorePage;
 use crate::ui::pages::home::HomePage;
 use crate::ui::pages::library::LibraryPage;
@@ -40,6 +41,8 @@ const APP_ID: &str = "com.pocoguy.Muse";
 const APP_NAME: &str = "Mixtapes";
 const NETWORK_SETTLE: Duration = Duration::from_millis(1500);
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(600);
+/// How long a search has to stand before it counts as one to remember.
+const RECENT_SETTLE: Duration = Duration::from_secs(2);
 const SEARCH_MIN_CHARS: usize = 3;
 
 /// Which appearance switch moved, so the window repaints only what it governs.
@@ -61,6 +64,9 @@ pub struct MainWindow {
     back_btn: gtk::Button,
     search_bar: gtk::SearchBar,
     search_entry: gtk::SearchEntry,
+    recent_searches: RefCell<Option<Rc<RecentSearches>>>,
+    /// Waits for the listener to settle on a search before remembering it.
+    recent_timer: RefCell<Option<glib::SourceId>>,
     root_content_view: adw::ToolbarView,
     player_bar_revealer: gtk::Revealer,
     /// Where the revealer lives on desktop widths. It stays in the toolbar view
@@ -324,6 +330,8 @@ impl MainWindow {
             back_btn,
             search_bar,
             search_entry,
+            recent_searches: RefCell::new(None),
+            recent_timer: RefCell::new(None),
             root_content_view,
             player_bar_revealer,
             player_bar_slot,
@@ -1683,6 +1691,20 @@ impl MainWindow {
 
     fn wire_search(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
+        let recent = RecentSearches::new(self.ui.paths.clone(), &self.search_entry, move |query| {
+            if let Some(w) = weak.upgrade() {
+                w.search_entry.set_text(query);
+                w.search_entry.set_position(-1);
+            }
+        });
+        self.recent_searches.replace(Some(recent));
+        let weak = Rc::downgrade(self);
+        self.search_bar.connect_search_mode_enabled_notify(move |_| {
+            if let Some(w) = weak.upgrade() {
+                w.sync_recent_searches();
+            }
+        });
+        let weak = Rc::downgrade(self);
         self.search_bar
             .connect_search_mode_enabled_notify(move |bar| {
                 let Some(w) = weak.upgrade() else { return };
@@ -1716,6 +1738,7 @@ impl MainWindow {
                 id.remove();
             }
             let text = entry.text().to_string();
+            w.sync_recent_searches();
             // A pasted YouTube link opens what it points at instead of searching for it.
             if crate::net::links::is_youtube_url(&text) && w.open_link(&text) {
                 let entry = entry.clone();
@@ -1728,6 +1751,22 @@ impl MainWindow {
                 filter(&text);
                 w.applied_filter.replace((!text.trim().is_empty()).then_some(filter));
                 return;
+            }
+            if let Some(id) = w.recent_timer.borrow_mut().take() {
+                id.remove();
+            }
+            if text.trim().chars().count() >= SEARCH_MIN_CHARS {
+                let weak = Rc::downgrade(&w);
+                let query = text.clone();
+                let id = glib::timeout_add_local_once(RECENT_SETTLE, move || {
+                    if let Some(w) = weak.upgrade() {
+                        w.recent_timer.borrow_mut().take();
+                        if let Some(recent) = w.recent_searches.borrow().as_ref() {
+                            recent.remember(&query);
+                        }
+                    }
+                });
+                w.recent_timer.replace(Some(id));
             }
             let weak = Rc::downgrade(&w);
             let id = glib::timeout_add_local_once(SEARCH_DEBOUNCE, move || {
@@ -1748,6 +1787,13 @@ impl MainWindow {
                 }
             }
         });
+    }
+
+    /// The recent list shows on an open, empty search bar, where a search would go to YouTube.
+    fn sync_recent_searches(&self) {
+        let Some(recent) = self.recent_searches.borrow().clone() else { return };
+        let wanted = self.search_bar.is_search_mode() && self.search_entry.text().is_empty() && self.active_filter().is_none();
+        if wanted { recent.show() } else { recent.hide() }
     }
 
     /// Show everything again on the page the search bar filtered. True when there was one.

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 19:20+0100\n"
+"POT-Creation-Date: 2026-10-31 19:21+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -682,7 +682,7 @@ msgstr ""
 msgid "Show Mixtapes"
 msgstr ""
 
-#: src/tray.rs:196 src/ui/window.rs:2241 src/ui/window.rs:2822
+#: src/tray.rs:196 src/ui/window.rs:2287 src/ui/window.rs:2868
 msgid "Quit"
 msgstr ""
 
@@ -1075,12 +1075,12 @@ msgstr ""
 msgid "Continue Without an Account"
 msgstr ""
 
-#: src/ui/onboarding.rs:152 src/ui/preferences.rs:160 src/ui/window.rs:2411
+#: src/ui/onboarding.rs:152 src/ui/preferences.rs:160 src/ui/window.rs:2457
 msgid "Account"
 msgstr ""
 
 #: src/ui/onboarding.rs:163 src/ui/preferences.rs:195 src/ui/preferences.rs:227
-#: src/ui/window.rs:562
+#: src/ui/window.rs:570
 msgid "Signed in"
 msgstr ""
 
@@ -1420,8 +1420,8 @@ msgid ""
 "Songs you play without signing in appear here. They stay on this device."
 msgstr ""
 
-#: src/ui/pages/history.rs:73 src/ui/pages/history.rs:113 src/ui/window.rs:1322
-#: src/ui/window.rs:2426
+#: src/ui/pages/history.rs:73 src/ui/pages/history.rs:113 src/ui/window.rs:1330
+#: src/ui/window.rs:2472
 msgid "Listening History"
 msgstr ""
 
@@ -1462,7 +1462,7 @@ msgstr ""
 msgid "Last week"
 msgstr ""
 
-#: src/ui/pages/home.rs:90 src/ui/pages/home.rs:293 src/ui/window.rs:161
+#: src/ui/pages/home.rs:90 src/ui/pages/home.rs:293 src/ui/window.rs:167
 msgid "Home"
 msgstr ""
 
@@ -1484,7 +1484,7 @@ msgstr ""
 msgid "Try refreshing in a moment."
 msgstr ""
 
-#: src/ui/pages/library.rs:74 src/ui/pages/library.rs:105 src/ui/window.rs:167
+#: src/ui/pages/library.rs:74 src/ui/pages/library.rs:105 src/ui/window.rs:173
 msgid "Library"
 msgstr ""
 
@@ -1496,7 +1496,7 @@ msgstr ""
 msgid "All Uploaded Songs"
 msgstr ""
 
-#: src/ui/pages/library.rs:86 src/ui/upload_queue.rs:74 src/ui/window.rs:2425
+#: src/ui/pages/library.rs:86 src/ui/upload_queue.rs:74 src/ui/window.rs:2471
 msgid "Upload Songs"
 msgstr ""
 
@@ -1885,7 +1885,7 @@ msgstr ""
 msgid "Deleted {title}"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2484 src/ui/window.rs:1309
+#: src/ui/pages/playlist.rs:2484 src/ui/window.rs:1317
 msgid "History requires an internet connection"
 msgstr ""
 
@@ -1900,7 +1900,7 @@ msgid_plural "{n} songs available offline"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/pages/playlist.rs:2513 src/ui/window.rs:1128 src/ui/window.rs:2236
+#: src/ui/pages/playlist.rs:2513 src/ui/window.rs:1136 src/ui/window.rs:2282
 msgid "Downloaded Songs"
 msgstr ""
 
@@ -2129,7 +2129,7 @@ msgstr ""
 msgid "Song Title"
 msgstr ""
 
-#: src/ui/preferences.rs:33 src/ui/window.rs:2816
+#: src/ui/preferences.rs:33 src/ui/window.rs:2862
 msgid "General"
 msgstr ""
 
@@ -2149,11 +2149,11 @@ msgstr ""
 msgid "Sign Out"
 msgstr ""
 
-#: src/ui/preferences.rs:167 src/ui/window.rs:2435
+#: src/ui/preferences.rs:167 src/ui/window.rs:2481
 msgid "Sign In"
 msgstr ""
 
-#: src/ui/preferences.rs:188 src/ui/window.rs:2351 src/ui/window.rs:2464
+#: src/ui/preferences.rs:188 src/ui/window.rs:2397 src/ui/window.rs:2510
 msgid "Not signed in"
 msgstr ""
 
@@ -2188,7 +2188,7 @@ msgstr ""
 msgid "Now using {name}"
 msgstr ""
 
-#: src/ui/preferences.rs:346 src/ui/window.rs:2826
+#: src/ui/preferences.rs:346 src/ui/window.rs:2872
 msgid "Playback"
 msgstr ""
 
@@ -2868,6 +2868,10 @@ msgid_plural "{n} tracks · {h} h {m} min"
 msgstr[0] ""
 msgstr[1] ""
 
+#: src/ui/recent_searches.rs:83
+msgid "Clear Recent Searches"
+msgstr ""
+
 #: src/ui/release_notes.rs:103
 #, rust-format
 msgid "What's New in {version}?"
@@ -2890,7 +2894,7 @@ msgstr ""
 msgid "Thanks for reading, and have a great day!"
 msgstr ""
 
-#: src/ui/release_notes.rs:138 src/ui/window.rs:2239
+#: src/ui/release_notes.rs:138 src/ui/window.rs:2285
 msgid "What's New"
 msgstr ""
 
@@ -3100,139 +3104,139 @@ msgstr ""
 msgid "Nothing found"
 msgstr ""
 
-#: src/ui/window.rs:140 src/ui/window.rs:2832
+#: src/ui/window.rs:146 src/ui/window.rs:2878
 msgid "Search"
 msgstr ""
 
-#: src/ui/window.rs:145
+#: src/ui/window.rs:151
 msgid "Upload Progress"
 msgstr ""
 
-#: src/ui/window.rs:146
+#: src/ui/window.rs:152
 msgid "Download Progress"
 msgstr ""
 
-#: src/ui/window.rs:173
+#: src/ui/window.rs:179
 msgid "Explore"
 msgstr ""
 
-#: src/ui/window.rs:186
+#: src/ui/window.rs:192
 msgid "Search..."
 msgstr ""
 
-#: src/ui/window.rs:282
+#: src/ui/window.rs:288
 msgid "No album for this track"
 msgstr ""
 
-#: src/ui/window.rs:370
+#: src/ui/window.rs:378
 msgid "Uploads complete"
 msgstr ""
 
-#: src/ui/window.rs:632
+#: src/ui/window.rs:640
 msgid "Back online"
 msgstr ""
 
-#: src/ui/window.rs:651
+#: src/ui/window.rs:659
 msgid "Offline - downloaded songs still available"
 msgstr ""
 
-#: src/ui/window.rs:686
+#: src/ui/window.rs:694
 msgid "No internet - running in offline mode"
 msgstr ""
 
-#: src/ui/window.rs:712
+#: src/ui/window.rs:720
 msgid "Already downloaded"
 msgstr ""
 
-#: src/ui/window.rs:734
+#: src/ui/window.rs:742
 msgid "Downloads complete"
 msgstr ""
 
-#: src/ui/window.rs:1078
+#: src/ui/window.rs:1086
 msgid "Uploaded artists are not available yet"
 msgstr ""
 
-#: src/ui/window.rs:1153 src/ui/window.rs:1176
+#: src/ui/window.rs:1161 src/ui/window.rs:1184
 msgid "Uploaded Songs"
 msgstr ""
 
-#: src/ui/window.rs:1175 src/ui/window.rs:1212
+#: src/ui/window.rs:1183 src/ui/window.rs:1220
 #, rust-format
 msgid "{n} uploaded song"
 msgid_plural "{n} uploaded songs"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/window.rs:1267
+#: src/ui/window.rs:1275
 msgid "Couldn't open your channel"
 msgstr ""
 
-#: src/ui/window.rs:1292
+#: src/ui/window.rs:1300
 msgid "Mixtapes cannot open this link"
 msgstr ""
 
-#: src/ui/window.rs:1295
+#: src/ui/window.rs:1303
 msgid "Could not open the link"
 msgstr ""
 
-#: src/ui/window.rs:1916
+#: src/ui/window.rs:1962
 #, rust-format
 msgid "Couldn't play track: {reason}"
 msgstr ""
 
-#: src/ui/window.rs:1918
+#: src/ui/window.rs:1964
 #, rust-format
 msgid "Couldn't play '{title}': {reason}"
 msgstr ""
 
-#: src/ui/window.rs:2147 src/ui/window.rs:2820
+#: src/ui/window.rs:2193 src/ui/window.rs:2866
 msgid "Refresh"
 msgstr ""
 
-#: src/ui/window.rs:2237 src/ui/window.rs:2819
+#: src/ui/window.rs:2283 src/ui/window.rs:2865
 msgid "Keyboard Shortcuts"
 msgstr ""
 
-#: src/ui/window.rs:2238 src/ui/window.rs:2818
+#: src/ui/window.rs:2284 src/ui/window.rs:2864
 msgid "Preferences"
 msgstr ""
 
-#: src/ui/window.rs:2240
+#: src/ui/window.rs:2286
 msgid "About Mixtapes"
 msgstr ""
 
-#: src/ui/window.rs:2250
+#: src/ui/window.rs:2296
 msgid "Main Menu"
 msgstr ""
 
-#: src/ui/window.rs:2271
+#: src/ui/window.rs:2317
 msgid "Follow System Style"
 msgstr ""
 
-#: src/ui/window.rs:2272
+#: src/ui/window.rs:2318
 msgid "Light Style"
 msgstr ""
 
-#: src/ui/window.rs:2273
+#: src/ui/window.rs:2319
 msgid "Dark Style"
 msgstr ""
 
-#: src/ui/window.rs:2424
+#: src/ui/window.rs:2470
 msgid "Your Channel"
 msgstr ""
 
-#: src/ui/window.rs:2435
+#: src/ui/window.rs:2481
 msgid "Log Out"
 msgstr ""
 
-#: src/ui/window.rs:2821
+#: src/ui/window.rs:2867
 msgid "Go Back / Close Search"
 msgstr ""
 
-#: src/ui/window.rs:2828
+#: src/ui/window.rs:2874
 msgid "Play / Pause"
 msgstr ""
 
-#: src/ui/window.rs:2829
+#: src/ui/window.rs:2875
 msgid "Open / Close Player"
 msgstr ""
