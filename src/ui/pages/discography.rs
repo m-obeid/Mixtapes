@@ -188,6 +188,8 @@ impl DiscographyPage {
                 }
                 _ => Vec::new(),
             };
+            let mut items = items;
+            crate::net::artist::newest_first(&mut items);
             (items, has_more)
         });
         let weak = Rc::downgrade(self);
