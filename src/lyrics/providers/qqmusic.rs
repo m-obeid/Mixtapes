@@ -30,7 +30,7 @@ const SIGN_SCRAMBLE: [u8; 20] = [89, 39, 179, 150, 218, 82, 58, 252, 177, 52, 18
 /// `[start,duration]` opening a timed line, in milliseconds.
 static LINE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[(\d+),(\d+)\](.*)$").expect("static regex"));
 /// A word and the `(start,duration)` following it.
-static WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([^(]+)\((\d+),(\d+)\)").expect("static regex"));
+static WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(.*?)\((\d+),(\d+)\)").expect("static regex"));
 
 /// What QQ Music answers for a song with no words.
 const INSTRUMENTAL: &str = "\u{7eaf}\u{97f3}\u{4e50}";
@@ -121,7 +121,8 @@ pub fn parse_lyric(data: &Value) -> Option<LyricsResult> {
 /// is real, and an XML parser would flatten it to a space.
 fn lyric_content(document: &str) -> Option<String> {
     let start = document.find("LyricContent=\"")? + "LyricContent=\"".len();
-    let end = start + document[start..].find('"')?;
+    // The attribute ends at its closing tag: a quote sung in a line arrives unescaped.
+    let end = start + document[start..].rfind("\"/>")?;
     Some(document[start..end].replace("&quot;", "\"").replace("&apos;", "'").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
 }
 
@@ -131,14 +132,20 @@ pub fn parse_qrc(content: &str) -> Vec<LyricLine> {
     let lines = content.lines().filter_map(|raw| {
         let timed = LINE_RE.captures(raw.trim())?;
         let start = seconds(&timed[1]);
-        let parts: Vec<LyricPart> = WORD_RE
-            .captures_iter(&timed[3])
-            .map(|word| {
+        let mut parts: Vec<LyricPart> = Vec::new();
+        for word in WORD_RE.captures_iter(&timed[3]) {
+            let text = &word[1];
+            // Songs in Latin script time the gap too: a token of bare space, or a space leading the next word.
+            if text.starts_with(char::is_whitespace) {
+                if let Some(last) = parts.last_mut() {
+                    last.space_after = true;
+                }
+            }
+            if !text.trim().is_empty() {
                 let at = seconds(&word[2]);
-                LyricPart { start: Some(at), end: Some(at + seconds(&word[3])), text: word[1].trim().to_owned(), space_after: word[1].ends_with(char::is_whitespace) }
-            })
-            .filter(|part| !part.text.is_empty())
-            .collect();
+                parts.push(LyricPart { start: Some(at), end: Some(at + seconds(&word[3])), text: text.trim().to_owned(), space_after: text.ends_with(char::is_whitespace) });
+            }
+        }
         if parts.is_empty() {
             return None;
         }
@@ -289,6 +296,33 @@ mod tests {
         assert_eq!(lines[0].parts[1].start, Some(292.469));
         assert!(lines[0].parts[0].space_after);
         assert_eq!(lines[1].text, "少年");
+    }
+
+    #[test]
+    fn a_quote_in_a_line_does_not_end_the_lyrics() {
+        let document = "<Lyric_1 LyricContent=\"[1,2]a(1,2)\n[3,4]\"(3,0)b(3,4)\n[5,6]c(5,6)\n\"/>\n</LyricInfo>";
+        assert_eq!(parse_qrc(&lyric_content(document).unwrap()).len(), 3);
+    }
+
+    #[test]
+    fn a_timed_gap_is_a_space_between_words() {
+        let lines = parse_qrc("[1000,3000]Peeled(1000,200) (1200,0)the(1200,100) (1300,0)paint(1300,100)\n[5000,1000]Let (5000,100) it(5100,100)\n[7000,1000](Hey)(7000,500) you(7500,500)");
+        assert_eq!(lines[0].text, "Peeled the paint");
+        assert_eq!(lines[0].parts.len(), 3);
+        assert_eq!(lines[1].text, "Let it");
+        assert_eq!(lines[2].text, "(Hey) you");
+    }
+
+    /// Hits the network. `cargo test -- --ignored live_qq_english --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_qq_english() {
+        let found = fetch(&reqwest::Client::new(), request("Clover", "FLAVOR FOLEY", 256)).await.expect("the song");
+        for line in found.lines.iter().take(3) {
+            println!("{:?}", line.text);
+        }
+        assert!(found.lines[0].text.contains(' '));
+        assert!(found.lines.last().and_then(|l| l.start).unwrap() > 240.0, "the whole song");
     }
 
     #[test]
