@@ -135,7 +135,8 @@ pub struct PlayerEndpointResolver {
 
 impl PlayerEndpointResolver {
     pub fn new(paths: &Paths, fallback: Arc<dyn StreamResolver>) -> Self {
-        let http = crate::net::offline::client_builder().timeout(REQUEST_TIMEOUT).gzip(true).build().unwrap_or_default();
+        // HTTP/1: hyper resets the landing page's HTTP/2 response, and without its visitor id every song falls back to yt-dlp.
+        let http = crate::net::offline::client_builder().timeout(REQUEST_TIMEOUT).gzip(true).http1_only().build().unwrap_or_default();
         Self { http, fallback, cache: StreamCache::new(paths.stream_cache_dir.clone()), visitor: Mutex::new(None) }
     }
 
