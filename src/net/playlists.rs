@@ -117,8 +117,8 @@ pub async fn get_playlist(api: &dyn Browse, playlist_id: &str, limit: Option<usi
     details.sum_duration();
     if playlist_id == "LM" {
         // English here, since the page caches these. The page passes them to i18n::gettext where they are shown.
-        details.title = tr_noop!("Your Likes").to_owned();
-        details.description = tr_noop!("Your liked songs from YouTube Music.").to_owned();
+        details.title = LIKED_TITLE.to_owned();
+        details.description = LIKED_DESCRIPTION.to_owned();
     }
     Ok(details)
 }
@@ -624,6 +624,10 @@ fn already_held<'a>(held: impl Iterator<Item = &'a str>, wanted: &[String]) -> V
     let held: std::collections::HashSet<&str> = held.collect();
     wanted.iter().filter(|id| held.contains(id.as_str()) || held.contains(twins::preferred_id(id).as_str())).cloned().collect()
 }
+
+/// What Liked Music is called in the app, in English: pages pass these to `i18n::gettext`.
+pub const LIKED_TITLE: &str = tr_noop!("Your Likes");
+pub const LIKED_DESCRIPTION: &str = tr_noop!("Your liked songs from YouTube Music.");
 
 /// Port of MusicClient.add_playlist_items. Single adds swap a music video
 /// for its song version first, bulk adds do not.

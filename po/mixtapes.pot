@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 16:19+0100\n"
+"POT-Creation-Date: 2026-10-31 16:29+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -22,7 +22,7 @@ msgstr ""
 #. Translators: a lyrics search result whose catalog entry has no title.
 #. Translators: stands in for a missing artist name
 #: src/discord.rs:92 src/lyrics/providers/mod.rs:206
-#: src/ui/pages/playlist.rs:2963
+#: src/ui/pages/playlist.rs:2984
 msgid "Unknown"
 msgstr ""
 
@@ -238,7 +238,7 @@ msgid "On this device"
 msgstr ""
 
 #: src/local_library.rs:521 src/ui/pages/library.rs:788
-#: src/ui/pages/playlist.rs:2986
+#: src/ui/pages/playlist.rs:3007
 #, rust-format
 msgid "{n} song"
 msgid_plural "{n} songs"
@@ -594,11 +594,11 @@ msgstr ""
 msgid "Similar to"
 msgstr ""
 
-#: src/net/playlists.rs:120
+#: src/net/playlists.rs:629
 msgid "Your Likes"
 msgstr ""
 
-#: src/net/playlists.rs:121
+#: src/net/playlists.rs:630
 msgid "Your liked songs from YouTube Music."
 msgstr ""
 
@@ -1922,17 +1922,17 @@ msgstr ""
 msgid "Visibility"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2953
+#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2974
 #: src/ui/playlist_ops.rs:100
 msgid "Public"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2954
+#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2975
 #: src/ui/playlist_ops.rs:100
 msgid "Private"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2955
+#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2976
 #: src/ui/playlist_ops.rs:100
 msgid "Unlisted"
 msgstr ""
@@ -1962,29 +1962,29 @@ msgstr ""
 msgid "Cropped PNG: {basename}"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2979 src/ui/pages/playlist.rs:2994
+#: src/ui/pages/playlist.rs:3000 src/ui/pages/playlist.rs:3015
 #, rust-format
 msgid "{hours} hr {minutes} min"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2979
+#: src/ui/pages/playlist.rs:3000
 #, rust-format
 msgid "{minutes} min {seconds} sec"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2985
+#: src/ui/pages/playlist.rs:3006
 #, rust-format
 msgid "{n} episode"
 msgid_plural "{n} episodes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/pages/playlist.rs:2994
+#: src/ui/pages/playlist.rs:3015
 #, rust-format
 msgid "{minutes} min"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:3119
+#: src/ui/pages/playlist.rs:3140
 msgid "Failed to fetch playlist after retries"
 msgstr ""
 

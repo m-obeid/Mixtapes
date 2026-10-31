@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 16:19+0100\n"
+"POT-Creation-Date: 2026-10-31 16:29+0100\n"
 "PO-Revision-Date: 2026-10-07 13:09+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -21,7 +21,7 @@ msgstr ""
 #. Translators: a lyrics search result whose catalog entry has no title.
 #. Translators: stands in for a missing artist name
 #: src/discord.rs:92 src/lyrics/providers/mod.rs:206
-#: src/ui/pages/playlist.rs:2963
+#: src/ui/pages/playlist.rs:2984
 msgid "Unknown"
 msgstr "Unbekannt"
 
@@ -237,7 +237,7 @@ msgid "On this device"
 msgstr "Auf diesem Gerät"
 
 #: src/local_library.rs:521 src/ui/pages/library.rs:788
-#: src/ui/pages/playlist.rs:2986
+#: src/ui/pages/playlist.rs:3007
 #, rust-format
 msgid "{n} song"
 msgid_plural "{n} songs"
@@ -593,11 +593,11 @@ msgstr "Neues von Künstlern, die du magst"
 msgid "Similar to"
 msgstr "Ähnlich wie"
 
-#: src/net/playlists.rs:120
+#: src/net/playlists.rs:629
 msgid "Your Likes"
 msgstr "Deine Likes"
 
-#: src/net/playlists.rs:121
+#: src/net/playlists.rs:630
 msgid "Your liked songs from YouTube Music."
 msgstr "Deine Lieblingssongs von YouTube Music."
 
@@ -1951,17 +1951,17 @@ msgstr "Beschreibung"
 msgid "Visibility"
 msgstr "Sichtbarkeit"
 
-#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2953
+#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2974
 #: src/ui/playlist_ops.rs:100
 msgid "Public"
 msgstr "Öffentlich"
 
-#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2954
+#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2975
 #: src/ui/playlist_ops.rs:100
 msgid "Private"
 msgstr "Privat"
 
-#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2955
+#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2976
 #: src/ui/playlist_ops.rs:100
 msgid "Unlisted"
 msgstr "Nicht gelistet"
@@ -1991,29 +1991,29 @@ msgstr "Cover-Bild auswählen"
 msgid "Cropped PNG: {basename}"
 msgstr "Zugeschnittenes PNG: {basename}"
 
-#: src/ui/pages/playlist.rs:2979 src/ui/pages/playlist.rs:2994
+#: src/ui/pages/playlist.rs:3000 src/ui/pages/playlist.rs:3015
 #, rust-format
 msgid "{hours} hr {minutes} min"
 msgstr "{hours} Std. {minutes} Min."
 
-#: src/ui/pages/playlist.rs:2979
+#: src/ui/pages/playlist.rs:3000
 #, rust-format
 msgid "{minutes} min {seconds} sec"
 msgstr "{minutes} Min. {seconds} Sek."
 
-#: src/ui/pages/playlist.rs:2985
+#: src/ui/pages/playlist.rs:3006
 #, rust-format
 msgid "{n} episode"
 msgid_plural "{n} episodes"
 msgstr[0] "{n} Folge"
 msgstr[1] "{n} Folgen"
 
-#: src/ui/pages/playlist.rs:2994
+#: src/ui/pages/playlist.rs:3015
 #, rust-format
 msgid "{minutes} min"
 msgstr "{minutes} Min."
 
-#: src/ui/pages/playlist.rs:3119
+#: src/ui/pages/playlist.rs:3140
 msgid "Failed to fetch playlist after retries"
 msgstr "Die Playlist konnte auch nach mehreren Versuchen nicht geladen werden"
 
@@ -2054,6 +2054,7 @@ msgid "Already in Playlist"
 msgstr "Bereits in der Playlist"
 
 #: src/ui/playlist_ops.rs:48
+#, rust-format
 msgid "{n} song is already in this playlist."
 msgid_plural "{n} songs are already in this playlist."
 msgstr[0] "{n} Song ist bereits in dieser Playlist."

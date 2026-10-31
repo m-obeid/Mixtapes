@@ -849,7 +849,7 @@ impl PlaylistPage {
     /// Port of _apply_disk_cache_header: the full header from the cached copy.
     fn apply_disk_cache_header(self: &Rc<Self>, cached: &CachedPlaylist, initial: Option<&InitialData>) {
         let pid = self.playlist_id().unwrap_or_default();
-        let title = if !cached.title.is_empty() { shown_list_text(&pid, &cached.title) } else { initial.map(|i| i.title.clone()).unwrap_or_default() };
+        let title = if !cached.title.is_empty() { shown_list_title(&pid, &cached.title) } else { initial.map(|i| i.title.clone()).unwrap_or_default() };
         let author_markup = if !cached.meta.author_raw.is_empty() {
             artist_markup(&cached.meta.author_raw)
         } else {
@@ -884,7 +884,7 @@ impl PlaylistPage {
 
         self.stack.set_visible_child_name("content");
         self.title_text.replace(title.clone());
-        let description = shown_list_text(&pid, &cached.meta.description);
+        let description = shown_list_description(&pid, &cached.meta.description);
         self.description_text.replace(description.clone());
         self.name_label.set_label(&title);
         self.meta_label.set_markup(&meta1_parts.join(" • "));
@@ -1004,7 +1004,7 @@ impl PlaylistPage {
             }
             match cached.filter(|c| !c.tracks.is_empty()) {
                 Some(cached) => {
-                    let title = if !cached.title.is_empty() { shown_list_text(&id, &cached.title) } else { initial.as_ref().map(|i| i.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| tr!("Playlist")) };
+                    let title = if !cached.title.is_empty() { shown_list_title(&id, &cached.title) } else { initial.as_ref().map(|i| i.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| tr!("Playlist")) };
                     let tracks = cached.tracks;
                     page.title_text.replace(title.clone());
                     page.tracks.borrow_mut().set(tracks.clone());
@@ -2861,9 +2861,30 @@ impl PlaylistPage {
     }
 }
 
-/// Text of a cached list as shown. YouTube's own lists (LM, SS, SE) are kept in English.
-fn shown_list_text(playlist_id: &str, text: &str) -> String {
-    if playlist_id.len() == 2 { crate::i18n::gettext(text) } else { text.to_owned() }
+/// A cached list's title as shown. YouTube's own lists (LM, SS, SE) are kept in English.
+/// Liked Music has a name of its own here, so a copy cached in another language has no say.
+fn shown_list_title(playlist_id: &str, cached: &str) -> String {
+    match playlist_id {
+        "LM" => crate::i18n::gettext(playlists::LIKED_TITLE),
+        id if id.len() == 2 => crate::i18n::gettext(cached),
+        _ => cached.to_owned(),
+    }
+}
+
+fn shown_list_description(playlist_id: &str, cached: &str) -> String {
+    if playlist_id == "LM" { crate::i18n::gettext(playlists::LIKED_DESCRIPTION) } else { cached.to_owned() }
+}
+
+#[cfg(test)]
+mod shown_text_tests {
+    use super::*;
+
+    #[test]
+    fn a_likes_page_cached_in_another_language_shows_the_app_language() {
+        assert_eq!(shown_list_title("LM", "Deine Likes"), "Your Likes");
+        assert_eq!(shown_list_description("LM", "Deine Lieblingssongs"), "Your liked songs from YouTube Music.");
+        assert_eq!(shown_list_title("PLabc", "Road Trip"), "Road Trip");
+    }
 }
 
 impl TrackRowHost for PlaylistPage {
