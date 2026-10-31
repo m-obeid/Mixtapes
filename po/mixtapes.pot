@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 17:30+0100\n"
+"POT-Creation-Date: 2026-10-31 17:41+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1203,7 +1203,7 @@ msgstr ""
 msgid "Top Songs"
 msgstr ""
 
-#: src/ui/pages/artist.rs:550 src/ui/pages/explore.rs:611
+#: src/ui/pages/artist.rs:550 src/ui/pages/explore.rs:610
 #: src/ui/pages/library.rs:100 src/ui/pages/library.rs:108
 msgid "Albums"
 msgstr ""
@@ -1212,12 +1212,12 @@ msgstr ""
 msgid "Singles & EPs"
 msgstr ""
 
-#: src/ui/pages/artist.rs:556 src/ui/pages/explore.rs:616
+#: src/ui/pages/artist.rs:556 src/ui/pages/explore.rs:615
 msgid "Videos"
 msgstr ""
 
-#: src/ui/pages/artist.rs:559 src/ui/pages/explore.rs:605
-#: src/ui/pages/explore.rs:606 src/ui/pages/library.rs:99
+#: src/ui/pages/artist.rs:559 src/ui/pages/explore.rs:604
+#: src/ui/pages/explore.rs:605 src/ui/pages/library.rs:99
 msgid "Playlists"
 msgstr ""
 
@@ -1254,146 +1254,146 @@ msgstr ""
 msgid "View All"
 msgstr ""
 
-#: src/ui/pages/explore.rs:80
+#: src/ui/pages/explore.rs:79
 msgid "Searching..."
 msgstr ""
 
-#: src/ui/pages/explore.rs:188 src/ui/pages/explore.rs:708
+#: src/ui/pages/explore.rs:187 src/ui/pages/explore.rs:707
 #: src/ui/pages/home.rs:83
 msgid "Loading…"
 msgstr ""
 
-#: src/ui/pages/explore.rs:220 src/ui/pages/home.rs:192
+#: src/ui/pages/explore.rs:219 src/ui/pages/home.rs:192
 msgid "You're offline"
 msgstr ""
 
-#: src/ui/pages/explore.rs:220
+#: src/ui/pages/explore.rs:219
 msgid ""
 "Explore requires an internet connection.\n"
 "Your downloaded songs are still available."
 msgstr ""
 
-#: src/ui/pages/explore.rs:248
+#: src/ui/pages/explore.rs:247
 msgid "Couldn't load Explore"
 msgstr ""
 
-#: src/ui/pages/explore.rs:249 src/ui/pages/home.rs:216
+#: src/ui/pages/explore.rs:248 src/ui/pages/home.rs:216
 msgid "Retry"
 msgstr ""
 
-#: src/ui/pages/explore.rs:275
+#: src/ui/pages/explore.rs:274
 msgid "Podcasts"
 msgstr ""
 
-#: src/ui/pages/explore.rs:279
+#: src/ui/pages/explore.rs:278
 msgid "Moods & Moments"
 msgstr ""
 
-#: src/ui/pages/explore.rs:283 src/ui/pages/explore.rs:359
+#: src/ui/pages/explore.rs:282 src/ui/pages/explore.rs:358
 msgid "Genres"
 msgstr ""
 
-#: src/ui/pages/explore.rs:283
+#: src/ui/pages/explore.rs:282
 msgid "For You & Genres"
 msgstr ""
 
-#: src/ui/pages/explore.rs:285
+#: src/ui/pages/explore.rs:284
 msgid "Moods & Genres"
 msgstr ""
 
-#: src/ui/pages/explore.rs:288
+#: src/ui/pages/explore.rs:287
 msgid "New Albums & Singles"
 msgstr ""
 
-#: src/ui/pages/explore.rs:289
+#: src/ui/pages/explore.rs:288
 msgid "New Music Videos"
 msgstr ""
 
-#: src/ui/pages/explore.rs:290 src/ui/pages/explore.rs:377
+#: src/ui/pages/explore.rs:289 src/ui/pages/explore.rs:376
 msgid "Trending"
 msgstr ""
 
-#: src/ui/pages/explore.rs:369
+#: src/ui/pages/explore.rs:368
 msgid "Charts"
 msgstr ""
 
-#: src/ui/pages/explore.rs:378
+#: src/ui/pages/explore.rs:377
 msgid "Daily"
 msgstr ""
 
-#: src/ui/pages/explore.rs:379
+#: src/ui/pages/explore.rs:378
 msgid "Weekly"
 msgstr ""
 
-#: src/ui/pages/explore.rs:380
+#: src/ui/pages/explore.rs:379
 msgid "Genre Charts"
 msgstr ""
 
-#: src/ui/pages/explore.rs:381
+#: src/ui/pages/explore.rs:380
 msgid "Top Artists"
 msgstr ""
 
-#: src/ui/pages/explore.rs:535
+#: src/ui/pages/explore.rs:534
 #, rust-format
 msgid "Search failed: {err}"
 msgstr ""
 
-#: src/ui/pages/explore.rs:560
+#: src/ui/pages/explore.rs:559
 msgid "No results"
 msgstr ""
 
-#: src/ui/pages/explore.rs:560
+#: src/ui/pages/explore.rs:559
 #, rust-format
 msgid "Nothing found for \"{query}\""
 msgstr ""
 
-#: src/ui/pages/explore.rs:585
+#: src/ui/pages/explore.rs:584
 msgid "Main"
 msgstr ""
 
-#: src/ui/pages/explore.rs:588
+#: src/ui/pages/explore.rs:587
 msgid "Top Result"
 msgstr ""
 
-#: src/ui/pages/explore.rs:594
+#: src/ui/pages/explore.rs:593
 msgid "Relevant Results"
 msgstr ""
 
-#: src/ui/pages/explore.rs:597 src/ui/pages/explore.rs:598
+#: src/ui/pages/explore.rs:596 src/ui/pages/explore.rs:597
 msgid "Songs"
 msgstr ""
 
-#: src/ui/pages/explore.rs:601 src/ui/pages/explore.rs:602
+#: src/ui/pages/explore.rs:600 src/ui/pages/explore.rs:601
 #: src/ui/pages/library.rs:101 src/ui/pages/library.rs:109
 msgid "Artists"
 msgstr ""
 
-#: src/ui/pages/explore.rs:605
+#: src/ui/pages/explore.rs:604
 msgid "Community Playlists"
 msgstr ""
 
-#: src/ui/pages/explore.rs:609
+#: src/ui/pages/explore.rs:608
 msgid "Other results"
 msgstr ""
 
-#: src/ui/pages/explore.rs:609
+#: src/ui/pages/explore.rs:608
 msgid "Other"
 msgstr ""
 
-#: src/ui/pages/explore.rs:619
+#: src/ui/pages/explore.rs:618
 msgid "More results"
 msgstr ""
 
-#: src/ui/pages/explore.rs:702 src/ui/pages/explore.rs:729
+#: src/ui/pages/explore.rs:701 src/ui/pages/explore.rs:728
 msgid "Show More"
 msgstr ""
 
-#: src/ui/pages/explore.rs:721
+#: src/ui/pages/explore.rs:720
 msgid "Could not load more results"
 msgstr ""
 
 #. Translators: the name of a queue started from the search results, {query} is what was searched for.
-#: src/ui/pages/explore.rs:774
+#: src/ui/pages/explore.rs:773
 #, rust-format
 msgid "Search: {query}"
 msgstr ""

@@ -16,13 +16,12 @@ use crate::ui::context::{NavRequest, UiContext};
 use crate::ui::cover::CoverImage;
 use crate::ui::pages::{activate_item, attach_item_menu, clear_children, loading_box, section_header};
 use crate::ui::toast;
+use crate::ui::widgets::chip_lines::ChipLines;
 use crate::ui::widgets::media_card::{CardOptions, MediaCard};
 use crate::ui::widgets::scroll_box::HorizontalScrollBox;
 use crate::ui::widgets::song_list::{SONG_THUMB_SIZE, search_subtitle, song_row_with_subtitle};
 use crate::ui::widgets::song_row::SongRow;
 
-/// How many pills a category row shows before it offers View All.
-const PILL_LIMIT: usize = 12;
 /// Gap between chart cards, which search.py sets on the strip itself.
 const CHART_STRIP_SPACING: i32 = 12;
 /// Gap between sections, tightened for the phone layout by set_compact_mode.
@@ -294,7 +293,7 @@ impl ExplorePage {
         self.set_compact(self.ctx.compact.get());
     }
 
-    /// Pills wrapped over as many lines as they need. Past the limit its heading offers View All,
+    /// Pills over a few lines, however many fit the width. The heading's View All has them all,
     /// which opens the full list on its own page.
     /// `lead` comes first in full, parted from the rest by a line.
     fn add_pill_section(self: &Rc<Self>, title: &str, lead: &[Category], categories: &[Category]) {
@@ -302,14 +301,14 @@ impl ExplorePage {
             return;
         }
         let section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
-        let on_view_all = (categories.len() > PILL_LIMIT).then(|| {
+        let on_view_all = {
             let ctx = self.ctx.clone();
-            let (title, items) = (title.to_owned(), categories.to_vec());
+            let (title, items) = (title.to_owned(), lead.iter().chain(categories).cloned().collect::<Vec<_>>());
             Box::new(move || ctx.nav.go(NavRequest::AllMoods { title: title.clone(), items: items.clone() })) as Box<dyn Fn()>
-        });
-        section.append(&section_header(title, on_view_all));
-        let chips = adw::WrapBox::builder().child_spacing(8).line_spacing(8).build();
-        for (index, category) in lead.iter().chain(categories.iter().take(PILL_LIMIT)).enumerate() {
+        };
+        section.append(&section_header(title, Some(on_view_all)));
+        let chips = ChipLines::new();
+        for (index, category) in lead.iter().chain(categories).enumerate() {
             if index == lead.len() && index > 0 {
                 chips.append(&gtk::Separator::builder().orientation(gtk::Orientation::Vertical).margin_top(6).margin_bottom(6).margin_start(4).margin_end(4).build());
             }

@@ -3,6 +3,7 @@
 pub mod add_to_playlist;
 pub mod allocate_bin;
 pub mod card_grid;
+pub mod chip_lines;
 pub mod cover_picture;
 pub mod drag_scroll;
 pub mod fade_bottom_bin;
