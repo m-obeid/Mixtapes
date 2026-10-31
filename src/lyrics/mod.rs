@@ -14,10 +14,12 @@ pub mod chain;
 pub mod lrc;
 pub mod matching;
 pub mod model;
+pub mod own;
 pub mod prefs;
 pub mod providers;
 pub mod romanize;
 pub mod script;
+pub mod timing;
 pub mod ttml;
 
 use std::sync::Arc;
@@ -28,6 +30,8 @@ use crate::net::ytmusic::YtMusic;
 use crate::paths::Paths;
 use cache::LyricsCache;
 use chain::Chain;
+use own::OwnLyrics;
+use timing::Offsets;
 pub use chain::TrackQuery;
 // The result types the view draws from. Unused until it is ported.
 #[allow(unused_imports)]
@@ -43,6 +47,8 @@ pub const DEFAULT_MATCH_LIMIT: usize = 8;
 pub const DEFAULT_MANUAL_SEARCH_LIMIT: usize = 4;
 
 struct Inner {
+    own: OwnLyrics,
+    offsets: Offsets,
     cache: LyricsCache,
     prefs: Arc<LyricsPrefs>,
     chain: Chain,
@@ -67,7 +73,23 @@ impl Lyrics {
     fn with_source(paths: &Paths, source: Arc<dyn Source>, cooldowns: Arc<Cooldowns>) -> Self {
         let prefs = Arc::new(LyricsPrefs::new(paths));
         let chain = Chain::new(source, prefs.clone(), cooldowns);
-        Self { inner: Arc::new(Inner { cache: LyricsCache::new(paths), prefs, chain }) }
+        Self { inner: Arc::new(Inner { cache: LyricsCache::new(paths), own: OwnLyrics::new(paths), offsets: Offsets::new(paths), prefs, chain }) }
+    }
+
+    /// Lyrics the listener wrote.
+    pub fn own(&self) -> &OwnLyrics {
+        &self.inner.own
+    }
+
+    /// Timing the listener corrected.
+    pub fn offsets(&self) -> &Offsets {
+        &self.inner.offsets
+    }
+
+    /// Written lyrics win, unless the listener pinned another source for this song.
+    fn own_result(&self, video_id: &str) -> Option<LyricsResult> {
+        let pinned = self.inner.cache.get_preferred(video_id);
+        pinned.is_none_or(|source| source == own::SOURCE).then(|| self.inner.own.get(video_id)).flatten()
     }
 
     /// The preferences, for the settings page and the view.
@@ -92,6 +114,9 @@ impl Lyrics {
         if track.video_id.is_empty() {
             return None;
         }
+        if let Some(own) = self.own_result(&track.video_id) {
+            return Some(own);
+        }
         let order = self.inner.prefs.provider_order();
         if let Some(cached) = self.inner.cache.get_result(&track.video_id, Some(&order), self.inner.chain.accept_rank()) {
             return Some(cached);
@@ -105,9 +130,18 @@ impl Lyrics {
     ///
     /// Falls back to the richest cached result when none of the queued providers is cached.
     pub async fn cached_lyrics(&self, track: &TrackQuery) -> Option<LyricsResult> {
+        if let Some(own) = self.own_result(&track.video_id) {
+            return Some(own);
+        }
         let order = self.inner.prefs.provider_order();
         let queued = self.inner.cache.get_result(&track.video_id, Some(&order), self.inner.chain.accept_rank());
         queued.or_else(|| self.inner.cache.get_alternatives(&track.video_id).into_iter().map(|(_, result)| result).find(|r| !r.lines.is_empty()))
+    }
+
+    /// What the picker lists for this video: written lyrics first, then what is cached.
+    pub fn listed_sources(&self, video_id: &str) -> Vec<(String, LyricsResult)> {
+        let own = self.inner.own.get(video_id).map(|result| (own::SOURCE.to_owned(), result));
+        own.into_iter().chain(self.inner.cache.get_alternatives(video_id)).collect()
     }
 
     /// Every provider already cached for this video, richest first. Use `fetch_alternatives` to fill in the ones that are not.
@@ -221,6 +255,17 @@ mod tests {
     }
 
     fn assert_send_sync<T: Send + Sync + Clone + 'static>() {}
+
+    #[tokio::test]
+    async fn written_lyrics_win_until_another_source_is_pinned() {
+        let (_dir, source, lyrics) = service();
+        source.answer(Provider::Lrclib, "Song", synced("LRCLIB", "la"));
+        lyrics.own().save("vid", "[00:01.00]mine").unwrap();
+        assert_eq!(lyrics.get_lyrics(&track()).await.unwrap().source, own::SOURCE);
+        lyrics.set_preferred_source("vid", Some("LRCLIB")).await;
+        assert_eq!(lyrics.get_lyrics(&track()).await.unwrap().source, "LRCLIB");
+        assert_eq!(lyrics.listed_sources("vid")[0].0, own::SOURCE);
+    }
 
     #[test]
     fn the_service_crosses_threads() {

@@ -65,6 +65,7 @@
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/view-sort-ascending-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/view-sort-descending-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/window-close-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">hicolor/scalable/actions/document-edit-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/apps/com.pocoguy.Muse.svg</file>
     <file preprocess="xml-stripblanks">hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg</file>
   </gresource>

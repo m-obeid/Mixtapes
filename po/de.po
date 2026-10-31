@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 18:24+0100\n"
+"POT-Creation-Date: 2026-10-31 18:26+0100\n"
 "PO-Revision-Date: 2026-10-07 13:09+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -243,6 +243,10 @@ msgid "{n} song"
 msgid_plural "{n} songs"
 msgstr[0] "{n} Song"
 msgstr[1] "{n} Songs"
+
+#: src/lyrics/own.rs:11
+msgid "My Lyrics"
+msgstr "Meine Songtexte"
 
 #. Translators: the kind word of a live stream, beside "Song" and "Video".
 #: src/model.rs:282 src/ui/widgets/media_card.rs:97
@@ -829,7 +833,7 @@ msgstr ""
 #: src/ui/pages/library.rs:1043 src/ui/pages/playlist.rs:2407
 #: src/ui/pages/playlist.rs:2583 src/ui/playlist_ops.rs:50
 #: src/ui/preferences.rs:566 src/ui/preferences.rs:928
-#: src/ui/preferences.rs:986
+#: src/ui/preferences.rs:986 src/ui/widgets/lyrics_view.rs:767
 msgid "Cancel"
 msgstr "Abbrechen"
 
@@ -1439,7 +1443,8 @@ msgstr "Verlauf wird geladen..."
 msgid "History requires an internet connection."
 msgstr "Der Verlauf benötigt eine Internetverbindung."
 
-#: src/ui/pages/history.rs:225
+#. Translators: moves the lyrics earlier against the song.
+#: src/ui/pages/history.rs:225 src/ui/widgets/lyrics_view.rs:333
 msgid "Earlier"
 msgstr "Früher"
 
@@ -1931,7 +1936,7 @@ msgstr "Heruntergeladene Songs"
 msgid "Copy Cover URL"
 msgstr "Cover-URL kopieren"
 
-#: src/ui/pages/playlist.rs:2645
+#: src/ui/pages/playlist.rs:2645 src/ui/widgets/lyrics_view.rs:768
 msgid "Save"
 msgstr "Speichern"
 
@@ -2330,7 +2335,8 @@ msgstr "Mixtapes neu starten?"
 msgid "The language changes after a restart. Playback stops."
 msgstr "Die Sprache ändert sich nach einem Neustart. Die Wiedergabe stoppt."
 
-#: src/ui/preferences.rs:482
+#. Translators: moves the lyrics later against the song.
+#: src/ui/preferences.rs:482 src/ui/widgets/lyrics_view.rs:335
 msgid "Later"
 msgstr "Später"
 
@@ -2741,19 +2747,19 @@ msgstr "Streng"
 
 #. Translators: the choices for the second lyric line. "Background" is the background vocals of a song.
 #: src/ui/preferences_lyrics.rs:33 src/ui/preferences_lyrics.rs:34
-#: src/ui/widgets/lyrics_view.rs:36
+#: src/ui/widgets/lyrics_view.rs:38
 msgid "Off"
 msgstr "Aus"
 
-#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:36
+#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:38
 msgid "Auto"
 msgstr "Auto"
 
-#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:36
+#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:38
 msgid "Romanization"
 msgstr "Romanisierung"
 
-#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:36
+#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:38
 msgid "Translation"
 msgstr "Übersetzung"
 
@@ -3018,127 +3024,172 @@ msgstr "Keine Playlists"
 msgid "New Playlist…"
 msgstr "Neue Playlist…"
 
-#: src/ui/widgets/lyrics_view.rs:36
+#: src/ui/widgets/lyrics_view.rs:38
 msgid "Background vocals"
 msgstr "Hintergrundgesang"
 
-#: src/ui/widgets/lyrics_view.rs:189
+#: src/ui/widgets/lyrics_view.rs:197
 msgid "Word by word"
 msgstr "Wort für Wort"
 
-#: src/ui/widgets/lyrics_view.rs:190
+#: src/ui/widgets/lyrics_view.rs:198
 msgid "word by word"
 msgstr "Wort für Wort"
 
-#: src/ui/widgets/lyrics_view.rs:191
+#: src/ui/widgets/lyrics_view.rs:199
 msgid "Line by line"
 msgstr "Zeile für Zeile"
 
-#: src/ui/widgets/lyrics_view.rs:192
+#: src/ui/widgets/lyrics_view.rs:200
 msgid "line by line"
 msgstr "Zeile für Zeile"
 
-#: src/ui/widgets/lyrics_view.rs:193
+#: src/ui/widgets/lyrics_view.rs:201
 msgid "No timing"
 msgstr "Ohne Timing"
 
-#: src/ui/widgets/lyrics_view.rs:194
+#: src/ui/widgets/lyrics_view.rs:202
 msgid "no timing"
 msgstr "ohne Timing"
 
-#: src/ui/widgets/lyrics_view.rs:216
+#: src/ui/widgets/lyrics_view.rs:224
 msgid "Back to sources"
 msgstr "Zurück zu den Quellen"
 
-#: src/ui/widgets/lyrics_view.rs:255 src/ui/widgets/lyrics_view.rs:669
-#: src/ui/widgets/lyrics_view.rs:670
+#: src/ui/widgets/lyrics_view.rs:263 src/ui/widgets/lyrics_view.rs:706
+#: src/ui/widgets/lyrics_view.rs:707
 msgid "No lyrics"
 msgstr "Kein Songtext"
 
-#: src/ui/widgets/lyrics_view.rs:255
+#: src/ui/widgets/lyrics_view.rs:263
 msgid "No lyrics found for this track."
 msgstr "Für diesen Titel wurde kein Songtext gefunden."
 
-#: src/ui/widgets/lyrics_view.rs:280
+#: src/ui/widgets/lyrics_view.rs:288
 msgid "Choose lyrics source"
 msgstr "Songtextquelle wählen"
 
-#: src/ui/widgets/lyrics_view.rs:291
+#: src/ui/widgets/lyrics_view.rs:299
 msgid "Lyrics source"
 msgstr "Songtextquelle"
 
-#: src/ui/widgets/lyrics_view.rs:301 src/ui/widgets/lyrics_view.rs:1322
-#: src/ui/widgets/lyrics_view.rs:1365
+#: src/ui/widgets/lyrics_view.rs:309 src/ui/widgets/lyrics_view.rs:1453
+#: src/ui/widgets/lyrics_view.rs:1496
 msgid "Searching…"
 msgstr "Suche läuft…"
 
 #. Translators: heading over the choice of what the smaller line under each lyric shows.
-#: src/ui/widgets/lyrics_view.rs:308
+#: src/ui/widgets/lyrics_view.rs:316
 msgid "Second line"
 msgstr "Zweite Zeile"
 
-#: src/ui/widgets/lyrics_view.rs:321
+#. Translators: heading over the buttons that move lyrics earlier or later against the song.
+#: src/ui/widgets/lyrics_view.rs:328
+msgid "Timing"
+msgstr "Timing"
+
+#: src/ui/widgets/lyrics_view.rs:333
+msgid "Lyrics are late"
+msgstr "Text kommt zu spät"
+
+#: src/ui/widgets/lyrics_view.rs:335
+msgid "Lyrics are early"
+msgstr "Text kommt zu früh"
+
+#: src/ui/widgets/lyrics_view.rs:337
+msgid "Reset timing"
+msgstr "Timing zurücksetzen"
+
+#: src/ui/widgets/lyrics_view.rs:350
 msgid "Song title"
 msgstr "Songtitel"
 
-#: src/ui/widgets/lyrics_view.rs:323
+#: src/ui/widgets/lyrics_view.rs:352
 msgid "Search by name"
 msgstr "Nach Namen suchen"
 
-#: src/ui/widgets/lyrics_view.rs:549 src/ui/widgets/lyrics_view.rs:639
+#: src/ui/widgets/lyrics_view.rs:585 src/ui/widgets/lyrics_view.rs:676
 msgid "Not playing"
 msgstr "Keine Wiedergabe"
 
-#: src/ui/widgets/lyrics_view.rs:639
+#: src/ui/widgets/lyrics_view.rs:676
 msgid "Play a song to see lyrics."
 msgstr "Spiele einen Song ab, um den Songtext zu sehen."
 
-#: src/ui/widgets/lyrics_view.rs:669
+#: src/ui/widgets/lyrics_view.rs:706
 msgid "No lyrics are saved for this song. They load once you are back online."
 msgstr ""
 "Für diesen Song ist kein Songtext gespeichert. Er wird geladen, sobald du "
 "wieder online bist."
 
-#: src/ui/widgets/lyrics_view.rs:670
+#: src/ui/widgets/lyrics_view.rs:707
 msgid "Nothing matched automatically. Try another source, or search by name."
 msgstr ""
 "Kein automatischer Treffer. Probiere eine andere Quelle oder suche nach dem "
 "Namen."
 
-#: src/ui/widgets/lyrics_view.rs:689
+#: src/ui/widgets/lyrics_view.rs:728
 #, rust-format
 msgid "Lyrics source: {source}"
 msgstr "Songtextquelle: {source}"
 
-#: src/ui/widgets/lyrics_view.rs:1173
+#: src/ui/widgets/lyrics_view.rs:745
+msgid "In time"
+msgstr "Im Takt"
+
+#: src/ui/widgets/lyrics_view.rs:764
+msgid "Edit Lyrics"
+msgstr "Songtext bearbeiten"
+
+#: src/ui/widgets/lyrics_view.rs:764
+msgid "Write Lyrics"
+msgstr "Songtext schreiben"
+
+#: src/ui/widgets/lyrics_view.rs:777
+msgid "Plain text works. For timing, start a line with [minutes:seconds], like [01:23.45]."
+msgstr "Einfacher Text reicht. Für Timing beginne eine Zeile mit [Minuten:Sekunden], etwa [01:23.45]."
+
+#: src/ui/widgets/lyrics_view.rs:780
+msgid "Delete My Lyrics"
+msgstr "Meinen Songtext löschen"
+
+#: src/ui/widgets/lyrics_view.rs:1292
 msgid "Search by name…"
 msgstr "Nach Namen suchen…"
 
-#: src/ui/widgets/lyrics_view.rs:1180
+#: src/ui/widgets/lyrics_view.rs:1299
+msgid "Edit my lyrics…"
+msgstr "Meinen Songtext bearbeiten…"
+
+#: src/ui/widgets/lyrics_view.rs:1299
+msgid "Write lyrics…"
+msgstr "Songtext schreiben…"
+
+#: src/ui/widgets/lyrics_view.rs:1306
 msgid "Use automatic choice"
 msgstr "Automatische Auswahl verwenden"
 
-#: src/ui/widgets/lyrics_view.rs:1181
+#: src/ui/widgets/lyrics_view.rs:1307
 #, rust-format
 msgid "Pinned to {preferred}"
 msgstr "An {preferred} angeheftet"
 
 #. Translators: marks the lyrics source the listener chose to keep for this song.
-#: src/ui/widgets/lyrics_view.rs:1196
+#: src/ui/widgets/lyrics_view.rs:1322
 msgid "Pinned"
 msgstr "Angeheftet"
 
-#: src/ui/widgets/lyrics_view.rs:1202
+#: src/ui/widgets/lyrics_view.rs:1328
 #, rust-format
 msgid "Other matches from {source}"
 msgstr "Weitere Treffer von {source}"
 
-#: src/ui/widgets/lyrics_view.rs:1340
+#: src/ui/widgets/lyrics_view.rs:1471
 #, rust-format
 msgid "No other matches from {source}"
 msgstr "Keine weiteren Treffer von {source}"
 
-#: src/ui/widgets/lyrics_view.rs:1380
+#: src/ui/widgets/lyrics_view.rs:1511
 msgid "Nothing found"
 msgstr "Nichts gefunden"
 
