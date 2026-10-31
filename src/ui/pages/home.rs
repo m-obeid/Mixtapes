@@ -363,7 +363,12 @@ impl HomePage {
             None => header.append(&title_label),
         }
         if title == crate::net::local_feed::LISTEN_AGAIN_TITLE {
-            let history = gtk::Button::builder().label(tr!("History")).action_name("win.open-history").css_classes(["flat", "dim-label", "caption"]).valign(gtk::Align::Center).build();
+            let content = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).build();
+            content.append(&gtk::Label::new(Some(&tr!("History"))));
+            content.append(&gtk::Image::from_icon_name("go-next-symbolic"));
+            // The look of View All, the link every other heading has.
+            let history = gtk::Button::builder().child(&content).action_name("win.open-history").css_classes(["flat", "dim-label", "caption", "view-all"]).valign(gtk::Align::Center).build();
+            history.set_cursor_from_name(Some("pointer"));
             let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).build();
             header.set_hexpand(true);
             row.append(&header);
