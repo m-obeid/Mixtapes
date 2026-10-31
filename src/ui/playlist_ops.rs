@@ -36,7 +36,7 @@ pub fn add_tracks(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: String
     let handle = ctx.net.spawn(async move { crate::net::playlists::tracks_already_in(&api, &list, &asked).await });
     let (ctx, anchor) = (ctx.clone(), anchor.clone());
     glib::spawn_future_local(async move {
-        // A list that will not load is no reason to refuse the song. YouTube still skips a duplicate.
+        // A list that will not load is no reason to refuse the song. YouTube still refuses a duplicate.
         let held = handle.await.ok().and_then(Result::ok).unwrap_or_default();
         if held.is_empty() {
             send_tracks(&ctx, &anchor, playlist_id, ids, false);

@@ -651,20 +651,26 @@ pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: 
     if ids.is_empty() {
         return Ok(());
     }
-    // Port of the crate's add_playlist_items body. DEDUPE_OPTION_SKIP is what
-    // "allow_duplicates: false" means to YouTube.
-    let actions: Vec<Value> = ids
-        .iter()
+    let response = api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": add_actions(&ids, allow_duplicates) })).await?;
+    // A refused add still answers 200: a song already there comes back as STATUS_FAILED.
+    match response.get("status").and_then(Value::as_str) {
+        Some(status) if !status.contains("SUCCEEDED") => Err(message(status)),
+        _ => Ok(()),
+    }
+}
+
+/// DEDUPE_OPTION_SKIP skips YouTube's duplicate check, so the song goes in a second
+/// time. Without it YouTube refuses a song the list holds. ytmusicapi for Python has this right, the Rust crate has it backwards.
+fn add_actions(ids: &[String], allow_duplicates: bool) -> Vec<Value> {
+    ids.iter()
         .map(|vid| {
             let mut action = json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": vid });
-            if !allow_duplicates {
+            if allow_duplicates {
                 action["dedupeOption"] = json!("DEDUPE_OPTION_SKIP");
             }
             action
         })
-        .collect();
-    api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
-    Ok(())
+        .collect()
 }
 
 /// Port of create_playlist: a new playlist, returning its id.
@@ -1128,6 +1134,13 @@ mod tests {
         assert_eq!(rows[0].title, "Song");
         assert_eq!(twins::preferred_id("twin-video"), "twin-song");
         assert_eq!(find_audio_version(&Silent, "twin-video").await.unwrap().unwrap().video_id.as_str(), "twin-song");
+    }
+
+    #[test]
+    fn only_an_add_anyway_skips_the_duplicate_check() {
+        let ids = ["a".to_owned()];
+        assert_eq!(add_actions(&ids, true)[0]["dedupeOption"], "DEDUPE_OPTION_SKIP");
+        assert!(add_actions(&ids, false)[0].get("dedupeOption").is_none());
     }
 
     #[test]
