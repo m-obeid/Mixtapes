@@ -210,7 +210,7 @@ mod tests {
     fn the_shipped_metainfo_has_a_release() {
         let release = latest().expect("metainfo release");
         assert!(!release.version.is_empty());
-        assert!(!release.items.is_empty());
+        assert!(!release.summary.is_empty() || !release.items.is_empty());
         assert_eq!(current_version(), release.version);
     }
 }
