@@ -7,12 +7,8 @@ use std::time::Duration;
 
 use gtk::{glib, prelude::*};
 
-use crate::ui::widgets::fade_edges::FadeEdges;
-
 pub struct HorizontalScrollBox {
     overlay: gtk::Overlay,
-    fade: FadeEdges,
-    edge_fade: Cell<bool>,
     scrolled: gtk::ScrolledWindow,
     left_btn: gtk::Button,
     right_btn: gtk::Button,
@@ -27,16 +23,13 @@ impl HorizontalScrollBox {
         // External: it scrolls by swipe, wheel and the arrows, with no bar drawn over the row.
         // Cards sliding under a resting pointer would each run a hover transition.
         crate::ui::suppress_hover_while_scrolling(&scrolled);
-        let fade = FadeEdges::new();
-        scrolled.set_hexpand(true);
-        fade.append(&scrolled);
-        let overlay = gtk::Overlay::builder().child(&fade).build();
+        let overlay = gtk::Overlay::builder().child(&scrolled).build();
         let left_btn = gtk::Button::builder().icon_name("go-previous-symbolic").css_classes(["circular", "osd"]).valign(gtk::Align::Center).halign(gtk::Align::Start).margin_start(8).visible(false).build();
         let right_btn = gtk::Button::builder().icon_name("go-next-symbolic").css_classes(["circular", "osd"]).valign(gtk::Align::Center).halign(gtk::Align::End).margin_end(8).visible(false).build();
         overlay.add_overlay(&left_btn);
         overlay.add_overlay(&right_btn);
 
-        let this = Rc::new(Self { overlay, fade, edge_fade: Cell::new(false), scrolled, left_btn, right_btn, hovered: Cell::new(false), animating: Cell::new(false), target: Cell::new(0.0) });
+        let this = Rc::new(Self { overlay, scrolled, left_btn, right_btn, hovered: Cell::new(false), animating: Cell::new(false), target: Cell::new(0.0) });
 
         let adj = this.scrolled.hadjustment();
         for signal in ["value-changed", "changed"] {
@@ -82,12 +75,6 @@ impl HorizontalScrollBox {
         this
     }
 
-    /// Fade the row out where more of it lies past the edge. It repaints the row through a mask, so not for rows of covers.
-    pub fn set_edge_fade(&self, on: bool) {
-        self.edge_fade.set(on);
-        self.update_buttons();
-    }
-
     pub fn widget(&self) -> &gtk::Overlay {
         &self.overlay
     }
@@ -127,10 +114,6 @@ impl HorizontalScrollBox {
     }
 
     fn update_buttons(&self) {
-        if self.edge_fade.get() {
-            let adj = self.scrolled.hadjustment();
-            self.fade.set_fades(adj.value() > adj.lower() + 1.0, adj.value() + adj.page_size() < adj.upper() - 1.0);
-        }
         if !self.hovered.get() {
             self.left_btn.set_visible(false);
             self.right_btn.set_visible(false);

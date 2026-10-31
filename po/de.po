@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 16:29+0100\n"
+"POT-Creation-Date: 2026-10-31 17:30+0100\n"
 "PO-Revision-Date: 2026-10-07 13:09+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -881,32 +881,32 @@ msgstr "Keine Metadaten gefunden"
 msgid "Failed to refresh metadata"
 msgstr "Metadaten konnten nicht aktualisiert werden"
 
-#: src/ui/cover_view.rs:66 src/ui/expanded_player.rs:65
+#: src/ui/cover_view.rs:69 src/ui/expanded_player.rs:65
 #: src/ui/expanded_player.rs:229
 msgid "Player"
 msgstr "Player"
 
-#: src/ui/cover_view.rs:73 src/ui/expanded_player.rs:65
+#: src/ui/cover_view.rs:76 src/ui/expanded_player.rs:65
 #: src/ui/expanded_player.rs:246 src/ui/preferences_lyrics.rs:116
 msgid "Lyrics"
 msgstr "Songtext"
 
-#: src/ui/cover_view.rs:110 src/ui/cover_view.rs:509
+#: src/ui/cover_view.rs:113 src/ui/cover_view.rs:531
 #: src/ui/expanded_player.rs:138 src/ui/expanded_player.rs:479
 #: src/ui/player_bar.rs:124 src/ui/player_bar.rs:448
 msgid "Not Playing"
 msgstr "Keine Wiedergabe"
 
-#: src/ui/cover_view.rs:240 src/ui/player_bar.rs:341
+#: src/ui/cover_view.rs:245 src/ui/player_bar.rs:341
 msgid "Collapse player"
 msgstr "Player einklappen"
 
-#: src/ui/cover_view.rs:247 src/ui/expanded_player.rs:65
+#: src/ui/cover_view.rs:252 src/ui/expanded_player.rs:65
 #: src/ui/expanded_player.rs:240
 msgid "Queue"
 msgstr "Wiedergabeliste"
 
-#: src/ui/cover_view.rs:586 src/ui/expanded_player.rs:552
+#: src/ui/cover_view.rs:608 src/ui/expanded_player.rs:552
 #: src/ui/preferences.rs:527
 msgid "Stream Info (Debug)"
 msgstr "Stream-Info (Debug)"
@@ -1303,30 +1303,30 @@ msgid "Podcasts"
 msgstr "Podcasts"
 
 #: src/ui/pages/explore.rs:279
-msgid "For You"
-msgstr "Für dich"
-
-#: src/ui/pages/explore.rs:280
 msgid "Moods & Moments"
 msgstr "Stimmungen & Momente"
 
-#: src/ui/pages/explore.rs:281 src/ui/pages/explore.rs:359
+#: src/ui/pages/explore.rs:283 src/ui/pages/explore.rs:359
 msgid "Genres"
 msgstr "Genres"
 
 #: src/ui/pages/explore.rs:283
+msgid "For You & Genres"
+msgstr "Für dich & Genres"
+
+#: src/ui/pages/explore.rs:285
 msgid "Moods & Genres"
 msgstr "Stimmungen & Genres"
 
-#: src/ui/pages/explore.rs:286
+#: src/ui/pages/explore.rs:288
 msgid "New Albums & Singles"
 msgstr "Neue Alben & Singles"
 
-#: src/ui/pages/explore.rs:287
+#: src/ui/pages/explore.rs:289
 msgid "New Music Videos"
 msgstr "Neue Musikvideos"
 
-#: src/ui/pages/explore.rs:288 src/ui/pages/explore.rs:377
+#: src/ui/pages/explore.rs:290 src/ui/pages/explore.rs:377
 msgid "Trending"
 msgstr "Trends"
 
@@ -3270,3 +3270,6 @@ msgstr "Wiedergabe / Pause"
 #: src/ui/window.rs:2829
 msgid "Open / Close Player"
 msgstr "Player öffnen / schließen"
+
+#~ msgid "For You"
+#~ msgstr "Für dich"

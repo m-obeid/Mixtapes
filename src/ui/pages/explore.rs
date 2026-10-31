@@ -22,7 +22,7 @@ use crate::ui::widgets::song_list::{SONG_THUMB_SIZE, search_subtitle, song_row_w
 use crate::ui::widgets::song_row::SongRow;
 
 /// How many pills a category row shows before it offers View All.
-const PILL_LIMIT: usize = 20;
+const PILL_LIMIT: usize = 12;
 /// Gap between chart cards, which search.py sets on the strip itself.
 const CHART_STRIP_SPACING: i32 = 12;
 /// Gap between sections, tightened for the phone layout by set_compact_mode.
@@ -276,11 +276,13 @@ impl ExplorePage {
             std::iter::once(podcasts).chain(pills.iter().cloned()).collect::<Vec<_>>()
         };
         if !data.for_you.is_empty() || !data.moods.is_empty() || !data.genres.is_empty() {
-            self.add_pill_section(&tr!("For You"), &data.for_you);
-            self.add_pill_section(&tr!("Moods & Moments"), &data.moods);
-            self.add_pill_section(&tr!("Genres"), &with_podcasts(&data.genres));
+            self.add_pill_section(&tr!("Moods & Moments"), &[], &data.moods);
+            // YouTube picks For You from the same lists, and a pill reads once.
+            let for_you: Vec<Category> = data.for_you.iter().filter(|c| !data.moods.iter().any(|m| m.title == c.title)).cloned().collect();
+            let genres: Vec<Category> = with_podcasts(&data.genres).into_iter().filter(|c| !for_you.iter().any(|f| f.title == c.title)).collect();
+            self.add_pill_section(&if for_you.is_empty() { tr!("Genres") } else { tr!("For You & Genres") }, &for_you, &genres);
         } else {
-            self.add_pill_section(&tr!("Moods & Genres"), &with_podcasts(&data.feed.moods_and_genres));
+            self.add_pill_section(&tr!("Moods & Genres"), &[], &with_podcasts(&data.feed.moods_and_genres));
         }
 
         self.add_row_section(&tr!("New Albums & Singles"), capped(&data.feed.new_releases, NEW_RELEASE_LIMIT));
@@ -292,9 +294,10 @@ impl ExplorePage {
         self.set_compact(self.ctx.compact.get());
     }
 
-    /// A scrolling row of pills. Past twenty its heading offers View All,
+    /// Pills wrapped over as many lines as they need. Past the limit its heading offers View All,
     /// which opens the full list on its own page.
-    fn add_pill_section(self: &Rc<Self>, title: &str, categories: &[Category]) {
+    /// `lead` comes first in full, parted from the rest by a line.
+    fn add_pill_section(self: &Rc<Self>, title: &str, lead: &[Category], categories: &[Category]) {
         if categories.is_empty() {
             return;
         }
@@ -305,20 +308,19 @@ impl ExplorePage {
             Box::new(move || ctx.nav.go(NavRequest::AllMoods { title: title.clone(), items: items.clone() })) as Box<dyn Fn()>
         });
         section.append(&section_header(title, on_view_all));
-        let scroll_box = HorizontalScrollBox::new();
-        scroll_box.set_edge_fade(true);
-        let strip = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
-        for category in categories.iter().take(PILL_LIMIT) {
+        let chips = adw::WrapBox::builder().child_spacing(8).line_spacing(8).build();
+        for (index, category) in lead.iter().chain(categories.iter().take(PILL_LIMIT)).enumerate() {
+            if index == lead.len() && index > 0 {
+                chips.append(&gtk::Separator::builder().orientation(gtk::Orientation::Vertical).margin_top(6).margin_bottom(6).margin_start(4).margin_end(4).build());
+            }
             let button = gtk::Button::builder().label(&category.title).css_classes(["category-chip"]).build();
             let ctx = self.ctx.clone();
             let category = category.clone();
             button.connect_clicked(move |_| ctx.nav.go(NavRequest::Category { title: category.title.clone(), params: category.params.clone() }));
-            strip.append(&button);
+            chips.append(&button);
         }
-        scroll_box.set_content(&strip);
-        section.append(scroll_box.widget());
+        section.append(&chips);
         self.explore_box.append(&section);
-        self.scrollers.borrow_mut().push(scroll_box);
     }
 
     /// One boxed list of rows, what add_section built for every feed shelf.
