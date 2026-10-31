@@ -667,9 +667,13 @@ impl Player {
     }
 
     pub fn add_to_queue(&self, tracks: Vec<Track>, play_next: bool) {
+        let was_empty = self.state.queue_length() == 0;
         let step = self.queue.borrow_mut().insert(tracks, play_next);
         self.sync_queue_model();
         self.apply(step);
+        if was_empty && self.state.queue_length() > 0 {
+            self.state.emit_queue_started();
+        }
     }
 
     pub fn remove_from_queue(&self, index: usize) {
