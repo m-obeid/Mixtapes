@@ -89,6 +89,12 @@
 
   <releases>
 
+    <release version="2026-10-31.1" date="2026-10-31">
+      <description>
+        <p>Small fixes for the last release: menus highlight what you point at again, the What's New window fits its text, and History on Home now looks like a link. Releases also come with macOS and Windows downloads.</p>
+      </description>
+    </release>
+
     <release version="2026-10-31.0" date="2026-10-31">
       <description>
         <p>Mixtapes comes to macOS and speaks German now, with more languages to come, lyrics now have new sources with more word-timed results, and the like button in the player no longer crashes the app.</p>
