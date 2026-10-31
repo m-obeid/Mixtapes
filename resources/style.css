@@ -671,6 +671,11 @@ window > windowhandle,
    that's what makes the lyrics column look like a darker block in our
    cover-tinted view. Wipe it (and the separator) so the lyrics blend
    into the same cover-derived background as the rest of the view. */
+.lyrics-split > dimming,
+.lyrics-split > shadow,
+.lyrics-split > outline,
+.lyrics-split > .overlay-pane,
+.lyrics-split > .overlay-pane > .background,
 .lyrics-split > .sidebar-pane,
 .lyrics-split > .sidebar-pane > .background,
 .lyrics-split > .content-pane,
