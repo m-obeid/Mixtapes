@@ -37,6 +37,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # SAPISIDHASH authorization header.
 sha1 = "0.10"
+flate2 = "1"
 # Last.fm request signatures (api_sig is an md5 by specification).
 md-5 = "0.10"
 # VISITOR_DATA extraction from the music.youtube.com landing page.

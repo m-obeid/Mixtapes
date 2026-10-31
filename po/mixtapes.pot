@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 20:05+0100\n"
+"POT-Creation-Date: 2026-10-31 20:16+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -21,7 +21,7 @@ msgstr ""
 #. Translators: stands in for a missing track title in the Discord status.
 #. Translators: a lyrics search result whose catalog entry has no title.
 #. Translators: stands in for a missing artist name
-#: src/discord.rs:92 src/lyrics/providers/mod.rs:215
+#: src/discord.rs:92 src/lyrics/providers/mod.rs:216
 #: src/ui/pages/playlist.rs:2987
 msgid "Unknown"
 msgstr ""
@@ -892,32 +892,32 @@ msgstr ""
 msgid "Failed to refresh metadata"
 msgstr ""
 
-#: src/ui/cover_view.rs:69 src/ui/expanded_player.rs:65
+#: src/ui/cover_view.rs:70 src/ui/expanded_player.rs:65
 #: src/ui/expanded_player.rs:229
 msgid "Player"
 msgstr ""
 
-#: src/ui/cover_view.rs:76 src/ui/expanded_player.rs:65
+#: src/ui/cover_view.rs:77 src/ui/expanded_player.rs:65
 #: src/ui/expanded_player.rs:246 src/ui/preferences_lyrics.rs:120
 msgid "Lyrics"
 msgstr ""
 
-#: src/ui/cover_view.rs:113 src/ui/cover_view.rs:531
+#: src/ui/cover_view.rs:114 src/ui/cover_view.rs:528
 #: src/ui/expanded_player.rs:138 src/ui/expanded_player.rs:479
 #: src/ui/player_bar.rs:124 src/ui/player_bar.rs:448
 msgid "Not Playing"
 msgstr ""
 
-#: src/ui/cover_view.rs:245 src/ui/player_bar.rs:341
+#: src/ui/cover_view.rs:246 src/ui/player_bar.rs:341
 msgid "Collapse player"
 msgstr ""
 
-#: src/ui/cover_view.rs:252 src/ui/expanded_player.rs:65
+#: src/ui/cover_view.rs:253 src/ui/expanded_player.rs:65
 #: src/ui/expanded_player.rs:240
 msgid "Queue"
 msgstr ""
 
-#: src/ui/cover_view.rs:608 src/ui/expanded_player.rs:552
+#: src/ui/cover_view.rs:605 src/ui/expanded_player.rs:552
 #: src/ui/preferences.rs:542
 msgid "Stream Info (Debug)"
 msgstr ""
@@ -2694,7 +2694,7 @@ msgid "Line-synced. Romanization and translation for CJK"
 msgstr ""
 
 #: src/ui/preferences_lyrics.rs:23
-msgid "Line-synced. Strong on Japanese and Chinese tracks"
+msgid "Word-level timing. Strong on Japanese and Chinese tracks"
 msgstr ""
 
 #: src/ui/preferences_lyrics.rs:24

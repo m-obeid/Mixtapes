@@ -3116,6 +3116,7 @@ dependencies = [
  "anyhow",
  "async-channel",
  "embed-resource",
+ "flate2",
  "gio 0.22.9",
  "glib 0.22.9",
  "glib-build-tools",

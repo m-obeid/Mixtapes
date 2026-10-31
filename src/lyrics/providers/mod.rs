@@ -9,6 +9,7 @@ pub mod captions;
 pub mod lrclib;
 pub mod netease;
 pub mod qqmusic;
+mod qrc;
 pub mod unison;
 pub mod ytm;
 
@@ -68,8 +69,8 @@ impl Provider {
     /// The richest shape this provider can return, which lets the chain skip one that cannot beat what it already holds.
     pub fn native_rank(self) -> u8 {
         match self {
-            Provider::AppleMusic | Provider::BetterLyrics | Provider::Unison | Provider::BiniLyrics => RANK_WORD,
-            Provider::NetEase | Provider::QqMusic | Provider::Lrclib | Provider::YouTubeCaptions => RANK_LINE,
+            Provider::AppleMusic | Provider::BetterLyrics | Provider::Unison | Provider::BiniLyrics | Provider::QqMusic => RANK_WORD,
+            Provider::NetEase | Provider::Lrclib | Provider::YouTubeCaptions => RANK_LINE,
             Provider::YouTubeMusic => RANK_PLAIN,
         }
     }

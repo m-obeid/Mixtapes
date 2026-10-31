@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 20:05+0100\n"
+"POT-Creation-Date: 2026-10-31 20:16+0100\n"
 "PO-Revision-Date: 2026-10-07 13:09+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -20,7 +20,7 @@ msgstr ""
 #. Translators: stands in for a missing track title in the Discord status.
 #. Translators: a lyrics search result whose catalog entry has no title.
 #. Translators: stands in for a missing artist name
-#: src/discord.rs:92 src/lyrics/providers/mod.rs:215
+#: src/discord.rs:92 src/lyrics/providers/mod.rs:216
 #: src/ui/pages/playlist.rs:2987
 msgid "Unknown"
 msgstr "Unbekannt"
@@ -894,32 +894,32 @@ msgstr "Keine Metadaten gefunden"
 msgid "Failed to refresh metadata"
 msgstr "Metadaten konnten nicht aktualisiert werden"
 
-#: src/ui/cover_view.rs:69 src/ui/expanded_player.rs:65
+#: src/ui/cover_view.rs:70 src/ui/expanded_player.rs:65
 #: src/ui/expanded_player.rs:229
 msgid "Player"
 msgstr "Player"
 
-#: src/ui/cover_view.rs:76 src/ui/expanded_player.rs:65
+#: src/ui/cover_view.rs:77 src/ui/expanded_player.rs:65
 #: src/ui/expanded_player.rs:246 src/ui/preferences_lyrics.rs:120
 msgid "Lyrics"
 msgstr "Songtext"
 
-#: src/ui/cover_view.rs:113 src/ui/cover_view.rs:531
+#: src/ui/cover_view.rs:114 src/ui/cover_view.rs:528
 #: src/ui/expanded_player.rs:138 src/ui/expanded_player.rs:479
 #: src/ui/player_bar.rs:124 src/ui/player_bar.rs:448
 msgid "Not Playing"
 msgstr "Keine Wiedergabe"
 
-#: src/ui/cover_view.rs:245 src/ui/player_bar.rs:341
+#: src/ui/cover_view.rs:246 src/ui/player_bar.rs:341
 msgid "Collapse player"
 msgstr "Player einklappen"
 
-#: src/ui/cover_view.rs:252 src/ui/expanded_player.rs:65
+#: src/ui/cover_view.rs:253 src/ui/expanded_player.rs:65
 #: src/ui/expanded_player.rs:240
 msgid "Queue"
 msgstr "Wiedergabeliste"
 
-#: src/ui/cover_view.rs:608 src/ui/expanded_player.rs:552
+#: src/ui/cover_view.rs:605 src/ui/expanded_player.rs:552
 #: src/ui/preferences.rs:542
 msgid "Stream Info (Debug)"
 msgstr "Stream-Info (Debug)"
@@ -2767,8 +2767,8 @@ msgid "Line-synced. Romanization and translation for CJK"
 msgstr "Zeilensynchron. Romanisierung und Übersetzung für CJK"
 
 #: src/ui/preferences_lyrics.rs:23
-msgid "Line-synced. Strong on Japanese and Chinese tracks"
-msgstr "Zeilensynchron. Stark bei japanischen und chinesischen Titeln"
+msgid "Word-level timing. Strong on Japanese and Chinese tracks"
+msgstr "Wortgenaues Timing. Stark bei japanischen und chinesischen Titeln"
 
 #: src/ui/preferences_lyrics.rs:24
 msgid "Line-synced. Large community LRC database"
@@ -3378,6 +3378,9 @@ msgstr "Wiedergabe / Pause"
 #: src/ui/window.rs:2875
 msgid "Open / Close Player"
 msgstr "Player öffnen / schließen"
+
+#~ msgid "Line-synced. Strong on Japanese and Chinese tracks"
+#~ msgstr "Zeilensynchron. Stark bei japanischen und chinesischen Titeln"
 
 #~ msgid "In time"
 #~ msgstr "Im Takt"

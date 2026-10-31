@@ -1,16 +1,20 @@
 //! QQ Music (y.qq.com), strong on Japanese anime and game songs and Chinese releases NetEase misses.
 //!
-//! Uses the plain web search and the `nobase64` lyric endpoint, which answer JSON with no account.
-//! Word-level QRC is encrypted, so this stays line-synced.
+//! Uses the plain web search and two lyric endpoints, none of which need an account: the
+//! signed app API for word-level QRC, and the `nobase64` one for LRC and any translation.
 
-use std::time::Duration;
+use std::sync::LazyLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde_json::Value;
+use regex::Regex;
+use serde_json::{Value, json};
+use sha1::{Digest, Sha1};
 
 use super::{Request, get_json, label_or_unknown, text_at, title_and_artist, variants_or_title};
 use crate::lyrics::lrc::{Secondary, attach_secondary_lrc, parse_lrc_text};
 use crate::lyrics::matching::{Candidate, artist_matches, gate, is_generic_title, match_detail, rank_matches};
-use crate::lyrics::model::{LyricLine, LyricsMatch, LyricsResult};
+use super::qrc::decode_hex;
+use crate::lyrics::model::{LyricLine, LyricPart, LyricsMatch, LyricsResult};
 
 const SOURCE: &str = "QQ Music";
 const SEARCH_URL: &str = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp";
@@ -18,6 +22,16 @@ const LYRIC_URL: &str = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.f
 const HEADERS: [(&str, &str); 2] = [("User-Agent", "Mozilla/5.0"), ("Referer", "https://y.qq.com/")];
 const TIMEOUT: Duration = Duration::from_secs(5);
 const SEARCH_LIMIT: &str = "8";
+const API_URL: &str = "https://u.y.qq.com/cgi-bin/musics.fcg";
+const API_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+const CLIENT_VERSION: u32 = 13020508;
+const SIGN_SCRAMBLE: [u8; 20] = [89, 39, 179, 150, 218, 82, 58, 252, 177, 52, 186, 123, 120, 64, 242, 133, 143, 161, 121, 179];
+
+/// `[start,duration]` opening a timed line, in milliseconds.
+static LINE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[(\d+),(\d+)\](.*)$").expect("static regex"));
+/// A word and the `(start,duration)` following it.
+static WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([^(]+)\((\d+),(\d+)\)").expect("static regex"));
+
 /// What QQ Music answers for a song with no words.
 const INSTRUMENTAL: &str = "\u{7eaf}\u{97f3}\u{4e50}";
 
@@ -84,7 +98,7 @@ fn without_header(lines: Vec<LyricLine>) -> Vec<LyricLine> {
         let text = line.text.trim();
         text.split([':', '：', '∶']).next().is_some_and(|head| head.len() < text.len() && head.chars().count() <= 4)
     };
-    let skip_title = usize::from(lines.first().is_some_and(|l| l.start == Some(0.0)));
+    let skip_title = usize::from(lines.first().is_some_and(|l| l.start == Some(0.0) || l.text.contains(" - ")));
     let first = lines.iter().skip(skip_title).position(|l| !is_credit(l)).map_or(lines.len(), |at| at + skip_title);
     lines.into_iter().skip(first).collect()
 }
@@ -103,6 +117,72 @@ pub fn parse_lyric(data: &Value) -> Option<LyricsResult> {
     Some(LyricsResult::from_lines(lines, SOURCE))
 }
 
+/// The body of a decoded QRC document. It sits in an attribute, so a line break in it
+/// is real, and an XML parser would flatten it to a space.
+fn lyric_content(document: &str) -> Option<String> {
+    let start = document.find("LyricContent=\"")? + "LyricContent=\"".len();
+    let end = start + document[start..].find('"')?;
+    Some(document[start..end].replace("&quot;", "\"").replace("&apos;", "'").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
+}
+
+/// QRC lines as lyric lines with word timing. A plain LRC body has none of these lines.
+pub fn parse_qrc(content: &str) -> Vec<LyricLine> {
+    let seconds = |text: &str| text.parse::<f64>().unwrap_or(0.0) / 1000.0;
+    let lines = content.lines().filter_map(|raw| {
+        let timed = LINE_RE.captures(raw.trim())?;
+        let start = seconds(&timed[1]);
+        let parts: Vec<LyricPart> = WORD_RE
+            .captures_iter(&timed[3])
+            .map(|word| {
+                let at = seconds(&word[2]);
+                LyricPart { start: Some(at), end: Some(at + seconds(&word[3])), text: word[1].trim().to_owned(), space_after: word[1].ends_with(char::is_whitespace) }
+            })
+            .filter(|part| !part.text.is_empty())
+            .collect();
+        if parts.is_empty() {
+            return None;
+        }
+        let text: String = parts.iter().map(|p| if p.space_after { format!("{} ", p.text) } else { p.text.clone() }).collect();
+        let mut line = LyricLine::new(Some(start), text.trim());
+        line.end = Some(start + seconds(&timed[2]));
+        line.parts = parts;
+        Some(line)
+    });
+    without_header(lines.collect())
+}
+
+/// The signature the app API checks, computed from the request body.
+fn sign(body: &str) -> String {
+    let hash: String = Sha1::digest(body.as_bytes()).iter().map(|byte| format!("{byte:02X}")).collect();
+    let pick = |positions: &[usize]| positions.iter().map(|at| &hash[*at..=*at]).collect::<String>();
+    let mixed: Vec<u8> = (0..20).map(|at| SIGN_SCRAMBLE[at] ^ u8::from_str_radix(&hash[at * 2..at * 2 + 2], 16).unwrap_or(0)).collect();
+    let encoded: String = glib::base64_encode(&mixed).chars().filter(|c| !matches!(c, '/' | '+' | '=')).collect();
+    format!("zzc{}{encoded}{}", pick(&[23, 14, 6, 36, 16, 7, 19]), pick(&[16, 1, 32, 12, 19, 27, 8, 5])).to_lowercase()
+}
+
+/// Word-level lyrics through the signed app API. None sends the caller to plain LRC.
+async fn word_level(http: &reqwest::Client, mid: &str) -> Option<Vec<LyricLine>> {
+    crate::net::offline::check().ok()?;
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let device: String = Sha1::digest(nanos.to_string().as_bytes()).iter().map(|byte| format!("{byte:02X}")).collect();
+    let body = json!({
+        "comm": { "wid": &device[..32], "cv": CLIENT_VERSION, "v": CLIENT_VERSION, "QIMEI36": "8888888888888888", "ct": "11", "tmeAppID": "qqmusic", "format": "json", "inCharset": "utf-8", "outCharset": "utf-8", "uid": "3931641530" },
+        "music.musichallSong.PlayLyricInfo.GetPlayLyricInfo": {
+            "module": "music.musichallSong.PlayLyricInfo",
+            "method": "GetPlayLyricInfo",
+            "param": { "crypt": 1, "ct": 11, "cv": CLIENT_VERSION, "lrc_t": 0, "qrc": 1, "qrc_t": 0, "roma": 0, "roma_t": 0, "trans": 0, "trans_t": 0, "type": 1, "songMid": mid },
+        },
+    })
+    .to_string();
+    let url = format!("{API_URL}?sign={}", sign(&body));
+    let request = http.post(url).header("User-Agent", API_USER_AGENT).header("Referer", "https://y.qq.com/").header("Origin", "https://y.qq.com").header("Content-Type", "application/json").timeout(TIMEOUT).body(body);
+    let answer: Value = request.send().await.ok()?.json().await.ok()?;
+    let encrypted = answer.pointer("/music.musichallSong.PlayLyricInfo.GetPlayLyricInfo/data/lyric")?.as_str()?;
+    let document = decode_hex(encrypted)?;
+    let lines = parse_qrc(&lyric_content(&document).unwrap_or(document));
+    (!lines.is_empty()).then_some(lines)
+}
+
 async fn search(http: &reqwest::Client, query: &str) -> Vec<Song> {
     let query = query.trim();
     if query.is_empty() {
@@ -118,14 +198,16 @@ async fn search(http: &reqwest::Client, query: &str) -> Vec<Song> {
     }
 }
 
+/// Word timing when QQ Music has it, line timing otherwise. The translation only comes with the LRC.
 async fn lyric(http: &reqwest::Client, mid: &str) -> Option<LyricsResult> {
-    match get_json(http, LYRIC_URL, &[("songmid", mid), ("format", "json"), ("nobase64", "1"), ("g_tk", "5381")], &HEADERS, TIMEOUT).await {
-        Ok(data) => parse_lyric(&data),
-        Err(err) => {
-            tracing::debug!(%err, "QQ Music lyric fetch failed");
-            None
-        }
+    let query = [("songmid", mid), ("format", "json"), ("nobase64", "1"), ("g_tk", "5381")];
+    let (words, plain) = tokio::join!(word_level(http, mid), get_json(http, LYRIC_URL, &query, &HEADERS, TIMEOUT));
+    let plain = plain.inspect_err(|err| tracing::debug!(%err, "QQ Music lyric fetch failed")).ok();
+    let Some(mut lines) = words else { return parse_lyric(&plain?) };
+    if let Some(data) = &plain {
+        attach_secondary_lrc(&mut lines, text_at(data, "trans"), Secondary::Translation);
     }
+    Some(LyricsResult::from_lines(lines, SOURCE))
 }
 
 pub async fn fetch(http: &reqwest::Client, request: Request<'_>) -> Option<LyricsResult> {
@@ -182,6 +264,37 @@ mod tests {
         println!("{} lines, first {:?}", found.lines.len(), found.lines.first().map(|l| (&l.text, l.start)));
         assert!(found.lines.len() > 10);
         assert!(found.synced);
+        assert_eq!(found.rank(), 3, "word timing");
+        println!("last {:?}", found.lines.last().map(|l| (&l.text, l.start)));
+        println!("words {:?}", found.lines[0].parts.iter().take(5).map(|p| (&p.text, p.start)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn the_signature_has_the_shape_the_api_wants() {
+        let signed = sign("body");
+        assert!(signed.starts_with("zzc"));
+        assert_eq!(signed, signed.to_lowercase());
+        assert_eq!(signed, sign("body"));
+        assert_ne!(signed, sign("other"));
+    }
+
+    #[test]
+    fn qrc_lines_carry_their_word_timing() {
+        let content = "[ti:Song]\n[offset:0]\n[5767,324]Song - (5767,109)nao(5876,106)\n[292333,1910]Let (292333,136)it (292469,97)go(292566,202)\n[300000,500]少(300000,100)年(300100,100)";
+        let lines = parse_qrc(content);
+        assert_eq!(lines.len(), 2, "the title line goes");
+        assert_eq!(lines[0].text, "Let it go");
+        assert_eq!(lines[0].start, Some(292.333));
+        assert!((lines[0].end.unwrap() - 294.243).abs() < 0.001);
+        assert_eq!(lines[0].parts[1].start, Some(292.469));
+        assert!(lines[0].parts[0].space_after);
+        assert_eq!(lines[1].text, "少年");
+    }
+
+    #[test]
+    fn the_body_comes_out_of_its_attribute_with_its_line_breaks() {
+        let document = "<QrcInfos><Lyric_1 LyricType=\"1\" LyricContent=\"[1,2]a(1,2)\n[3,4]&amp;(3,4)\"/></QrcInfos>";
+        assert_eq!(lyric_content(document).unwrap(), "[1,2]a(1,2)\n[3,4]&(3,4)");
     }
 
     #[test]
