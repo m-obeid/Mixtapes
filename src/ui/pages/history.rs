@@ -35,6 +35,8 @@ pub struct HistoryPage {
     ctx: Rc<UiContext>,
     /// Every play in one flat list, which is what a row queues.
     entries: RefCell<Vec<HistoryEntry>>,
+    /// What the search bar narrows the page to, lowercase.
+    query: RefCell<String>,
     rows: RefCell<Vec<Rc<SongRow>>>,
     loading: Cell<bool>,
     /// Counts renders, so rows still being built for an earlier one stop.
@@ -98,6 +100,7 @@ impl HistoryPage {
             loading_wrap,
             ctx,
             entries: RefCell::new(Vec::new()),
+            query: RefCell::new(String::new()),
             rows: RefCell::new(Vec::new()),
             loading: Cell::new(false),
             render_generation: Cell::new(0),
@@ -233,29 +236,45 @@ impl HistoryPage {
         self.render(entries);
     }
 
+    /// Keep the plays whose title, artist or album contains the query.
+    pub fn filter_content(self: &Rc<Self>, text: &str) {
+        let query = text.trim().to_lowercase();
+        if self.query.replace(query) != *self.query.borrow() && !self.entries.borrow().is_empty() {
+            self.show_entries();
+        }
+    }
+
     fn render(self: &Rc<Self>, entries: Vec<HistoryEntry>) {
         self.loading_wrap.set_visible(false);
+        self.entries.replace(entries);
+        self.show_entries();
+    }
+
+    fn show_entries(self: &Rc<Self>) {
         // Rows an earlier render is still adding would land in the emptied page.
         let generation = self.render_generation.get().wrapping_add(1);
         self.render_generation.set(generation);
         clear_children(&self.sections_box);
         self.rows.borrow_mut().clear();
-        if entries.is_empty() {
-            self.entries.borrow_mut().clear();
+        if self.entries.borrow().is_empty() {
             self.show_empty(&crate::i18n::gettext(EMPTY_TEXT));
             return;
         }
-        self.empty_label.set_visible(false);
 
         // One section per heading, in the order YouTube sent them.
+        let query = self.query.borrow().clone();
         let mut sections: Vec<(String, Vec<usize>)> = Vec::new();
-        for (index, entry) in entries.iter().enumerate() {
+        for (index, entry) in self.entries.borrow().iter().enumerate().filter(|(_, e)| matches_query(&e.track, &query)) {
             match sections.last_mut() {
                 Some((title, rows)) if *title == entry.played => rows.push(index),
                 _ => sections.push((entry.played.clone(), vec![index])),
             }
         }
-        self.entries.replace(entries);
+        if sections.is_empty() {
+            self.show_empty(&tr!("No songs match your search"));
+            return;
+        }
+        self.empty_label.set_visible(false);
 
         // A few hundred rows built in one go froze the page for half a second. The
         // first screenful goes up now, the rest a few milliseconds at a time.
@@ -428,6 +447,12 @@ fn heading_for(days_ago: i64, month: &str) -> String {
 }
 
 /// The row's subtitle: the artists, then the album behind a dot, as the home lists write theirs.
+/// Whether a play belongs under a search. `query` is lowercase.
+fn matches_query(track: &Track, query: &str) -> bool {
+    let album = track.album.as_ref().map(|a| a.name.as_str()).unwrap_or_default();
+    query.is_empty() || [track.title.as_str(), track.artist.as_str(), album].iter().any(|text| text.to_lowercase().contains(query))
+}
+
 fn subtitle(track: &Track) -> String {
     let album = track.album.as_ref().map(|a| a.name.as_str()).unwrap_or_default();
     match (track.artist.is_empty(), album.is_empty()) {
@@ -462,6 +487,15 @@ fn clear_children(container: &gtk::Box) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_search_looks_at_title_artist_and_album() {
+        let track = Track { title: "Blinding Lights".to_owned(), artist: "The Weeknd".to_owned(), album: Some(crate::model::Named { name: "After Hours".to_owned(), id: None }), ..Track::default() };
+        for query in ["", "blinding", "weeknd", "after h"] {
+            assert!(matches_query(&track, query), "{query}");
+        }
+        assert!(!matches_query(&track, "queen"));
+    }
 
     #[test]
     fn local_plays_file_under_youtubes_headings() {

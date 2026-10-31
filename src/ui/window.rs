@@ -2194,7 +2194,6 @@ pub enum PushedPage {
     /// Held only so the page outlives the call that pushed it.
     #[allow(dead_code)]
     Category(Rc<CategoryPage>),
-    #[allow(dead_code)]
     History(Rc<HistoryPage>),
     AllMoods(Rc<AllMoodsPage>),
 }
@@ -2205,13 +2204,14 @@ impl PushedPage {
             PushedPage::Playlist(p) => p.filter_content(text),
             PushedPage::Discography(p) => p.filter_content(text),
             PushedPage::AllMoods(p) => p.filter_content(text),
-            PushedPage::Artist(_) | PushedPage::Category(_) | PushedPage::History(_) => {}
+            PushedPage::History(p) => p.filter_content(text),
+            PushedPage::Artist(_) | PushedPage::Category(_) => {}
         }
     }
 
     /// Whether the search bar filters this page instead of running a search.
     fn is_filterable(&self) -> bool {
-        !matches!(self, PushedPage::Artist(_) | PushedPage::Category(_) | PushedPage::History(_))
+        !matches!(self, PushedPage::Artist(_) | PushedPage::Category(_))
     }
 }
 

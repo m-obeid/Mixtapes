@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 16:16+0100\n"
+"POT-Creation-Date: 2026-10-31 16:17+0100\n"
 "PO-Revision-Date: 2026-10-07 13:09+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -572,7 +572,7 @@ msgstr "Simbabwe"
 msgid "Recently"
 msgstr "Kürzlich"
 
-#: src/net/history.rs:270 src/ui/pages/history.rs:421
+#: src/net/history.rs:270 src/ui/pages/history.rs:440
 msgid "Today"
 msgstr "Heute"
 
@@ -661,7 +661,7 @@ msgid "Pause"
 msgstr "Pause"
 
 #: src/tray.rs:191 src/ui/context_menu.rs:308 src/ui/pages/artist.rs:189
-#: src/ui/pages/history.rs:348 src/ui/pages/playlist.rs:187
+#: src/ui/pages/history.rs:367 src/ui/pages/playlist.rs:187
 #: src/ui/player_bar.rs:165 src/ui/player_bar.rs:555
 msgid "Play"
 msgstr "Abspielen"
@@ -1425,40 +1425,44 @@ msgstr ""
 "Songs, die du ohne Anmeldung abspielst, erscheinen hier. Sie bleiben auf "
 "diesem Gerät."
 
-#: src/ui/pages/history.rs:71 src/ui/pages/history.rs:110 src/ui/window.rs:1322
+#: src/ui/pages/history.rs:73 src/ui/pages/history.rs:113 src/ui/window.rs:1322
 #: src/ui/window.rs:2426
 msgid "Listening History"
 msgstr "Wiedergabeverlauf"
 
-#: src/ui/pages/history.rs:88
+#: src/ui/pages/history.rs:90
 msgid "Loading history..."
 msgstr "Verlauf wird geladen..."
 
-#: src/ui/pages/history.rs:182
+#: src/ui/pages/history.rs:185
 msgid "History requires an internet connection."
 msgstr "Der Verlauf benötigt eine Internetverbindung."
 
-#: src/ui/pages/history.rs:222
+#: src/ui/pages/history.rs:225
 msgid "Earlier"
 msgstr "Früher"
 
-#: src/ui/pages/history.rs:339
+#: src/ui/pages/history.rs:274
+msgid "No songs match your search"
+msgstr "Keine Songs passen zu deiner Suche"
+
+#: src/ui/pages/history.rs:358
 msgid "History"
 msgstr "Verlauf"
 
-#: src/ui/pages/history.rs:355 src/ui/pages/history.rs:366
+#: src/ui/pages/history.rs:374 src/ui/pages/history.rs:385
 msgid "Remove from History"
 msgstr "Aus Verlauf entfernen"
 
-#: src/ui/pages/history.rs:422
+#: src/ui/pages/history.rs:441
 msgid "Yesterday"
 msgstr "Gestern"
 
-#: src/ui/pages/history.rs:423
+#: src/ui/pages/history.rs:442
 msgid "This week"
 msgstr "Diese Woche"
 
-#: src/ui/pages/history.rs:424
+#: src/ui/pages/history.rs:443
 msgid "Last week"
 msgstr "Letzte Woche"
 

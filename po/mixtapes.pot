@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 16:16+0100\n"
+"POT-Creation-Date: 2026-10-31 16:17+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -573,7 +573,7 @@ msgstr ""
 msgid "Recently"
 msgstr ""
 
-#: src/net/history.rs:270 src/ui/pages/history.rs:421
+#: src/net/history.rs:270 src/ui/pages/history.rs:440
 msgid "Today"
 msgstr ""
 
@@ -661,7 +661,7 @@ msgid "Pause"
 msgstr ""
 
 #: src/tray.rs:191 src/ui/context_menu.rs:308 src/ui/pages/artist.rs:189
-#: src/ui/pages/history.rs:348 src/ui/pages/playlist.rs:187
+#: src/ui/pages/history.rs:367 src/ui/pages/playlist.rs:187
 #: src/ui/player_bar.rs:165 src/ui/player_bar.rs:555
 msgid "Play"
 msgstr ""
@@ -1406,40 +1406,44 @@ msgid ""
 "Songs you play without signing in appear here. They stay on this device."
 msgstr ""
 
-#: src/ui/pages/history.rs:71 src/ui/pages/history.rs:110 src/ui/window.rs:1322
+#: src/ui/pages/history.rs:73 src/ui/pages/history.rs:113 src/ui/window.rs:1322
 #: src/ui/window.rs:2426
 msgid "Listening History"
 msgstr ""
 
-#: src/ui/pages/history.rs:88
+#: src/ui/pages/history.rs:90
 msgid "Loading history..."
 msgstr ""
 
-#: src/ui/pages/history.rs:182
+#: src/ui/pages/history.rs:185
 msgid "History requires an internet connection."
 msgstr ""
 
-#: src/ui/pages/history.rs:222
+#: src/ui/pages/history.rs:225
 msgid "Earlier"
 msgstr ""
 
-#: src/ui/pages/history.rs:339
+#: src/ui/pages/history.rs:274
+msgid "No songs match your search"
+msgstr ""
+
+#: src/ui/pages/history.rs:358
 msgid "History"
 msgstr ""
 
-#: src/ui/pages/history.rs:355 src/ui/pages/history.rs:366
+#: src/ui/pages/history.rs:374 src/ui/pages/history.rs:385
 msgid "Remove from History"
 msgstr ""
 
-#: src/ui/pages/history.rs:422
+#: src/ui/pages/history.rs:441
 msgid "Yesterday"
 msgstr ""
 
-#: src/ui/pages/history.rs:423
+#: src/ui/pages/history.rs:442
 msgid "This week"
 msgstr ""
 
-#: src/ui/pages/history.rs:424
+#: src/ui/pages/history.rs:443
 msgid "Last week"
 msgstr ""
 
