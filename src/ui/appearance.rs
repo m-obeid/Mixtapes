@@ -110,6 +110,17 @@ window.cover-bg-active gridview.queue-list > child:hover .queue-row {
   background-color: alpha(currentColor, 0.1);
 }
 
+/* The transparent rows above reach lists inside popovers too, and took their hover with them. */
+window.cover-bg-active popover listview > row:hover,
+window.cover-bg-active popover listbox > row:hover {
+  background-color: alpha(currentColor, 0.07);
+}
+
+window.cover-bg-active popover listview > row:active,
+window.cover-bg-active popover listbox > row:active {
+  background-color: alpha(currentColor, 0.1);
+}
+
 window.cover-bg-active toggle:checked {
   background-color: @toggle_checked_bg;
 }
