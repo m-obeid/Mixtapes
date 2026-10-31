@@ -18,7 +18,10 @@ use serde_json::{Map, Value, json};
 use crate::paths::Paths;
 
 /// Canonical provider names in the order the chain used before the queue was configurable.
-pub const DEFAULT_PROVIDER_ORDER: [&str; 8] = ["Apple Music", "BetterLyrics", "Unison", "BiniLyrics", "NetEase", "LRCLIB", "YouTube Captions", "YouTube Music"];
+pub const DEFAULT_PROVIDER_ORDER: [&str; 8] = ["Apple Music", "Unison", "BetterLyrics", "BiniLyrics", "NetEase", "LRCLIB", "YouTube Captions", "YouTube Music"];
+
+/// Providers added after orders were first saved, and the one each goes in front of.
+const NEWCOMERS: [(&str, &str); 2] = [("Unison", "BetterLyrics"), ("YouTube Captions", "YouTube Music")];
 
 pub const MATCH_QUALITY: &str = "quality";
 pub const MATCH_STRICT: &str = "strict";
@@ -99,9 +102,21 @@ impl LyricsPrefs {
                 out.push(name.to_owned());
             }
         }
+        let mut newcomers = Vec::new();
         for name in DEFAULT_PROVIDER_ORDER {
             if !out.iter().any(|n| n == name) {
+                if NEWCOMERS.iter().any(|(new, _)| *new == name) {
+                    newcomers.push(name);
+                }
                 out.push(name.to_owned());
+            }
+        }
+        // A provider newer than the saved order goes in front of its neighbour, not to the bottom.
+        for (name, neighbour) in NEWCOMERS.iter().filter(|(name, _)| newcomers.contains(name)) {
+            if let Some(from) = out.iter().position(|n| n == name) {
+                let moved = out.remove(from);
+                let to = out.iter().position(|n| n == neighbour).unwrap_or(out.len());
+                out.insert(to, moved);
             }
         }
         out
@@ -269,7 +284,7 @@ mod tests {
     fn saved_order_drops_unknown_names_and_appends_new_providers() {
         let (_dir, prefs) = prefs();
         put(&prefs, json!({"lyrics_provider_order": ["LRCLIB", "Gone", "LRCLIB", 7, "NetEase"]}));
-        assert_eq!(prefs.full_provider_order(), ["LRCLIB", "NetEase", "Apple Music", "BetterLyrics", "Unison", "BiniLyrics", "YouTube Captions", "YouTube Music"]);
+        assert_eq!(prefs.full_provider_order(), ["LRCLIB", "NetEase", "Apple Music", "Unison", "BetterLyrics", "BiniLyrics", "YouTube Captions", "YouTube Music"]);
     }
 
     #[test]

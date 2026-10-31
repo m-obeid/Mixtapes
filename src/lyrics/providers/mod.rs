@@ -37,7 +37,7 @@ pub enum Provider {
 
 impl Provider {
     /// Catalog order, the same as prefs::DEFAULT_PROVIDER_ORDER.
-    pub const ALL: [Provider; 8] = [Provider::AppleMusic, Provider::BetterLyrics, Provider::Unison, Provider::BiniLyrics, Provider::NetEase, Provider::Lrclib, Provider::YouTubeCaptions, Provider::YouTubeMusic];
+    pub const ALL: [Provider; 8] = [Provider::AppleMusic, Provider::Unison, Provider::BetterLyrics, Provider::BiniLyrics, Provider::NetEase, Provider::Lrclib, Provider::YouTubeCaptions, Provider::YouTubeMusic];
 
     /// The providers whose other matches can be listed, in the order the manual search walks them.
     pub const MATCH_BROWSERS: [Provider; 3] = [Provider::AppleMusic, Provider::NetEase, Provider::Lrclib];

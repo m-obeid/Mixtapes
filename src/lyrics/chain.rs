@@ -319,7 +319,7 @@ pub(crate) mod tests {
         let lonely = self::rig();
         lonely.source.answer(Provider::BetterLyrics, "Song", plain("BetterLyrics", "la"));
         assert_eq!(lonely.chain.run(&track("Song")).await.unwrap().source, "BetterLyrics");
-        assert_eq!(lonely.source.called(), [Provider::AppleMusic, Provider::BetterLyrics, Provider::Unison, Provider::BiniLyrics, Provider::NetEase, Provider::Lrclib, Provider::YouTubeCaptions]);
+        assert_eq!(lonely.source.called(), [Provider::AppleMusic, Provider::Unison, Provider::BetterLyrics, Provider::BiniLyrics, Provider::NetEase, Provider::Lrclib, Provider::YouTubeCaptions]);
     }
 
     #[tokio::test]
