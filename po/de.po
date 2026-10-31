@@ -2231,12 +2231,12 @@ msgstr ""
 
 #: src/ui/preferences.rs:400
 msgid "Normalize Volume"
-msgstr ""
+msgstr "Lautstärke angleichen"
 
 #: src/ui/preferences.rs:400
 msgid ""
 "Turn loud songs down to match the rest, using YouTube's loudness measurements"
-msgstr ""
+msgstr "Laute Songs anhand der Lautstärkemessungen von YouTube an die übrigen angleichen"
 
 #: src/ui/preferences.rs:410
 msgid "Record Plays to History"
