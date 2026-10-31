@@ -16,9 +16,12 @@ fn provider_blurb(name: &str) -> String {
     match name {
         "Apple Music" => tr!("Word-level timing. Best coverage for Western pop"),
         "BetterLyrics" => tr!("Word-level timing. Mirrors Apple's database"),
+        // The credit Unison's license asks for, word for word.
+        "Unison" => format!("Lyrics from Unison (https://unison.boidu.dev). {}", tr!("Community word-level timing")),
         "BiniLyrics" => tr!("Word-level timing. Strong on Japanese tracks"),
         "NetEase" => tr!("Line-synced. Romanization and translation for CJK"),
         "LRCLIB" => tr!("Line-synced. Large community LRC database"),
+        "YouTube Captions" => tr!("Line-synced. Subtitles written for music videos"),
         "YouTube Music" => tr!("Plain text, no timing. Always available when signed in"),
         _ => String::new(),
     }

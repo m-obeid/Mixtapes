@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 17:47+0100\n"
+"POT-Creation-Date: 2026-10-31 18:24+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -21,7 +21,7 @@ msgstr ""
 #. Translators: stands in for a missing track title in the Discord status.
 #. Translators: a lyrics search result whose catalog entry has no title.
 #. Translators: stands in for a missing artist name
-#: src/discord.rs:92 src/lyrics/providers/mod.rs:206
+#: src/discord.rs:92 src/lyrics/providers/mod.rs:212
 #: src/ui/pages/playlist.rs:2984
 msgid "Unknown"
 msgstr ""
@@ -885,7 +885,7 @@ msgid "Player"
 msgstr ""
 
 #: src/ui/cover_view.rs:76 src/ui/expanded_player.rs:65
-#: src/ui/expanded_player.rs:246 src/ui/preferences_lyrics.rs:116
+#: src/ui/expanded_player.rs:246 src/ui/preferences_lyrics.rs:119
 msgid "Lyrics"
 msgstr ""
 
@@ -1203,7 +1203,7 @@ msgstr ""
 msgid "Top Songs"
 msgstr ""
 
-#: src/ui/pages/artist.rs:550 src/ui/pages/explore.rs:615
+#: src/ui/pages/artist.rs:550 src/ui/pages/explore.rs:614
 #: src/ui/pages/library.rs:100 src/ui/pages/library.rs:108
 msgid "Albums"
 msgstr ""
@@ -1212,12 +1212,12 @@ msgstr ""
 msgid "Singles & EPs"
 msgstr ""
 
-#: src/ui/pages/artist.rs:556 src/ui/pages/explore.rs:620
+#: src/ui/pages/artist.rs:556 src/ui/pages/explore.rs:619
 msgid "Videos"
 msgstr ""
 
-#: src/ui/pages/artist.rs:559 src/ui/pages/explore.rs:609
-#: src/ui/pages/explore.rs:610 src/ui/pages/library.rs:99
+#: src/ui/pages/artist.rs:559 src/ui/pages/explore.rs:608
+#: src/ui/pages/explore.rs:609 src/ui/pages/library.rs:99
 msgid "Playlists"
 msgstr ""
 
@@ -1258,7 +1258,7 @@ msgstr ""
 msgid "Searching..."
 msgstr ""
 
-#: src/ui/pages/explore.rs:188 src/ui/pages/explore.rs:712
+#: src/ui/pages/explore.rs:188 src/ui/pages/explore.rs:711
 #: src/ui/pages/home.rs:83
 msgid "Loading…"
 msgstr ""
@@ -1285,115 +1285,115 @@ msgstr ""
 msgid "Podcasts"
 msgstr ""
 
-#: src/ui/pages/explore.rs:279
+#: src/ui/pages/explore.rs:281
 msgid "Moods & Moments"
 msgstr ""
 
-#: src/ui/pages/explore.rs:283 src/ui/pages/explore.rs:363
+#: src/ui/pages/explore.rs:282 src/ui/pages/explore.rs:362
 msgid "Genres"
 msgstr ""
 
-#: src/ui/pages/explore.rs:283
+#: src/ui/pages/explore.rs:282
 msgid "For You & Genres"
 msgstr ""
 
-#: src/ui/pages/explore.rs:285
+#: src/ui/pages/explore.rs:284
 msgid "Moods & Genres"
 msgstr ""
 
-#: src/ui/pages/explore.rs:288
+#: src/ui/pages/explore.rs:287
 msgid "New Albums & Singles"
 msgstr ""
 
-#: src/ui/pages/explore.rs:289
+#: src/ui/pages/explore.rs:288
 msgid "New Music Videos"
 msgstr ""
 
-#: src/ui/pages/explore.rs:290 src/ui/pages/explore.rs:381
+#: src/ui/pages/explore.rs:289 src/ui/pages/explore.rs:380
 msgid "Trending"
 msgstr ""
 
-#: src/ui/pages/explore.rs:373
+#: src/ui/pages/explore.rs:372
 msgid "Charts"
 msgstr ""
 
-#: src/ui/pages/explore.rs:382
+#: src/ui/pages/explore.rs:381
 msgid "Daily"
 msgstr ""
 
-#: src/ui/pages/explore.rs:383
+#: src/ui/pages/explore.rs:382
 msgid "Weekly"
 msgstr ""
 
-#: src/ui/pages/explore.rs:384
+#: src/ui/pages/explore.rs:383
 msgid "Genre Charts"
 msgstr ""
 
-#: src/ui/pages/explore.rs:385
+#: src/ui/pages/explore.rs:384
 msgid "Top Artists"
 msgstr ""
 
-#: src/ui/pages/explore.rs:539
+#: src/ui/pages/explore.rs:538
 #, rust-format
 msgid "Search failed: {err}"
 msgstr ""
 
-#: src/ui/pages/explore.rs:564
+#: src/ui/pages/explore.rs:563
 msgid "No results"
 msgstr ""
 
-#: src/ui/pages/explore.rs:564
+#: src/ui/pages/explore.rs:563
 #, rust-format
 msgid "Nothing found for \"{query}\""
 msgstr ""
 
-#: src/ui/pages/explore.rs:589
+#: src/ui/pages/explore.rs:588
 msgid "Main"
 msgstr ""
 
-#: src/ui/pages/explore.rs:592
+#: src/ui/pages/explore.rs:591
 msgid "Top Result"
 msgstr ""
 
-#: src/ui/pages/explore.rs:598
+#: src/ui/pages/explore.rs:597
 msgid "Relevant Results"
 msgstr ""
 
-#: src/ui/pages/explore.rs:601 src/ui/pages/explore.rs:602
+#: src/ui/pages/explore.rs:600 src/ui/pages/explore.rs:601
 msgid "Songs"
 msgstr ""
 
-#: src/ui/pages/explore.rs:605 src/ui/pages/explore.rs:606
+#: src/ui/pages/explore.rs:604 src/ui/pages/explore.rs:605
 #: src/ui/pages/library.rs:101 src/ui/pages/library.rs:109
 msgid "Artists"
 msgstr ""
 
-#: src/ui/pages/explore.rs:609
+#: src/ui/pages/explore.rs:608
 msgid "Community Playlists"
 msgstr ""
 
-#: src/ui/pages/explore.rs:613
+#: src/ui/pages/explore.rs:612
 msgid "Other results"
 msgstr ""
 
-#: src/ui/pages/explore.rs:613
+#: src/ui/pages/explore.rs:612
 msgid "Other"
 msgstr ""
 
-#: src/ui/pages/explore.rs:623
+#: src/ui/pages/explore.rs:622
 msgid "More results"
 msgstr ""
 
-#: src/ui/pages/explore.rs:706 src/ui/pages/explore.rs:733
+#: src/ui/pages/explore.rs:705 src/ui/pages/explore.rs:732
 msgid "Show More"
 msgstr ""
 
-#: src/ui/pages/explore.rs:725
+#: src/ui/pages/explore.rs:724
 msgid "Could not load more results"
 msgstr ""
 
 #. Translators: the name of a queue started from the search results, {query} is what was searched for.
-#: src/ui/pages/explore.rs:778
+#: src/ui/pages/explore.rs:777
 #, rust-format
 msgid "Search: {query}"
 msgstr ""
@@ -2638,99 +2638,107 @@ msgstr ""
 msgid "Word-level timing. Mirrors Apple's database"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:19
-msgid "Word-level timing. Strong on Japanese tracks"
-msgstr ""
-
 #: src/ui/preferences_lyrics.rs:20
-msgid "Line-synced. Romanization and translation for CJK"
+msgid "Community word-level timing"
 msgstr ""
 
 #: src/ui/preferences_lyrics.rs:21
-msgid "Line-synced. Large community LRC database"
+msgid "Word-level timing. Strong on Japanese tracks"
 msgstr ""
 
 #: src/ui/preferences_lyrics.rs:22
+msgid "Line-synced. Romanization and translation for CJK"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:23
+msgid "Line-synced. Large community LRC database"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:24
+msgid "Line-synced. Subtitles written for music videos"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:25
 msgid "Plain text, no timing. Always available when signed in"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:28
+#: src/ui/preferences_lyrics.rs:31
 msgid "Quality-aware"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:28
+#: src/ui/preferences_lyrics.rs:31
 msgid "Strict"
 msgstr ""
 
 #. Translators: the choices for the second lyric line. "Background" is the background vocals of a song.
-#: src/ui/preferences_lyrics.rs:30 src/ui/preferences_lyrics.rs:31
+#: src/ui/preferences_lyrics.rs:33 src/ui/preferences_lyrics.rs:34
 #: src/ui/widgets/lyrics_view.rs:36
 msgid "Off"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:30 src/ui/widgets/lyrics_view.rs:36
+#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:36
 msgid "Auto"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:30 src/ui/widgets/lyrics_view.rs:36
+#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:36
 msgid "Romanization"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:30 src/ui/widgets/lyrics_view.rs:36
+#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:36
 msgid "Translation"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:30
+#: src/ui/preferences_lyrics.rs:33
 msgid "Background"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:31
+#: src/ui/preferences_lyrics.rs:34
 msgid "Subtle"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:31
+#: src/ui/preferences_lyrics.rs:34
 msgid "Full"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:50
+#: src/ui/preferences_lyrics.rs:53
 msgid "Move up"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:50
+#: src/ui/preferences_lyrics.rs:53
 msgid "Move down"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:96
+#: src/ui/preferences_lyrics.rs:99
 msgid "Keep at least one lyrics provider enabled"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:130
+#: src/ui/preferences_lyrics.rs:133
 msgid "Search Queue"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:130
+#: src/ui/preferences_lyrics.rs:133
 msgid "Tried from the top down. Switch one off to skip it."
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:139
+#: src/ui/preferences_lyrics.rs:142
 msgid "Matching"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:140
+#: src/ui/preferences_lyrics.rs:143
 msgid ""
 "Quality-aware keeps looking for synced lyrics before settling for plain "
 "text. Strict takes the first hit of any kind."
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:145
+#: src/ui/preferences_lyrics.rs:148
 msgid "When to Stop Searching"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:159
+#: src/ui/preferences_lyrics.rs:162
 msgid "Second Line"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:160
+#: src/ui/preferences_lyrics.rs:163
 msgid ""
 "An extra line under each lyric. Auto picks a romanization for non-Latin "
 "scripts and background vocals otherwise. What's available depends on the "
@@ -2738,15 +2746,15 @@ msgid ""
 msgstr ""
 
 #. Translators: row title, followed by what the second lyric line shows: Off, Auto, Romanization, Translation or Background.
-#: src/ui/preferences_lyrics.rs:165
+#: src/ui/preferences_lyrics.rs:168
 msgid "Show"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:180
+#: src/ui/preferences_lyrics.rs:183
 msgid "Effects"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:181
+#: src/ui/preferences_lyrics.rs:184
 msgid ""
 "Subtle fades each word in over the time it's actually held and grows the "
 "active line. Full adds a glow on the active line and blurs the lines "
@@ -2754,55 +2762,55 @@ msgid ""
 msgstr ""
 
 #. Translators: how strong the lyric effects are: Off, Subtle or Full.
-#: src/ui/preferences_lyrics.rs:186
+#: src/ui/preferences_lyrics.rs:189
 msgid "Level"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:189
+#: src/ui/preferences_lyrics.rs:192
 msgid "Emulate Word Timing"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:189
+#: src/ui/preferences_lyrics.rs:192
 msgid ""
 "On sources with no word timing, move the highlight across the line instead "
 "of lighting the whole line at once"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:202
+#: src/ui/preferences_lyrics.rs:205
 msgid "Text Size"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:203
+#: src/ui/preferences_lyrics.rs:206
 msgid ""
 "Resting size of the lyric column, and how much bigger the line being sung is "
 "drawn. The active line is scaled when it is painted, so growing it never "
 "changes the row's height or disturbs the scrolling."
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:207
+#: src/ui/preferences_lyrics.rs:210
 msgid "Lyrics Size"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:219
+#: src/ui/preferences_lyrics.rs:222
 msgid "Active Line Size"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:244
+#: src/ui/preferences_lyrics.rs:247
 msgid "Queue changes only apply to tracks that aren't cached yet"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:245
+#: src/ui/preferences_lyrics.rs:248
 msgid "Clear Cached Lyrics"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:254
+#: src/ui/preferences_lyrics.rs:257
 #, rust-format
 msgid "Cleared {n} cached track(s)"
 msgid_plural "Cleared {n} cached track(s)"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/preferences_lyrics.rs:254
+#: src/ui/preferences_lyrics.rs:257
 msgid "No cached lyrics to clear"
 msgstr ""
 

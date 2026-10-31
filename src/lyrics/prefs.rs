@@ -18,7 +18,7 @@ use serde_json::{Map, Value, json};
 use crate::paths::Paths;
 
 /// Canonical provider names in the order the chain used before the queue was configurable.
-pub const DEFAULT_PROVIDER_ORDER: [&str; 6] = ["Apple Music", "BetterLyrics", "BiniLyrics", "NetEase", "LRCLIB", "YouTube Music"];
+pub const DEFAULT_PROVIDER_ORDER: [&str; 8] = ["Apple Music", "BetterLyrics", "Unison", "BiniLyrics", "NetEase", "LRCLIB", "YouTube Captions", "YouTube Music"];
 
 pub const MATCH_QUALITY: &str = "quality";
 pub const MATCH_STRICT: &str = "strict";
@@ -269,7 +269,7 @@ mod tests {
     fn saved_order_drops_unknown_names_and_appends_new_providers() {
         let (_dir, prefs) = prefs();
         put(&prefs, json!({"lyrics_provider_order": ["LRCLIB", "Gone", "LRCLIB", 7, "NetEase"]}));
-        assert_eq!(prefs.full_provider_order(), ["LRCLIB", "NetEase", "Apple Music", "BetterLyrics", "BiniLyrics", "YouTube Music"]);
+        assert_eq!(prefs.full_provider_order(), ["LRCLIB", "NetEase", "Apple Music", "BetterLyrics", "Unison", "BiniLyrics", "YouTube Captions", "YouTube Music"]);
     }
 
     #[test]

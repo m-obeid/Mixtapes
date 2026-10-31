@@ -1,4 +1,4 @@
-//! Lyrics: six providers, the chain that ranks them, the per-track disk cache and the preferences. Port of the lyrics half of api/client.py plus player/lyrics_cache.py and player/lyrics_prefs.py. No widgets live here.
+//! Lyrics: the providers, the chain that ranks them, the per-track disk cache and the preferences. Port of the lyrics half of api/client.py plus player/lyrics_cache.py and player/lyrics_prefs.py. No widgets live here.
 //!
 //! `Lyrics` is the one handle the UI needs. It is cheap to clone and every call is an async fn meant for the tokio runtime:
 //!
@@ -81,7 +81,7 @@ impl Lyrics {
     }
 
     /// Every provider's display name, in catalog order.
-    pub fn provider_names() -> [&'static str; 6] {
+    pub fn provider_names() -> [&'static str; 8] {
         prefs::DEFAULT_PROVIDER_ORDER
     }
 
@@ -308,7 +308,7 @@ mod tests {
         while let Ok(item) = receiver.try_recv() {
             got.push(item);
         }
-        assert_eq!(got.len(), 6);
+        assert_eq!(got.len(), 8);
         assert_eq!(got[0].source, "LRCLIB");
         assert_eq!(got[0].result.as_ref().unwrap().lines[0].text, "cached");
         let found = |name: &str| got.iter().find(|a| a.source == name).unwrap().result.clone();
@@ -350,7 +350,7 @@ mod tests {
         assert!(!Lyrics::provider_supports_matches("Nope"));
         assert!(lyrics.fetch_provider_matches("Nope", &track(), DEFAULT_MATCH_LIMIT).await.is_empty());
         assert!(lyrics.search_manually("typed", None, None, DEFAULT_MANUAL_SEARCH_LIMIT).await.is_empty());
-        assert_eq!(Lyrics::provider_names().len(), 6);
+        assert_eq!(Lyrics::provider_names().len(), 8);
     }
 
     /// Live checks, one per provider. Run with `cargo test lyrics::tests::live -- --ignored --nocapture --test-threads=1`.
