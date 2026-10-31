@@ -91,7 +91,6 @@
 
     <release version="2026-10-31.0" date="2026-10-31">
       <description>
-        <p>A big update, built from your reports.</p>
         <ul>
           <li>Mixtapes runs on macOS</li>
           <li>Translations, starting with German</li>
