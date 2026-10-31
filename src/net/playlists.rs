@@ -615,14 +615,20 @@ pub async fn remove_playlist_items(api: &dyn Browse, playlist_id: &str, items: &
     Ok(())
 }
 
-/// Move a row in front of `next`, or to the end without one. Rows go by setVideoId.
-pub async fn move_playlist_item(api: &dyn Browse, playlist_id: &str, moved: &str, next: Option<&str>) -> Result<(), NetError> {
-    let mut action = json!({ "action": "ACTION_MOVE_VIDEO_BEFORE", "setVideoId": moved });
-    if let Some(next) = next {
-        action["movedSetVideoIdSuccessor"] = json!(next);
-    }
-    api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": [action] })).await?;
-    Ok(())
+/// Move rows, in this order, in front of `next`, or to the end without one. Rows go by setVideoId.
+pub async fn move_playlist_items(api: &dyn Browse, playlist_id: &str, moved: &[String], next: Option<&str>) -> Result<(), NetError> {
+    let actions: Vec<Value> = moved
+        .iter()
+        .map(|set_id| {
+            let mut action = json!({ "action": "ACTION_MOVE_VIDEO_BEFORE", "setVideoId": set_id });
+            if let Some(next) = next {
+                action["movedSetVideoIdSuccessor"] = json!(next);
+            }
+            action
+        })
+        .collect();
+    let response = api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
+    edit_status(&response)
 }
 
 /// Which of these tracks the playlist already holds, by their own id or their song version's.
@@ -663,7 +669,11 @@ pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: 
         return Ok(());
     }
     let response = api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": add_actions(&ids, allow_duplicates) })).await?;
-    // A refused add still answers 200: a song already there comes back as STATUS_FAILED.
+    edit_status(&response)
+}
+
+/// A refused edit still answers 200, so the verdict is in the body: a song already there comes back as STATUS_FAILED.
+fn edit_status(response: &Value) -> Result<(), NetError> {
     match response.get("status").and_then(Value::as_str) {
         Some(status) if !status.contains("SUCCEEDED") => Err(message(status)),
         _ => Ok(()),

@@ -2112,10 +2112,11 @@ impl PlaylistPage {
         self.add_to_playlist(target.to_owned(), self.selected_tracks());
     }
 
-    /// A dragged row landed. The list changes at once, YouTube follows, and a refusal brings its order back.
+    /// Dragged rows landed. The list changes at once, YouTube follows, and a refusal brings its order back.
     fn move_track(self: &Rc<Self>, from: &str, to: &str, after: bool) {
         let Some(pid) = self.playlist_id() else { return };
-        let Some((moved, next)) = self.tracks.borrow_mut().move_track(from, to, after) else { return };
+        let keys = self.tracks.borrow().drag_keys(from);
+        let Some((moved, next)) = self.tracks.borrow_mut().move_tracks(&keys, to, after) else { return };
         let visible = self.tracks.borrow().visible();
         self.sync_track_store(visible);
         if crate::local_library::is_local(&pid) {
@@ -2123,13 +2124,15 @@ impl PlaylistPage {
             self.ctx.local.reorder_tracks(&pid, &tracks.source().iter().map(|t| t.video_id.as_str()).collect::<Vec<_>>());
             return;
         }
-        let Some(set_id) = moved.set_video_id else {
+        let set_ids: Vec<String> = moved.iter().filter_map(|t| t.set_video_id.clone()).collect();
+        if set_ids.len() != moved.len() {
             toast(&self.stack, &tr!("Could not move the song"));
+            self.load_playlist(&pid, None);
             return;
-        };
+        }
         let api = self.ctx.net.client().api();
         let list = pid.clone();
-        let handle = self.ctx.net.spawn(async move { playlists::move_playlist_item(&api, &list, &set_id, next.and_then(|t| t.set_video_id).as_deref()).await });
+        let handle = self.ctx.net.spawn(async move { playlists::move_playlist_items(&api, &list, &set_ids, next.and_then(|t| t.set_video_id).as_deref()).await });
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let Some(page) = weak.upgrade() else { return };
