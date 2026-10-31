@@ -100,6 +100,8 @@ fn summarize_error(message: &str) -> String {
 pub enum PlayEvent {
     Started(Track),
     Refined(Track),
+    /// The listener liked, disliked or cleared a song.
+    Rated(Track, LikeStatus),
 }
 
 type PlayListener = Box<dyn Fn(&PlayEvent)>;
@@ -451,6 +453,9 @@ impl Player {
     /// the queue is known by nothing else here.
     pub fn rate(&self, video_id: VideoId, status: LikeStatus, known: Option<Track>) {
         let known = self.queue.borrow().tracks().iter().find(|t| t.video_id == video_id).cloned().or(known);
+        if let Some(track) = &known {
+            self.emit_play(PlayEvent::Rated(track.clone(), status));
+        }
         if status == LikeStatus::Like && self.download_liked.get() {
             self.download_liked_track(&video_id, known.clone());
         }

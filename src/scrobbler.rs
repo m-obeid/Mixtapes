@@ -142,6 +142,10 @@ struct Due {
 }
 
 /// In offline mode a submission fails like a dropped connection, so the listen waits in the backlog.
+fn feedback_body(recording_mbid: &str, score: i8) -> Value {
+    json!({ "recording_mbid": recording_mbid, "score": score })
+}
+
 fn refuse_offline() -> Result<(), ScrobbleError> {
     if crate::net::offline::sealed() { Err(Transient(crate::net::offline::REFUSAL.to_owned())) } else { Ok(()) }
 }
@@ -189,6 +193,8 @@ fn tick(cur: &mut Current, duration: f64, is_playing: bool, now: Instant) -> Due
 enum Op {
     NowPlaying(Entry),
     Scrobble(Entry),
+    /// A like or dislike: artist, title and the ListenBrainz score.
+    Feedback(String, String, i8),
     Flush,
     Stop,
 }
@@ -386,6 +392,13 @@ impl Scrobbler {
         SERVICES.iter().any(|s| self.is_connected(*s))
     }
 
+    /// Pass a like (1), a dislike (-1) or a cleared rating (0) on to ListenBrainz.
+    pub fn send_feedback(&self, artist: &str, title: &str, score: i8) {
+        if self.is_connected(Service::ListenBrainz) && self.enabled() && !self.lock().muted && !artist.is_empty() && !title.is_empty() {
+            let _ = self.tx.send(Op::Feedback(artist.to_owned(), title.to_owned(), score));
+        }
+    }
+
     // -- worker ---------------------------------------------------------------
 
     async fn run(self: Arc<Self>, mut rx: UnboundedReceiver<Op>) {
@@ -405,6 +418,11 @@ impl Scrobbler {
             match op {
                 Op::Stop => break,
                 Op::NowPlaying(entry) => self.do_now_playing(&entry).await,
+                Op::Feedback(artist, title, score) => {
+                    if let Err(err) = self.listenbrainz_feedback(&artist, &title, score).await {
+                        tracing::warn!(%err, title, "ListenBrainz feedback failed");
+                    }
+                }
                 Op::Scrobble(entry) => {
                     self.append_pending(entry);
                     last_flush = Instant::now();
@@ -655,6 +673,36 @@ impl Scrobbler {
                 Err(Permanent(format!("HTTP {status}: {text}")))
             }
         }
+    }
+
+    /// Feedback hangs off a MusicBrainz recording, so the song is looked up by name first.
+    /// A song MusicBrainz does not know cannot be rated, and is not an error.
+    async fn listenbrainz_feedback(&self, artist: &str, title: &str, score: i8) -> Result<(), ScrobbleError> {
+        let token = format!("Token {}", self.credential(Service::ListenBrainz));
+        refuse_offline()?;
+        let lookup = self
+            .http
+            .get(format!("{LISTENBRAINZ_API_ROOT}/1/metadata/lookup/"))
+            .query(&[("artist_name", artist), ("recording_name", title)])
+            .header("Authorization", &token)
+            .send()
+            .await
+            .map_err(|e| Transient(e.to_string()))?;
+        let found: Value = lookup.json().await.map_err(|e| Transient(e.to_string()))?;
+        let Some(recording) = found.get("recording_mbid").and_then(Value::as_str) else {
+            tracing::debug!(title, "no MusicBrainz recording to rate");
+            return Ok(());
+        };
+        let response = self
+            .http
+            .post(format!("{LISTENBRAINZ_API_ROOT}/1/feedback/recording-feedback"))
+            .header("Authorization", &token)
+            .json(&feedback_body(recording, score))
+            .send()
+            .await
+            .map_err(|e| Transient(e.to_string()))?;
+        let status = response.status().as_u16();
+        if status == 200 { Ok(()) } else { Err(Permanent(format!("HTTP {status}"))) }
     }
 
     async fn listenbrainz_now_playing(&self, entry: &Entry) -> Result<(), ScrobbleError> {
@@ -928,6 +976,11 @@ fn write_json(path: &std::path::Path, data: &Value, private: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feedback_names_the_recording_and_the_score() {
+        assert_eq!(feedback_body("abc", -1), json!({"recording_mbid": "abc", "score": -1}));
+    }
 
     fn current(duration: f64) -> Current {
         Current {

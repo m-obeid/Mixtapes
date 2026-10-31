@@ -9,6 +9,7 @@ use glib::prelude::*;
 use crate::App;
 use crate::discord::{self, Options, Snapshot};
 use crate::model::PlaybackStatus;
+use crate::model::LikeStatus;
 use crate::player::PlayEvent;
 
 pub fn wire(ctx: &Rc<App>) {
@@ -25,6 +26,14 @@ fn wire_scrobbler(ctx: &Rc<App>) {
                 let album = t.album.as_ref().map(|a| a.name.as_str()).unwrap_or_default();
                 let duration = t.duration_seconds.map(f64::from).unwrap_or(0.0);
                 scrobbler.on_track_started(&t.video_id.0, &t.title, &t.artist, album, duration);
+            }
+            PlayEvent::Rated(t, status) => {
+                let score = match status {
+                    LikeStatus::Like => 1,
+                    LikeStatus::Dislike => -1,
+                    LikeStatus::Indifferent => 0,
+                };
+                scrobbler.send_feedback(t.artists.first().map_or(t.artist.as_str(), |a| a.name.as_str()), &t.title, score);
             }
             PlayEvent::Refined(t) => scrobbler.refine_current_track(&t.video_id.0, &t.title, &t.artist, t.album.as_ref().map(|a| a.name.as_str()).unwrap_or_default()),
         });
