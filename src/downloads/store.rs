@@ -87,7 +87,7 @@ pub fn migrate_legacy_folder(music_dir: &Path) {
 }
 
 /// Point rows at the renamed folder.
-fn rewrite_paths(music_dir: &Path, old_root: &Path) {
+pub fn rewrite_paths(music_dir: &Path, old_root: &Path) {
     let db_path = music_dir.join(".mixtapes").join("library.db");
     let Ok(db) = Connection::open(&db_path) else { return };
     let sep = std::path::MAIN_SEPARATOR;

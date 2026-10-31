@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
+/// The pref holding a download folder the listener chose. Applied at the next start.
+pub const MUSIC_FOLDER_PREF: &str = "download_folder";
+
 #[derive(Clone, Debug)]
 pub struct Paths {
     /// $XDG_DATA_HOME/muse
@@ -20,7 +23,7 @@ pub struct Paths {
     /// Developer config (debug_logs).
     pub config_file: PathBuf,
     /// Where downloads live, when something other than ~/Music/Mixtapes.
-    /// Tests set it, and MIXTAPES_MUSIC_DIR sets it for a demo run.
+    /// The listener's choice, read at startup. Tests set it, and MIXTAPES_MUSIC_DIR sets it for a demo run.
     music_override: Option<PathBuf>,
 }
 
@@ -34,14 +37,16 @@ impl Paths {
                 tracing::warn!(?dir, %err, "could not create directory");
             }
         }
+        let prefs_file = data_dir.join("prefs.json");
+        let chosen = read_object(&prefs_file).get(MUSIC_FOLDER_PREF).and_then(Value::as_str).filter(|p| !p.is_empty()).map(PathBuf::from);
         Self {
             auth_file: data_dir.join("headers_auth.json"),
-            prefs_file: data_dir.join("prefs.json"),
+            prefs_file,
             config_file: data_dir.join("config.json"),
             data_dir,
             cache_dir,
             stream_cache_dir,
-            music_override: std::env::var_os("MIXTAPES_MUSIC_DIR").map(PathBuf::from),
+            music_override: std::env::var_os("MIXTAPES_MUSIC_DIR").map(PathBuf::from).or(chosen),
         }
     }
 

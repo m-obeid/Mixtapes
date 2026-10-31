@@ -833,7 +833,8 @@ msgstr ""
 #: src/ui/pages/library.rs:1101 src/ui/pages/playlist.rs:2410
 #: src/ui/pages/playlist.rs:2586 src/ui/playlist_ops.rs:50
 #: src/ui/preferences.rs:581 src/ui/preferences.rs:943
-#: src/ui/preferences.rs:1001 src/ui/widgets/lyrics_view.rs:764
+#: src/ui/preferences.rs:1001 src/ui/preferences.rs:1095
+#: src/ui/widgets/lyrics_view.rs:764
 msgid "Cancel"
 msgstr "Abbrechen"
 
@@ -1561,7 +1562,7 @@ msgstr "Name (A-Z)"
 msgid "Name (Z-A)"
 msgstr "Name (Z-A)"
 
-#: src/ui/pages/library.rs:782 src/ui/preferences.rs:1100
+#: src/ui/pages/library.rs:782 src/ui/preferences.rs:1155
 msgid "Downloads"
 msgstr "Downloads"
 
@@ -2675,15 +2676,58 @@ msgstr "Den aktuellen Titel in deinem Profil anzeigen, solange er läuft"
 msgid "Queued Listens"
 msgstr "Wartende Wiedergaben"
 
-#: src/ui/preferences.rs:1081
+#: src/ui/preferences.rs:1077
+msgid "Choose Download Folder"
+msgstr "Download-Ordner wählen"
+
+#: src/ui/preferences.rs:1090
+msgid "Wait for downloads to finish first"
+msgstr "Warte, bis die Downloads fertig sind"
+
+#: src/ui/preferences.rs:1094
+msgid "Move Your Downloads?"
+msgstr "Downloads verschieben?"
+
+#: src/ui/preferences.rs:1094
+#, rust-format
+msgid ""
+"Mixtapes restarts to use the new folder, and playback stops. {n} downloaded "
+"song can move there, or stay where it is and no longer show in the app."
+msgid_plural ""
+"Mixtapes restarts to use the new folder, and playback stops. {n} downloaded "
+"songs can move there, or stay where they are and no longer show in the app."
+msgstr[0] "Mixtapes startet neu, um den neuen Ordner zu nutzen, und die Wiedergabe stoppt. {n} heruntergeladener Song kann mitkommen oder bleibt, wo er ist, und erscheint nicht mehr in der App."
+msgstr[1] "Mixtapes startet neu, um den neuen Ordner zu nutzen, und die Wiedergabe stoppt. {n} heruntergeladene Songs können mitkommen oder bleiben, wo sie sind, und erscheinen nicht mehr in der App."
+
+#: src/ui/preferences.rs:1095
+msgid "Leave Them"
+msgstr "Dort lassen"
+
+#: src/ui/preferences.rs:1095
+msgid "Move Them"
+msgstr "Verschieben"
+
+#: src/ui/preferences.rs:1109
+msgid "Moving downloads..."
+msgstr "Downloads werden verschoben..."
+
+#: src/ui/preferences.rs:1118
+msgid "Could not move your downloads. Nothing was changed."
+msgstr "Downloads konnten nicht verschoben werden. Nichts wurde geändert."
+
+#: src/ui/preferences.rs:1127
+msgid "The new folder is used after a restart"
+msgstr "Der neue Ordner gilt nach einem Neustart"
+
+#: src/ui/preferences.rs:1136
 msgid "Reorganizing downloads..."
 msgstr "Downloads werden neu sortiert..."
 
-#: src/ui/preferences.rs:1088
+#: src/ui/preferences.rs:1143
 msgid "Downloads already organized"
 msgstr "Downloads sind bereits sortiert"
 
-#: src/ui/preferences.rs:1089
+#: src/ui/preferences.rs:1144
 #, rust-format
 msgid "Reorganized {n} file(s)"
 msgid_plural "Reorganized {n} file(s)"
@@ -2691,46 +2735,54 @@ msgstr[0] "{n} Datei neu sortiert"
 msgstr[1] "{n} Dateien neu sortiert"
 
 #. Translators: {n} files were moved, {errors} is how many were left where they are.
-#: src/ui/preferences.rs:1091
+#: src/ui/preferences.rs:1146
 #, rust-format
 msgid "Reorganized {n} file(s); {errors} skipped"
 msgid_plural "Reorganized {n} file(s); {errors} skipped"
 msgstr[0] "{n} Datei neu sortiert, {errors} übersprungen"
 msgstr[1] "{n} Dateien neu sortiert, {errors} übersprungen"
 
-#: src/ui/preferences.rs:1104
+#: src/ui/preferences.rs:1159
 #, rust-format
 msgid "Songs are saved to {folder}"
 msgstr "Songs werden in {folder} gespeichert"
 
-#: src/ui/preferences.rs:1105
+#: src/ui/preferences.rs:1160
 msgid "Audio Format"
 msgstr "Audioformat"
 
-#: src/ui/preferences.rs:1120
+#: src/ui/preferences.rs:1175
 msgid "Folder Structure"
 msgstr "Ordnerstruktur"
 
-#: src/ui/preferences.rs:1120
+#: src/ui/preferences.rs:1175
 msgid "How new downloads are organized on disk"
 msgstr "Wie neue Downloads auf dem Datenträger abgelegt werden"
 
-#: src/ui/preferences.rs:1131
+#: src/ui/preferences.rs:1186
 msgid ""
 "Structure saved. Existing files will be reorganized after downloads finish."
 msgstr ""
 "Struktur gespeichert. Vorhandene Dateien werden neu sortiert, sobald die "
 "Downloads fertig sind."
 
-#: src/ui/preferences.rs:1137
+#: src/ui/preferences.rs:1192
+msgid "Download Folder"
+msgstr "Download-Ordner"
+
+#: src/ui/preferences.rs:1193
+msgid "Change…"
+msgstr "Ändern…"
+
+#: src/ui/preferences.rs:1204
 msgid "Use Songs Subfolder"
 msgstr "Unterordner „Songs“ verwenden"
 
-#: src/ui/preferences.rs:1137
+#: src/ui/preferences.rs:1204
 msgid "Place downloads inside a Songs/ subfolder within the music directory"
 msgstr "Downloads in einem Unterordner Songs/ im Musikverzeichnis ablegen"
 
-#: src/ui/preferences.rs:1144
+#: src/ui/preferences.rs:1211
 msgid ""
 "Subfolder setting saved. Existing files will be reorganized after downloads "
 "finish."
@@ -2738,11 +2790,11 @@ msgstr ""
 "Unterordner-Einstellung gespeichert. Vorhandene Dateien werden neu sortiert, "
 "sobald die Downloads fertig sind."
 
-#: src/ui/preferences.rs:1150
+#: src/ui/preferences.rs:1217
 msgid "Download Liked Songs"
 msgstr "Lieblingssongs herunterladen"
 
-#: src/ui/preferences.rs:1150
+#: src/ui/preferences.rs:1217
 msgid "Download a song when you like it"
 msgstr "Einen Song herunterladen, sobald du ihn mit „Mag ich“ bewertest"
 

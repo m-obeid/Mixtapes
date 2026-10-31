@@ -1073,6 +1073,61 @@ fn scrobbler_group(win: &Rc<MainWindow>, ctx: &Rc<App>, dialog: &adw::Preference
 
 /// Move existing downloads into the layout just chosen, and say how it went.
 /// `deferred` is the whole toast for when downloads are still running.
+fn choose_download_folder(win: &Rc<MainWindow>, ctx: &Rc<App>) {
+    let dialog = gtk::FileDialog::builder().title(tr!("Choose Download Folder")).build();
+    let (win_c, ctx) = (win.clone(), ctx.clone());
+    dialog.select_folder(Some(win.window()), None::<&gtk::gio::Cancellable>, move |picked| {
+        let Some(folder) = picked.ok().and_then(|file| file.path()) else { return };
+        if folder != ctx.paths.music_dir() {
+            ask_moving_downloads(&win_c, &ctx, folder);
+        }
+    });
+}
+
+/// A new folder takes effect at the next start. What is downloaded can come along or stay where it is.
+fn ask_moving_downloads(win: &Rc<MainWindow>, ctx: &Rc<App>, folder: std::path::PathBuf) {
+    if ctx.downloads.is_busy() {
+        win.add_toast(&tr!("Wait for downloads to finish first"));
+        return;
+    }
+    let count = ctx.downloads.downloaded_count();
+    let dialog = adw::AlertDialog::builder().heading(tr!("Move Your Downloads?")).body(trn!("Mixtapes restarts to use the new folder, and playback stops. {n} downloaded song can move there, or stay where it is and no longer show in the app.", "Mixtapes restarts to use the new folder, and playback stops. {n} downloaded songs can move there, or stay where they are and no longer show in the app.", count)).build();
+    dialog.add_responses(&[("cancel", &tr!("Cancel")), ("keep", &tr!("Leave Them")), ("move", &tr!("Move Them"))]);
+    dialog.set_response_appearance("move", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("move"));
+    dialog.set_close_response("cancel");
+    let (win_c, ctx_c) = (win.clone(), ctx.clone());
+    dialog.connect_response(None, move |_, response| match response {
+        "move" => move_downloads(&win_c, &ctx_c, folder.clone()),
+        "keep" => use_download_folder(&win_c, &ctx_c, &folder),
+        _ => {}
+    });
+    dialog.present(Some(win.window()));
+}
+
+fn move_downloads(win: &Rc<MainWindow>, ctx: &Rc<App>, folder: std::path::PathBuf) {
+    win.add_toast(&tr!("Moving downloads..."));
+    let (downloads, target) = (ctx.downloads.clone(), folder.clone());
+    let handle = ctx.net.spawn(async move { tokio::task::spawn_blocking(move || downloads.move_folder(&target)).await });
+    let (win, ctx) = (win.clone(), ctx.clone());
+    glib::spawn_future_local(async move {
+        match handle.await {
+            Ok(Ok(Ok(_))) => use_download_folder(&win, &ctx, &folder),
+            failed => {
+                tracing::warn!(?failed, "moving the download folder failed");
+                win.add_toast(&tr!("Could not move your downloads. Nothing was changed."));
+            }
+        }
+    });
+}
+
+fn use_download_folder(win: &Rc<MainWindow>, ctx: &Rc<App>, folder: &std::path::Path) {
+    save(ctx, crate::paths::MUSIC_FOLDER_PREF, folder.to_string_lossy().as_ref());
+    if !relaunch(win) {
+        win.add_toast(&tr!("The new folder is used after a restart"));
+    }
+}
+
 fn reorganize(win: &Rc<MainWindow>, ctx: &Rc<App>, deferred: &str) {
     if ctx.downloads.progress().is_some() {
         win.add_toast(deferred);
@@ -1133,6 +1188,18 @@ fn downloads_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup
         });
     }
     group.add(&structure_row);
+
+    let folder_row = adw::ActionRow::builder().title(tr!("Download Folder")).subtitle(glib::markup_escape_text(&ctx.paths.music_dir().display().to_string())).build();
+    let change = gtk::Button::builder().label(tr!("Change…")).valign(gtk::Align::Center).build();
+    folder_row.add_suffix(&change);
+    {
+        let (ctx, win) = (ctx.clone(), Rc::downgrade(win));
+        change.connect_clicked(move |_| {
+            let Some(win) = win.upgrade() else { return };
+            choose_download_folder(&win, &ctx);
+        });
+    }
+    group.add(&folder_row);
 
     let subdir_row = switch_row(&tr!("Use Songs Subfolder"), &tr!("Place downloads inside a Songs/ subfolder within the music directory"), naming::use_songs_subdir(&ctx.paths));
     {

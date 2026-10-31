@@ -283,6 +283,26 @@ impl Downloads {
     ///
     /// For when the layout setting changes. Returns how many moved and how
     /// many could not, which is what the settings page reports.
+    /// Whether a queue is running, which a folder change has to wait for.
+    pub fn is_busy(&self) -> bool {
+        self.progress().is_some()
+    }
+
+    /// Move everything to `to`, library included, and point its rows there. The app restarts right after,
+    /// since the library stays open on the old path until then.
+    pub fn move_folder(&self, to: &Path) -> std::io::Result<usize> {
+        let from = self.paths.music_dir();
+        if !from.exists() {
+            return Ok(0);
+        }
+        if to.join(".mixtapes").join("library.db").exists() {
+            return Err(std::io::Error::other("that folder already holds a library"));
+        }
+        let moved = move_tree(&from, to)?;
+        store::rewrite_paths(to, &from);
+        Ok(moved)
+    }
+
     pub fn migrate_layout(&self) -> (usize, usize) {
         relayout(&self.paths, &self.store)
     }
@@ -695,6 +715,55 @@ pub fn relayout(paths: &Paths, store: &Store) -> (usize, usize) {
     (moves.len(), errors)
 }
 
+/// Every file under `dir`, folders left out.
+fn files_under(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() { files_under(&path, out)? } else { out.push(path) }
+    }
+    Ok(())
+}
+
+/// Move a whole folder's files into `to`, keeping their layout. All or nothing: a file
+/// already in the way stops it before anything moves, and a failure puts back what went.
+pub fn move_tree(from: &Path, to: &Path) -> std::io::Result<usize> {
+    if to.starts_with(from) {
+        return Err(std::io::Error::other("the new folder is inside the old one"));
+    }
+    let mut files = Vec::new();
+    files_under(from, &mut files)?;
+    let target = |file: &Path| file.strip_prefix(from).map(|rest| to.join(rest)).map_err(std::io::Error::other);
+    for file in &files {
+        if target(file)?.exists() {
+            return Err(std::io::Error::other(format!("{} is already there", target(file)?.display())));
+        }
+    }
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for file in &files {
+        let destination = target(file)?;
+        let step = destination.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| move_file(file, &destination));
+        if let Err(err) = step {
+            for (back, there) in moved.iter().rev() {
+                let _ = move_file(there, back);
+            }
+            return Err(err);
+        }
+        moved.push((file.clone(), destination));
+    }
+    let _ = remove_empty_folders(from);
+    Ok(files.len())
+}
+
+fn remove_empty_folders(dir: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            remove_empty_folders(&path)?;
+        }
+    }
+    std::fs::remove_dir(dir)
+}
+
 /// Remove folders left empty by a move or a deletion, stopping at the music folder.
 fn prune_empty(paths: &Paths, start: &Path) {
     let music = paths.music_dir();
@@ -787,6 +856,59 @@ fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_moves_whole_and_leaves_nothing_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let (from, to) = (dir.path().join("old"), dir.path().join("new"));
+        std::fs::create_dir_all(from.join("Artist/Album")).unwrap();
+        std::fs::create_dir_all(from.join(".mixtapes")).unwrap();
+        std::fs::write(from.join("Artist/Album/One.opus"), b"song").unwrap();
+        std::fs::write(from.join(".mixtapes/library.db"), b"db").unwrap();
+        assert_eq!(move_tree(&from, &to).unwrap(), 2);
+        assert_eq!(std::fs::read(to.join("Artist/Album/One.opus")).unwrap(), b"song");
+        assert!(to.join(".mixtapes/library.db").exists());
+        assert!(!from.exists());
+    }
+
+    #[test]
+    fn the_library_follows_its_files_to_the_new_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::for_tests(dir.path());
+        let from = paths.music_dir();
+        let to = dir.path().join("elsewhere");
+        let store = Store::open(&from);
+        std::fs::create_dir_all(from.join("Artist")).unwrap();
+        let file = from.join("Artist/One.opus");
+        std::fs::write(&file, b"song").unwrap();
+        store.add(&Entry { video_id: "a".to_owned(), title: "One".to_owned(), file_path: file, ..Entry::default() });
+        drop(store);
+        move_tree(&from, &to).unwrap();
+        store::rewrite_paths(&to, &from);
+        let moved = Store::open(&to);
+        assert_eq!(moved.local_path("a"), Some(to.join("Artist/One.opus")));
+    }
+
+    #[test]
+    fn a_file_in_the_way_stops_the_move_before_it_starts() {
+        let dir = tempfile::tempdir().unwrap();
+        let (from, to) = (dir.path().join("old"), dir.path().join("new"));
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::create_dir_all(&to).unwrap();
+        std::fs::write(from.join("a.opus"), b"a").unwrap();
+        std::fs::write(from.join("b.opus"), b"mine").unwrap();
+        std::fs::write(to.join("b.opus"), b"theirs").unwrap();
+        assert!(move_tree(&from, &to).is_err());
+        assert!(from.join("a.opus").exists(), "nothing moved");
+        assert!(!to.join("a.opus").exists());
+        assert_eq!(std::fs::read(to.join("b.opus")).unwrap(), b"theirs");
+    }
+
+    #[test]
+    fn a_folder_cannot_move_into_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(move_tree(dir.path(), &dir.path().join("inside")).is_err());
+    }
 
     #[test]
     fn progress_lines_become_a_fraction() {
