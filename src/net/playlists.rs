@@ -442,7 +442,18 @@ async fn search_audio_version(api: &dyn Browse, title: &str, artists: &[String],
     if !artists.is_empty() && let Some(item) = results.items.iter().filter(by_artist).filter(same_length).find(|i| normalize_title(without_featuring(&i.title)) == wanted) {
         return Ok(item.to_track());
     }
+    // Japanese songs are often listed as "Original - Romanized (feat. X)", where a video has only one half.
+    // Spelled out that fully it is the same song even when the video runs longer than the audio.
+    if !artists.is_empty() && let Some(item) = results.items.iter().filter(by_artist).find(|i| names_a_half(&i.title, &wanted)) {
+        return Ok(item.to_track());
+    }
     Ok(None)
+}
+
+/// Whether either half of an "Original - Romanized" title is `wanted`, normalized.
+fn names_a_half(title: &str, wanted: &str) -> bool {
+    let Some((first, second)) = without_featuring(title).split_once(" - ") else { return false };
+    !wanted.is_empty() && (normalize_title(first) == wanted || normalize_title(second) == wanted)
 }
 
 /// How far apart, in seconds, a video and a song may run and still be one recording when only the featured name differs.
@@ -1141,6 +1152,15 @@ mod tests {
         let ids = ["a".to_owned()];
         assert_eq!(add_actions(&ids, true)[0]["dedupeOption"], "DEDUPE_OPTION_SKIP");
         assert!(add_actions(&ids, false)[0].get("dedupeOption").is_none());
+    }
+
+    #[test]
+    fn either_half_of_a_two_part_title_names_the_song() {
+        let wanted = normalize_title("M@GICAL CURE! LOVE SHOT!");
+        assert!(names_a_half("M@GICAL☆CURE! LOVE SHOT! - M@GICAL CURE! LOVE SHOT! (feat. Hatsune Miku)", &wanted));
+        assert!(names_a_half("怪物 - Monster", &normalize_title("Monster")));
+        assert!(!names_a_half("M@GICAL CURE! LOVE SHOT!", &wanted), "one part is not two");
+        assert!(!names_a_half("Love Shot - Remix", &wanted));
     }
 
     #[test]
