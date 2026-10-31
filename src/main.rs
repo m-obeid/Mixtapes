@@ -24,6 +24,8 @@ mod model;
 // MPRIS on Linux. Elsewhere the same two calls land in smtc.rs.
 #[cfg_attr(not(target_os = "linux"), path = "smtc.rs")]
 mod mpris;
+#[cfg(target_os = "linux")]
+mod ducking;
 mod net;
 mod paths;
 mod player;
@@ -236,6 +238,8 @@ fn on_startup(ctx: &Rc<App>) {
     ctx.mpris.replace(Some(Mpris::start(ctx)));
     tray::start(ctx);
     presence::wire(ctx);
+    #[cfg(target_os = "linux")]
+    ducking::start(ctx);
     tracing::info!(auth = ?ctx.net.client().auth_state(), "core started");
 }
 

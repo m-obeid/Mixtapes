@@ -404,6 +404,14 @@ fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup 
     }
     group.add(&radio_row);
 
+    #[cfg(target_os = "linux")]
+    {
+        let duck_row = switch_row(&tr!("Lower Volume for Other Players"), &tr!("Turn the music down while another app plays media, like a voice message in a browser"), pref_bool(ctx, crate::ducking::PREF, false));
+        let ctx = ctx.clone();
+        duck_row.connect_active_notify(move |row| save(&ctx, crate::ducking::PREF, row.is_active()));
+        group.add(&duck_row);
+    }
+
     let normalize_row = switch_row(&tr!("Normalize Volume"), &tr!("Turn loud songs down to match the rest, using YouTube's loudness measurements"), pref_bool(ctx, crate::net::loudness::PREF, true));
     {
         let ctx = ctx.clone();

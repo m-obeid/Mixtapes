@@ -106,6 +106,9 @@ pub enum PlayEvent {
 
 type PlayListener = Box<dyn Fn(&PlayEvent)>;
 
+/// What the music is multiplied by while another player plays.
+const DUCKED_GAIN: f64 = 0.3;
+
 pub struct Player {
     me: Weak<Player>,
     state: PlayerState,
@@ -157,6 +160,8 @@ pub struct Player {
     swap_checked: RefCell<std::collections::HashSet<String>>,
     /// Told when a play starts or its metadata is corrected. See `on_play`.
     play_listeners: RefCell<Vec<PlayListener>>,
+    /// Turned down while another player plays.
+    ducked: Cell<bool>,
     /// Set while the audio-version swap writes its metadata, so the source id survives it.
     swapping: Cell<bool>,
     /// Where the queue is kept between runs.
@@ -199,6 +204,7 @@ impl Player {
             listened: RefCell::new(Listened::default()),
             swap_checked: RefCell::new(std::collections::HashSet::new()),
             play_listeners: RefCell::new(Vec::new()),
+            ducked: Cell::new(false),
             swapping: Cell::new(false),
             session_file: crate::session::file(paths),
             keep_session: Cell::new(session_allowed() && paths.read_prefs().get("restore_queue").and_then(|v| v.as_bool()).unwrap_or(true)),
@@ -1061,7 +1067,15 @@ impl Player {
     }
 
     fn apply_gain(&self, video_id: &VideoId) {
-        self.audio.send(AudioCommand::SetGain(crate::net::loudness::gain(video_id.as_str())));
+        let duck = if self.ducked.get() { DUCKED_GAIN } else { 1.0 };
+        self.audio.send(AudioCommand::SetGain(crate::net::loudness::gain(video_id.as_str()) * duck));
+    }
+
+    /// Another player started or stopped. The song in the speakers follows at once.
+    pub fn set_ducked(&self, ducked: bool) {
+        tracing::debug!(ducked, "another player");
+        self.ducked.set(ducked);
+        self.apply_gain(&VideoId(self.state.video_id()));
     }
 
     /// The Normalize Volume setting. The song playing changes straight away.
