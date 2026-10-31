@@ -173,7 +173,9 @@ impl LikeButton {
         let Some(video_id) = self.video_id.borrow().clone() else { return };
         self.status.set(status);
         self.update_icon();
-        self.player.rate(video_id, status, self.track.borrow().clone());
+        // Rating updates the row through set_data, so no borrow may outlive this line.
+        let track = self.track.borrow().clone();
+        self.player.rate(video_id, status, track);
     }
 
     fn update_icon(&self) {
