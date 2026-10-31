@@ -397,6 +397,13 @@ fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup 
     let current = pref_str(ctx, "history_mode", "immediate");
     let labels: Vec<String> = HISTORY_MODES.iter().map(|(_, label)| crate::i18n::gettext(label)).collect();
     let selected = HISTORY_MODES.iter().position(|(key, _)| *key == current).unwrap_or(0);
+    let radio_row = switch_row(&tr!("Start a Radio from Songs"), &tr!("A song played from search or Home continues with similar songs, not the rest of the list"), pref_bool(ctx, crate::ui::pages::RADIO_PREF, false));
+    {
+        let ctx = ctx.clone();
+        radio_row.connect_active_notify(move |row| save(&ctx, crate::ui::pages::RADIO_PREF, row.is_active()));
+    }
+    group.add(&radio_row);
+
     let normalize_row = switch_row(&tr!("Normalize Volume"), &tr!("Turn loud songs down to match the rest, using YouTube's loudness measurements"), pref_bool(ctx, crate::net::loudness::PREF, true));
     {
         let ctx = ctx.clone();

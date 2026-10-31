@@ -712,7 +712,7 @@ impl Section {
 }
 
 /// The lists every library starts with. They stay on top whatever the order.
-const PINNED: [&str; 3] = ["LM", DOWNLOADS_ID, crate::local_library::LIKED_ID];
+const PINNED: [&str; 5] = ["LM", "SS", "SE", DOWNLOADS_ID, crate::local_library::LIKED_ID];
 const SORT_PREF: &str = "library_sort";
 const SORT_RECENT: u32 = 0;
 const SORT_OLDEST: u32 = 1;

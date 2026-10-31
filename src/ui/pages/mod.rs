@@ -22,6 +22,9 @@ use crate::ui::context::{NavRequest, UiContext};
 /// Port of home.py _activate_item: play songs and videos, navigate for the rest.
 /// `from` names the queue a song starts: the shelf or the search it was clicked in.
 pub fn activate_item(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem], from: &str) {
+    if radio_instead(ctx, item, from) {
+        return;
+    }
     match item.kind {
         ItemKind::Song | ItemKind::Video => {
             let tracks: Vec<_> = pool.iter().filter_map(MediaItem::to_track).collect();
@@ -46,10 +49,27 @@ pub fn activate_item(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem], 
     }
 }
 
+/// The pref behind Start a Radio from Songs.
+pub const RADIO_PREF: &str = "radio_from_songs";
+
+/// With the setting on, a song from a shelf or a search result plays alone and a radio of it follows,
+/// as on the YouTube Music app. False when the list around it should play instead.
+fn radio_instead(ctx: &Rc<UiContext>, item: &MediaItem, from: &str) -> bool {
+    if !item.kind.is_playable() || !ctx.paths.read_prefs().get(RADIO_PREF).and_then(|v| v.as_bool()).unwrap_or(false) {
+        return false;
+    }
+    let Some(track) = item.to_track() else { return false };
+    ctx.player.play_then_radio(vec![track], 0, &item.id, from);
+    true
+}
+
 /// Home's variant: a song or video plays the whole shelf it was in and then
 /// keeps going with a radio seeded from the shelf's last track, like
 /// _play_with_radio. Everything else navigates as usual.
 pub fn activate_item_with_radio(ctx: &Rc<UiContext>, item: &MediaItem, pool: &[MediaItem], from: &str) {
+    if radio_instead(ctx, item, from) {
+        return;
+    }
     if !item.kind.is_playable() {
         activate_item(ctx, item, pool, from);
         return;
