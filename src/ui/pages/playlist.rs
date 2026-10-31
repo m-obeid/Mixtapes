@@ -727,6 +727,8 @@ impl PlaylistPage {
             self.emit_title("");
             self.tracks.borrow_mut().clear();
             self.is_previewing_cover.set(false);
+            self.header_says_saved.set(false);
+            self.library_choice.set(None);
             self.clear_track_store();
         }
 
@@ -760,6 +762,11 @@ impl PlaylistPage {
                 None => self.cover.clear(),
             }
             self.stack.set_visible_child_name("content");
+            // An album is nobody's own, so the star needs no fetch to know it belongs here.
+            if Self::is_album_id(playlist_id) {
+                self.is_saved_to_library.set(self.saved_in_library(playlist_id, false));
+                self.sync_library_button(false);
+            }
             // Optimistic render from the disk cache while the fresh fetch runs.
             // The delayed fetch only applies when rows are showing, so the
             // cache read decides the schedule once it lands.
@@ -1763,14 +1770,21 @@ impl PlaylistPage {
         self.sync_library_button(is_owned);
     }
 
+    fn is_album_id(pid: &str) -> bool {
+        pid.starts_with("MPRE") || pid.starts_with("OLAK")
+    }
+
     /// The library button: an empty star on a list that can be saved, a full one once it is, like Subscribe on an artist.
     /// Hidden on your own lists, on lists made here and where there is nothing to save to.
     fn sync_library_button(&self, is_owned: bool) {
         let pid = self.playlist_id.borrow().clone().unwrap_or_default();
         // The account takes any list YouTube serves. Without one, the card kept on this device is what gets saved.
-        let savable = if self.ctx.net.client().is_authenticated() { !pid.is_empty() && !Self::is_virtual(&pid) && pid != "LM" } else { self.library_item.borrow().is_some() };
+        let savable = if self.ctx.net.client().is_authenticated() { !pid.is_empty() && !Self::is_virtual(&pid) && pid != "LM" } else { self.library_item.borrow().is_some() || Self::is_album_id(&pid) };
         let saved = self.is_saved_to_library.get();
         self.library_btn.set_visible(!is_owned && !crate::local_library::is_local(&pid) && savable);
+        // Shown ahead of the fetch, but saving needs what the fetch brings: the album's audio playlist, or its card here.
+        let authenticated = self.ctx.net.client().is_authenticated();
+        self.library_btn.set_sensitive(if authenticated { !pid.starts_with("MPRE") || self.audio_playlist_id.borrow().is_some() } else { self.library_item.borrow().is_some() });
         self.library_btn.set_icon_name(if saved { "starred-symbolic" } else { "non-starred-symbolic" });
         self.library_btn.set_tooltip_text(Some(if saved { "Remove from Library" } else { "Add to Library" }));
         // The accent the artist page's star takes once subscribed.

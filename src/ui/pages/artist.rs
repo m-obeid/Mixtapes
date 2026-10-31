@@ -208,7 +208,7 @@ impl ArtistPage {
         actions.append(&radio_btn);
         let subscribe_btn = gtk::Button::builder()
             .icon_name("non-starred-symbolic")
-            .css_classes(["circular", "flat"])
+            .css_classes(["circular"])
             .valign(gtk::Align::Center)
             .tooltip_text("Subscribe")
             .build();
