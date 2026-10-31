@@ -393,6 +393,8 @@ impl MainWindow {
         this.wire_state(&state);
         avatar_profile.bind(ctx, &this.window);
         this.install_key_controller();
+        #[cfg(target_os = "macos")]
+        this.install_swipe_back();
         install_close_handler(&this.window, ctx);
         this.install_network_state();
         this.sync_player_bar_visibility();
@@ -1980,6 +1982,82 @@ impl MainWindow {
         });
     }
 
+    /// Two-finger swipe back on macOS. GTK reports trackpad scrolling there as a
+    /// mouse, and libadwaita's swipe tracker only follows touchpads, so the
+    /// navigation views never see the gesture. Relabelling the pointer fixes
+    /// that; if it cannot be done, a mostly sideways swipe toward the right
+    /// goes back once it has travelled far enough, unless it started over
+    /// something that scrolls sideways itself.
+    #[cfg(target_os = "macos")]
+    fn install_swipe_back(self: &Rc<Self>) {
+        // With the trackpad reported as one, libadwaita's own swipe takes over.
+        if crate::macos::report_trackpad_as_touchpad() {
+            tracing::debug!("trackpad reported as a touchpad, libadwaita handles swipes");
+            return;
+        }
+        const DISTANCE: f64 = 120.0;
+        // Travel along each axis since the fingers went down, and whether this
+        // swipe is spent: it went back already, or it belongs to a scroller.
+        let travel = Rc::new(Cell::new((0.0f64, 0.0f64)));
+        let spent = Rc::new(Cell::new(false));
+        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+        scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = Rc::downgrade(self);
+        scroll.connect_scroll(move |controller, dx, dy| {
+            let Some(event) = controller.current_event().and_then(|e| e.downcast::<gdk::ScrollEvent>().ok()) else {
+                return glib::Propagation::Proceed;
+            };
+            // macOS sends a stop as the fingers touch down and another as they lift.
+            if event.is_stop() {
+                travel.set((0.0, 0.0));
+                spent.set(false);
+                return glib::Propagation::Proceed;
+            }
+            if spent.get() || event.unit() != gdk::ScrollUnit::Surface {
+                return glib::Propagation::Proceed;
+            }
+            let Some(w) = weak.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            let (x, y) = travel.get();
+            if x == 0.0 && y == 0.0 && w.scrolls_sideways_at(&event) {
+                spent.set(true);
+                return glib::Propagation::Proceed;
+            }
+            // With natural scrolling the content follows the fingers, so the
+            // deltas point the other way from them.
+            let fingers_right = if natural_scrolling(&event) { -dx } else { dx };
+            let (x, y) = (x + fingers_right, y + dy.abs());
+            travel.set((x, y));
+            if x > DISTANCE && x > 2.0 * y && w.back_btn.is_visible() {
+                spent.set(true);
+                w.on_back_clicked();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        self.window.add_controller(scroll);
+    }
+
+    /// Whether the pointer is over something that scrolls sideways, such as a
+    /// card strip. A swipe there moves the strip, not the page.
+    #[cfg(target_os = "macos")]
+    fn scrolls_sideways_at(&self, event: &gdk::ScrollEvent) -> bool {
+        let Some((x, y)) = event.position() else { return false };
+        let (tx, ty) = self.window.surface_transform();
+        let mut widget = self.window.pick(x - tx, y - ty, gtk::PickFlags::DEFAULT);
+        while let Some(current) = widget {
+            if let Some(scroller) = current.downcast_ref::<gtk::ScrolledWindow>() {
+                let h = scroller.hadjustment();
+                if h.upper() - h.lower() > h.page_size() + 1.0 {
+                    return true;
+                }
+            }
+            widget = current.parent();
+        }
+        false
+    }
+
     /// Escape closes search or goes back, space toggles playback, media keys skip,
     /// and a printable key opens search with that character.
     fn install_key_controller(self: &Rc<Self>) {
@@ -2045,6 +2123,20 @@ impl MainWindow {
         });
         self.window.add_controller(ctrl);
     }
+}
+
+/// Whether the scroll came from a device set to natural scrolling. GTK 4.20
+/// API, above the version floor elsewhere, so it is called directly.
+#[cfg(target_os = "macos")]
+fn natural_scrolling(event: &gdk::ScrollEvent) -> bool {
+    use gtk::glib::translate::ToGlibPtr;
+    unsafe extern "C" {
+        fn gdk_scroll_event_get_relative_direction(event: *mut gdk::ffi::GdkEvent) -> std::ffi::c_int;
+    }
+    const GDK_SCROLL_RELATIVE_DIRECTION_INVERTED: std::ffi::c_int = 1;
+    let event: &gdk::Event = event.upcast_ref();
+    // SAFETY: a live scroll event; the call only reads it.
+    unsafe { gdk_scroll_event_get_relative_direction(event.to_glib_none().0) == GDK_SCROLL_RELATIVE_DIRECTION_INVERTED }
 }
 
 /// One AdwNavigationView per tab, its root page tagged "root".
@@ -2837,12 +2929,22 @@ fn install_actions(
     }
     window.add_action(&scheme);
 
-    app.set_accels_for_action("win.preferences", &["<Primary>comma"]);
-    app.set_accels_for_action("win.shortcuts", &["<Primary>question", "<Primary>slash"]);
-    app.set_accels_for_action("win.quit", &["<Primary>q"]);
-    app.set_accels_for_action("win.toggle-player", &["<Primary>e"]);
-    app.set_accels_for_action("win.refresh", &["F5", "<Primary>r"]);
-    app.set_accels_for_action("win.search", &["<Primary>f"]);
+    let set_accels = |action: &str, accels: &[&str]| {
+        let accels: Vec<String> = accels.iter().map(|accel| primary_to_platform(accel)).collect();
+        app.set_accels_for_action(action, &accels.iter().map(String::as_str).collect::<Vec<_>>());
+    };
+    set_accels("win.preferences", &["<Primary>comma"]);
+    set_accels("win.shortcuts", &["<Primary>question", "<Primary>slash"]);
+    set_accels("win.quit", &["<Primary>q"]);
+    set_accels("win.toggle-player", &["<Primary>e"]);
+    set_accels("win.refresh", &["F5", "<Primary>r"]);
+    // The Mac conventions. Closing hides the window while music plays, like the close button.
+    #[cfg(target_os = "macos")]
+    {
+        set_accels("window.close", &["<Primary>w"]);
+        set_accels("window.minimize", &["<Primary>m"]);
+    }
+    set_accels("win.search", &["<Primary>f"]);
 }
 
 fn apply_color_scheme(value: &str) {
@@ -2854,6 +2956,12 @@ fn apply_color_scheme(value: &str) {
     adw::StyleManager::default().set_color_scheme(scheme);
 }
 
+/// GTK 4 reads <Primary> as Control on every platform. Mac shortcuts use
+/// Command, which GTK calls Meta there.
+fn primary_to_platform(accel: &str) -> String {
+    if cfg!(target_os = "macos") { accel.replace("<Primary>", "<Meta>") } else { accel.to_owned() }
+}
+
 /// The shortcut list, as libadwaita's own dialog.
 fn build_shortcuts_dialog() -> adw::ShortcutsDialog {
     let dialog = adw::ShortcutsDialog::new();
@@ -2861,25 +2969,29 @@ fn build_shortcuts_dialog() -> adw::ShortcutsDialog {
         (
             tr!("General"),
             vec![
-                (tr!("Preferences"), "<Control>comma"),
-                (tr!("Keyboard Shortcuts"), "<Control>question"),
-                (tr!("Refresh"), "F5 <Control>r"),
+                (tr!("Preferences"), "<Primary>comma"),
+                (tr!("Keyboard Shortcuts"), "<Primary>question"),
+                (tr!("Refresh"), "F5 <Primary>r"),
                 (tr!("Go Back / Close Search"), "Escape"),
-                (tr!("Quit"), "<Control>q"),
+                (tr!("Quit"), "<Primary>q"),
+                #[cfg(target_os = "macos")]
+                (tr!("Close Window"), "<Primary>w"),
+                #[cfg(target_os = "macos")]
+                (tr!("Minimize"), "<Primary>m"),
             ],
         ),
         (
             tr!("Playback"),
             vec![
                 (tr!("Play / Pause"), "space"),
-                (tr!("Open / Close Player"), "<Control>e"),
+                (tr!("Open / Close Player"), "<Primary>e"),
             ],
         ),
-        (tr!("Search"), vec![(tr!("Search"), "<Control>f")]),
+        (tr!("Search"), vec![(tr!("Search"), "<Primary>f")]),
     ] {
         let section = adw::ShortcutsSection::new(Some(&title));
         for (name, accel) in entries {
-            section.add(adw::ShortcutsItem::new(&name, accel));
+            section.add(adw::ShortcutsItem::new(&name, &primary_to_platform(accel)));
         }
         dialog.add(section);
     }

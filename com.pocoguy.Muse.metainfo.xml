@@ -91,8 +91,9 @@
 
     <release version="2026-10-31.0" date="2026-10-31">
       <description>
-        <p>A big update, built from your reports. Mixtapes speaks German now, with more languages to come, and the like button no longer crashes the app.</p>
+        <p>A big update, built from your reports. Mixtapes comes to macOS and speaks German now, with more languages to come, and the like button no longer crashes the app.</p>
         <ul>
+          <li>Mixtapes runs on macOS: sign-in, Now Playing, media keys, the menu bar and trackpad gestures, as a disk image for Apple silicon and Intel</li>
           <li>Translations are here, starting with German. Preferences, General has a Language row</li>
           <li>Volume normalization turns loud songs down to match the rest, like on YouTube, for streams and downloads: Preferences, Playback</li>
           <li>Lyrics from two new sources, QQ Music and the community made Unison, both with word by word timing</li>

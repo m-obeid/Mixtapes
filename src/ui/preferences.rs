@@ -19,6 +19,11 @@ use crate::ui::window::{AppearancePref, MainWindow};
 
 // The labels in these tables are translated where a row shows them. Bare brand names stay as they are.
 const RENDERERS: [(&str, &str); 5] = [("default", tr_noop!("Default (recommended)")), ("ngl", "NGL"), ("gl", tr_noop!("Legacy GL")), ("vulkan", "Vulkan"), ("cairo", tr_noop!("Cairo (Software)"))];
+
+/// The renderers this platform's GTK has. Its macOS build has no Vulkan.
+fn renderers() -> Vec<(&'static str, &'static str)> {
+    RENDERERS.into_iter().filter(|(key, _)| !(cfg!(target_os = "macos") && *key == "vulkan")).collect()
+}
 const HISTORY_MODES: [(&str, &str); 3] = [("immediate", tr_noop!("Immediately")), ("after_30s", tr_noop!("After 30 seconds")), ("never", tr_noop!("Never"))];
 const FORMAT_LABELS: [&str; 5] = [tr_noop!("Opus (smallest)"), tr_noop!("MP3 (universal)"), tr_noop!("M4A (Apple)"), tr_noop!("FLAC (lossless)"), tr_noop!("OGG (Vorbis)")];
 const STRUCTURE_LABELS: [&str; 3] = [tr_noop!("Artist / Album / Song"), tr_noop!("Artist / Song"), tr_noop!("No folders")];
@@ -519,13 +524,14 @@ fn troubleshooting_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::Preference
 
     // Some GPU and driver pairs crash inside the default renderer. Read at the next launch.
     let current = pref_str(ctx, "gsk_renderer", "default");
-    let labels: Vec<String> = RENDERERS.iter().map(|(_, label)| crate::i18n::gettext(label)).collect();
-    let selected = RENDERERS.iter().position(|(key, _)| *key == current).unwrap_or(0);
+    let renderers = renderers();
+    let labels: Vec<String> = renderers.iter().map(|(_, label)| crate::i18n::gettext(label)).collect();
+    let selected = renderers.iter().position(|(key, _)| *key == current).unwrap_or(0);
     let renderer_row = combo_row(&tr!("Renderer"), &tr!("Switch if you hit GPU-related crashes. Applies on next launch."), &labels, selected);
     {
         let ctx = ctx.clone();
         renderer_row.connect_selected_notify(move |row| {
-            if let Some((key, _)) = RENDERERS.get(row.selected() as usize) {
+            if let Some((key, _)) = renderers.get(row.selected() as usize) {
                 save(&ctx, "gsk_renderer", *key);
             }
         });

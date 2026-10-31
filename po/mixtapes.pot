@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 20:42+0100\n"
+"POT-Creation-Date: 2026-10-31 21:24+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -46,7 +46,7 @@ msgstr ""
 msgid "Disconnected"
 msgstr ""
 
-#: src/discord.rs:367 src/ui/preferences.rs:871
+#: src/discord.rs:367 src/ui/preferences.rs:877
 msgid "Connected"
 msgstr ""
 
@@ -249,6 +249,146 @@ msgstr[1] ""
 msgid "My Lyrics"
 msgstr ""
 
+#: src/macos.rs:134
+msgid "Sign In…"
+msgstr ""
+
+#: src/macos.rs:135 src/ui/preferences.rs:172
+msgid "Sign Out"
+msgstr ""
+
+#: src/macos.rs:138
+msgid "Upload Songs…"
+msgstr ""
+
+#: src/macos.rs:141 src/ui/window.rs:2978
+msgid "Close Window"
+msgstr ""
+
+#: src/macos.rs:143
+msgid "File"
+msgstr ""
+
+#: src/macos.rs:148
+msgid "Undo"
+msgstr ""
+
+#: src/macos.rs:149
+msgid "Redo"
+msgstr ""
+
+#: src/macos.rs:152
+msgid "Cut"
+msgstr ""
+
+#: src/macos.rs:153 src/ui/expanded_player.rs:735
+msgid "Copy"
+msgstr ""
+
+#: src/macos.rs:154
+msgid "Paste"
+msgstr ""
+
+#: src/macos.rs:155 src/ui/pages/library.rs:1064 src/ui/pages/library.rs:1102
+#: src/ui/pages/playlist.rs:2411 src/ui/pages/playlist.rs:2587
+msgid "Delete"
+msgstr ""
+
+#: src/macos.rs:156 src/ui/pages/playlist.rs:237 src/ui/pages/playlist.rs:2387
+msgid "Select All"
+msgstr ""
+
+#: src/macos.rs:159
+msgid "Find"
+msgstr ""
+
+#: src/macos.rs:161
+msgid "Edit"
+msgstr ""
+
+#: src/macos.rs:165
+msgid "Show or Hide Player"
+msgstr ""
+
+#: src/macos.rs:166 src/ui/window.rs:2285 src/ui/window.rs:2974
+msgid "Refresh"
+msgstr ""
+
+#: src/macos.rs:169 src/ui/pages/history.rs:358 src/ui/pages/home.rs:366
+msgid "History"
+msgstr ""
+
+#: src/macos.rs:170 src/ui/pages/playlist.rs:2513 src/ui/window.rs:1138
+#: src/ui/window.rs:2374
+msgid "Downloaded Songs"
+msgstr ""
+
+#: src/macos.rs:171 src/ui/window.rs:1163 src/ui/window.rs:1186
+msgid "Uploaded Songs"
+msgstr ""
+
+#: src/macos.rs:172 src/ui/window.rs:2562
+msgid "Your Channel"
+msgstr ""
+
+#: src/macos.rs:174
+msgid "View"
+msgstr ""
+
+#: src/macos.rs:178
+msgid "Play/Pause"
+msgstr ""
+
+#: src/macos.rs:179 src/tray.rs:193 src/ui/player_bar.rs:169
+msgid "Next"
+msgstr ""
+
+#: src/macos.rs:180 src/tray.rs:192 src/ui/player_bar.rs:149
+msgid "Previous"
+msgstr ""
+
+#: src/macos.rs:183 src/ui/pages/artist.rs:197
+msgid "Shuffle"
+msgstr ""
+
+#. Translators: the choices for the second lyric line. "Background" is the background vocals of a song.
+#: src/macos.rs:185 src/ui/preferences_lyrics.rs:34
+#: src/ui/preferences_lyrics.rs:35 src/ui/widgets/lyrics_view.rs:38
+msgid "Off"
+msgstr ""
+
+#: src/macos.rs:186
+msgid "All"
+msgstr ""
+
+#: src/macos.rs:187
+msgid "One"
+msgstr ""
+
+#: src/macos.rs:188
+msgid "Repeat"
+msgstr ""
+
+#: src/macos.rs:190
+msgid "Controls"
+msgstr ""
+
+#: src/macos.rs:193
+msgid "Window"
+msgstr ""
+
+#: src/macos.rs:198 src/ui/window.rs:2375 src/ui/window.rs:2973
+msgid "Keyboard Shortcuts"
+msgstr ""
+
+#: src/macos.rs:199 src/ui/release_notes.rs:138 src/ui/window.rs:2377
+msgid "What's New"
+msgstr ""
+
+#: src/macos.rs:200
+msgid "Help"
+msgstr ""
+
 #. Translators: the kind word of a live stream, beside "Song" and "Video".
 #: src/model.rs:282 src/ui/widgets/media_card.rs:97
 msgid "Live"
@@ -287,7 +427,7 @@ msgid "Profile"
 msgstr ""
 
 #: src/model.rs:294 src/net/artist.rs:303 src/ui/pages/playlist.rs:607
-#: src/ui/preferences.rs:25
+#: src/ui/preferences.rs:30
 msgid "Artist"
 msgstr ""
 
@@ -670,19 +810,11 @@ msgstr ""
 msgid "Play"
 msgstr ""
 
-#: src/tray.rs:192 src/ui/player_bar.rs:149
-msgid "Previous"
-msgstr ""
-
-#: src/tray.rs:193 src/ui/player_bar.rs:169
-msgid "Next"
-msgstr ""
-
 #: src/tray.rs:195
 msgid "Show Mixtapes"
 msgstr ""
 
-#: src/tray.rs:196 src/ui/window.rs:2287 src/ui/window.rs:2868
+#: src/tray.rs:196 src/ui/window.rs:2379 src/ui/window.rs:2976
 msgid "Quit"
 msgstr ""
 
@@ -830,8 +962,8 @@ msgstr ""
 #: src/ui/download_queue.rs:88 src/ui/pages/library.rs:1063
 #: src/ui/pages/library.rs:1101 src/ui/pages/playlist.rs:2410
 #: src/ui/pages/playlist.rs:2586 src/ui/playlist_ops.rs:50
-#: src/ui/preferences.rs:581 src/ui/preferences.rs:943
-#: src/ui/preferences.rs:1001 src/ui/preferences.rs:1095
+#: src/ui/preferences.rs:587 src/ui/preferences.rs:949
+#: src/ui/preferences.rs:1007 src/ui/preferences.rs:1101
 #: src/ui/widgets/lyrics_view.rs:764
 msgid "Cancel"
 msgstr ""
@@ -919,7 +1051,7 @@ msgid "Queue"
 msgstr ""
 
 #: src/ui/cover_view.rs:605 src/ui/expanded_player.rs:552
-#: src/ui/preferences.rs:542
+#: src/ui/preferences.rs:548
 msgid "Stream Info (Debug)"
 msgstr ""
 
@@ -976,10 +1108,6 @@ msgstr ""
 msgid "Close"
 msgstr ""
 
-#: src/ui/expanded_player.rs:735
-msgid "Copy"
-msgstr ""
-
 #: src/ui/expanded_player.rs:751
 msgid "Stream info copied"
 msgstr ""
@@ -1004,15 +1132,15 @@ msgstr ""
 msgid "Like (Hold or right-click for Dislike)"
 msgstr ""
 
-#: src/ui/login.rs:44 src/ui/login.rs:273
+#: src/ui/login.rs:44 src/ui/login.rs:279
 msgid "Sign in to YouTube Music"
 msgstr ""
 
-#: src/ui/login.rs:49 src/ui/login.rs:278
+#: src/ui/login.rs:49 src/ui/login.rs:286
 msgid "Skip"
 msgstr ""
 
-#: src/ui/login.rs:174 src/ui/login.rs:424
+#: src/ui/login.rs:174 src/ui/login.rs:434
 #, rust-format
 msgid "Could not read cookies: {err}"
 msgstr ""
@@ -1021,23 +1149,23 @@ msgstr ""
 msgid "Not signed in yet, the session has no SAPISID cookie."
 msgstr ""
 
-#: src/ui/login.rs:193 src/ui/login.rs:434
+#: src/ui/login.rs:193 src/ui/login.rs:444
 msgid "Signing in..."
 msgstr ""
 
-#: src/ui/login.rs:197 src/ui/login.rs:439
+#: src/ui/login.rs:197 src/ui/login.rs:449
 msgid "Signed in."
 msgstr ""
 
-#: src/ui/login.rs:202 src/ui/login.rs:447
+#: src/ui/login.rs:202 src/ui/login.rs:457
 msgid "The server did not accept the session. Try again."
 msgstr ""
 
-#: src/ui/login.rs:364
+#: src/ui/login.rs:372 src/ui/login.rs:404
 msgid "The sign-in page could not be shown."
 msgstr ""
 
-#: src/ui/login.rs:395
+#: src/ui/login.rs:404
 msgid "The sign-in page could not be shown. Is the WebView2 runtime installed?"
 msgstr ""
 
@@ -1076,12 +1204,12 @@ msgstr ""
 msgid "Continue Without an Account"
 msgstr ""
 
-#: src/ui/onboarding.rs:152 src/ui/preferences.rs:160 src/ui/window.rs:2457
+#: src/ui/onboarding.rs:152 src/ui/preferences.rs:165 src/ui/window.rs:2549
 msgid "Account"
 msgstr ""
 
-#: src/ui/onboarding.rs:163 src/ui/preferences.rs:195 src/ui/preferences.rs:227
-#: src/ui/window.rs:570
+#: src/ui/onboarding.rs:163 src/ui/preferences.rs:200 src/ui/preferences.rs:232
+#: src/ui/window.rs:572
 msgid "Signed in"
 msgstr ""
 
@@ -1095,11 +1223,11 @@ msgid ""
 "Mixtapes should show. You can change this under Preferences."
 msgstr ""
 
-#: src/ui/onboarding.rs:226 src/ui/preferences.rs:250
+#: src/ui/onboarding.rs:226 src/ui/preferences.rs:255
 msgid "Channel"
 msgstr ""
 
-#: src/ui/onboarding.rs:249 src/ui/preferences.rs:337
+#: src/ui/onboarding.rs:249 src/ui/preferences.rs:342
 msgid "Could not switch the channel"
 msgstr ""
 
@@ -1111,7 +1239,7 @@ msgstr ""
 msgid "Each of these lives under Preferences too."
 msgstr ""
 
-#: src/ui/onboarding.rs:265 src/ui/preferences.rs:772
+#: src/ui/onboarding.rs:265 src/ui/preferences.rs:778
 msgid "Discord Rich Presence"
 msgstr ""
 
@@ -1119,7 +1247,7 @@ msgstr ""
 msgid "Show what you're listening to on your Discord profile"
 msgstr ""
 
-#: src/ui/onboarding.rs:279 src/ui/preferences.rs:1029
+#: src/ui/onboarding.rs:279 src/ui/preferences.rs:1035
 msgid "Scrobbling"
 msgstr ""
 
@@ -1129,7 +1257,7 @@ msgid ""
 "Preferences."
 msgstr ""
 
-#: src/ui/onboarding.rs:289 src/ui/preferences.rs:649
+#: src/ui/onboarding.rs:289 src/ui/preferences.rs:655
 msgid "Dynamic Cover Color"
 msgstr ""
 
@@ -1137,7 +1265,7 @@ msgstr ""
 msgid "Match the accent color to the cover of the playing song"
 msgstr ""
 
-#: src/ui/onboarding.rs:302 src/ui/preferences.rs:634
+#: src/ui/onboarding.rs:302 src/ui/preferences.rs:640
 msgid "Blurred Cover Background"
 msgstr ""
 
@@ -1145,11 +1273,11 @@ msgstr ""
 msgid "Use the cover as a blurred window background"
 msgstr ""
 
-#: src/ui/onboarding.rs:315 src/ui/preferences.rs:459
+#: src/ui/onboarding.rs:315 src/ui/preferences.rs:464
 msgid "Release Notes After Updates"
 msgstr ""
 
-#: src/ui/onboarding.rs:315 src/ui/preferences.rs:459
+#: src/ui/onboarding.rs:315 src/ui/preferences.rs:464
 msgid "Open what's new once for each new version"
 msgstr ""
 
@@ -1186,10 +1314,6 @@ msgstr ""
 
 #: src/ui/pages/artist.rs:166
 msgid "Artist Name"
-msgstr ""
-
-#: src/ui/pages/artist.rs:197
-msgid "Shuffle"
 msgstr ""
 
 #: src/ui/pages/artist.rs:213 src/ui/pages/artist.rs:1174
@@ -1421,8 +1545,8 @@ msgid ""
 "Songs you play without signing in appear here. They stay on this device."
 msgstr ""
 
-#: src/ui/pages/history.rs:73 src/ui/pages/history.rs:113 src/ui/window.rs:1330
-#: src/ui/window.rs:2472
+#: src/ui/pages/history.rs:73 src/ui/pages/history.rs:113 src/ui/window.rs:1332
+#: src/ui/window.rs:2564
 msgid "Listening History"
 msgstr ""
 
@@ -1441,10 +1565,6 @@ msgstr ""
 
 #: src/ui/pages/history.rs:274
 msgid "No songs match your search"
-msgstr ""
-
-#: src/ui/pages/history.rs:358 src/ui/pages/home.rs:366
-msgid "History"
 msgstr ""
 
 #: src/ui/pages/history.rs:374 src/ui/pages/history.rs:385
@@ -1497,7 +1617,7 @@ msgstr ""
 msgid "All Uploaded Songs"
 msgstr ""
 
-#: src/ui/pages/library.rs:93 src/ui/upload_queue.rs:74 src/ui/window.rs:2471
+#: src/ui/pages/library.rs:93 src/ui/upload_queue.rs:74 src/ui/window.rs:2563
 msgid "Upload Songs"
 msgstr ""
 
@@ -1541,7 +1661,7 @@ msgstr ""
 msgid "Name (Z-A)"
 msgstr ""
 
-#: src/ui/pages/library.rs:782 src/ui/preferences.rs:1155
+#: src/ui/pages/library.rs:782 src/ui/preferences.rs:1161
 msgid "Downloads"
 msgstr ""
 
@@ -1585,11 +1705,6 @@ msgstr ""
 msgid ""
 "Are you sure you want to delete \"{title}\"?\n"
 "This cannot be undone."
-msgstr ""
-
-#: src/ui/pages/library.rs:1064 src/ui/pages/library.rs:1102
-#: src/ui/pages/playlist.rs:2411 src/ui/pages/playlist.rs:2587
-msgid "Delete"
 msgstr ""
 
 #: src/ui/pages/library.rs:1081
@@ -1693,10 +1808,6 @@ msgstr ""
 
 #: src/ui/pages/playlist.rs:235 src/ui/player_bar.rs:233
 msgid "More"
-msgstr ""
-
-#: src/ui/pages/playlist.rs:237 src/ui/pages/playlist.rs:2387
-msgid "Select All"
 msgstr ""
 
 #: src/ui/pages/playlist.rs:238 src/ui/pages/playlist.rs:2389
@@ -1902,7 +2013,7 @@ msgstr ""
 msgid "Deleted {title}"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2484 src/ui/window.rs:1317
+#: src/ui/pages/playlist.rs:2484 src/ui/window.rs:1319
 msgid "History requires an internet connection"
 msgstr ""
 
@@ -1916,10 +2027,6 @@ msgid "{n} song available offline"
 msgid_plural "{n} songs available offline"
 msgstr[0] ""
 msgstr[1] ""
-
-#: src/ui/pages/playlist.rs:2513 src/ui/window.rs:1136 src/ui/window.rs:2282
-msgid "Downloaded Songs"
-msgstr ""
 
 #: src/ui/pages/playlist.rs:2556
 msgid "Copy Cover URL"
@@ -2094,532 +2201,528 @@ msgstr ""
 msgid "Cairo (Software)"
 msgstr ""
 
-#: src/ui/preferences.rs:22
+#: src/ui/preferences.rs:27
 msgid "Immediately"
 msgstr ""
 
-#: src/ui/preferences.rs:22
+#: src/ui/preferences.rs:27
 msgid "After 30 seconds"
 msgstr ""
 
-#: src/ui/preferences.rs:22
+#: src/ui/preferences.rs:27
 msgid "Never"
 msgstr ""
 
-#: src/ui/preferences.rs:23
+#: src/ui/preferences.rs:28
 msgid "Opus (smallest)"
 msgstr ""
 
-#: src/ui/preferences.rs:23
+#: src/ui/preferences.rs:28
 msgid "MP3 (universal)"
 msgstr ""
 
-#: src/ui/preferences.rs:23
+#: src/ui/preferences.rs:28
 msgid "M4A (Apple)"
 msgstr ""
 
-#: src/ui/preferences.rs:23
+#: src/ui/preferences.rs:28
 msgid "FLAC (lossless)"
 msgstr ""
 
-#: src/ui/preferences.rs:23
+#: src/ui/preferences.rs:28
 msgid "OGG (Vorbis)"
 msgstr ""
 
-#: src/ui/preferences.rs:24
+#: src/ui/preferences.rs:29
 msgid "Artist / Album / Song"
 msgstr ""
 
-#: src/ui/preferences.rs:24
+#: src/ui/preferences.rs:29
 msgid "Artist / Song"
 msgstr ""
 
-#: src/ui/preferences.rs:24
+#: src/ui/preferences.rs:29
 msgid "No folders"
 msgstr ""
 
-#: src/ui/preferences.rs:25
+#: src/ui/preferences.rs:30
 msgid "App Name (Mixtapes)"
 msgstr ""
 
-#: src/ui/preferences.rs:25
+#: src/ui/preferences.rs:30
 msgid "Song Title"
 msgstr ""
 
-#: src/ui/preferences.rs:33 src/ui/window.rs:2862
+#: src/ui/preferences.rs:38 src/ui/window.rs:2970
 msgid "General"
 msgstr ""
 
-#: src/ui/preferences.rs:43
+#: src/ui/preferences.rs:48
 msgid "Appearance"
 msgstr ""
 
-#: src/ui/preferences.rs:52
+#: src/ui/preferences.rs:57
 msgid "Services"
 msgstr ""
 
-#: src/ui/preferences.rs:57
+#: src/ui/preferences.rs:62
 msgid "Advanced"
 msgstr ""
 
-#: src/ui/preferences.rs:167
-msgid "Sign Out"
-msgstr ""
-
-#: src/ui/preferences.rs:167 src/ui/window.rs:2481
+#: src/ui/preferences.rs:172 src/ui/window.rs:2573
 msgid "Sign In"
 msgstr ""
 
-#: src/ui/preferences.rs:188 src/ui/window.rs:2397 src/ui/window.rs:2510
+#: src/ui/preferences.rs:193 src/ui/window.rs:2489 src/ui/window.rs:2602
 msgid "Not signed in"
 msgstr ""
 
-#: src/ui/preferences.rs:189
+#: src/ui/preferences.rs:194
 msgid ""
 "Sign in to YouTube Music to access your library. Playlists and likes stay on "
 "this device until then."
 msgstr ""
 
-#: src/ui/preferences.rs:197 src/ui/preferences.rs:229
+#: src/ui/preferences.rs:202 src/ui/preferences.rs:234
 msgid "YouTube Music account"
 msgstr ""
 
-#: src/ui/preferences.rs:250
+#: src/ui/preferences.rs:255
 msgid "Loading channels…"
 msgstr ""
 
-#: src/ui/preferences.rs:260
+#: src/ui/preferences.rs:265
 msgid "This account has no other channels"
 msgstr ""
 
-#: src/ui/preferences.rs:266
+#: src/ui/preferences.rs:271
 msgid "Could not load the channels"
 msgstr ""
 
-#: src/ui/preferences.rs:273
+#: src/ui/preferences.rs:278
 msgid "Google account"
 msgstr ""
 
-#: src/ui/preferences.rs:331
+#: src/ui/preferences.rs:336
 #, rust-format
 msgid "Now using {name}"
 msgstr ""
 
-#: src/ui/preferences.rs:346 src/ui/window.rs:2872
+#: src/ui/preferences.rs:351 src/ui/window.rs:2984
 msgid "Playback"
 msgstr ""
 
-#: src/ui/preferences.rs:348
+#: src/ui/preferences.rs:353
 msgid "Background Playback"
 msgstr ""
 
-#: src/ui/preferences.rs:348
+#: src/ui/preferences.rs:353
 msgid "Allow music to keep playing when the window is closed"
 msgstr ""
 
-#: src/ui/preferences.rs:357
+#: src/ui/preferences.rs:362
 msgid "Restore Queue on Startup"
 msgstr ""
 
-#: src/ui/preferences.rs:358
+#: src/ui/preferences.rs:363
 msgid "Come back to the queue, song and position you left"
 msgstr ""
 
-#: src/ui/preferences.rs:363
+#: src/ui/preferences.rs:368
 msgid "Play on Startup"
 msgstr ""
 
-#: src/ui/preferences.rs:363
+#: src/ui/preferences.rs:368
 msgid "Start the restored song as soon as the app opens"
 msgstr ""
 
-#: src/ui/preferences.rs:380
+#: src/ui/preferences.rs:385
 msgid "Open Queue When Playback Starts"
 msgstr ""
 
-#: src/ui/preferences.rs:380
+#: src/ui/preferences.rs:385
 msgid "Show the queue sidebar when you start a song, an album or a playlist"
 msgstr ""
 
-#: src/ui/preferences.rs:387
+#: src/ui/preferences.rs:392
 msgid "Prefer Song Versions"
 msgstr ""
 
-#: src/ui/preferences.rs:387
+#: src/ui/preferences.rs:392
 msgid ""
 "Play, queue and download the song in place of its music video when one is "
 "found by title and artist"
 msgstr ""
 
-#: src/ui/preferences.rs:400
+#: src/ui/preferences.rs:405
 msgid "Start a Radio from Songs"
 msgstr ""
 
-#: src/ui/preferences.rs:400
+#: src/ui/preferences.rs:405
 msgid ""
 "A song played from search or Home continues with similar songs, not the rest "
 "of the list"
 msgstr ""
 
-#: src/ui/preferences.rs:409
+#: src/ui/preferences.rs:414
 msgid "Lower Volume for Other Players"
 msgstr ""
 
-#: src/ui/preferences.rs:409
+#: src/ui/preferences.rs:414
 msgid ""
 "Turn the music down while another app plays media, like a voice message in a "
 "browser"
 msgstr ""
 
-#: src/ui/preferences.rs:415
+#: src/ui/preferences.rs:420
 msgid "Normalize Volume"
 msgstr ""
 
-#: src/ui/preferences.rs:415
+#: src/ui/preferences.rs:420
 msgid ""
 "Turn loud songs down to match the rest, using YouTube's loudness measurements"
 msgstr ""
 
-#: src/ui/preferences.rs:425
+#: src/ui/preferences.rs:430
 msgid "Record Plays to History"
 msgstr ""
 
-#: src/ui/preferences.rs:425
+#: src/ui/preferences.rs:430
 msgid ""
 "When a song counts as played, for YouTube Music or, signed out, for Home on "
 "this device"
 msgstr ""
 
-#: src/ui/preferences.rs:438
+#: src/ui/preferences.rs:443
 msgid "Force Offline Mode"
 msgstr ""
 
-#: src/ui/preferences.rs:438
+#: src/ui/preferences.rs:443
 msgid "Disable all network requests and use only downloaded content"
 msgstr ""
 
-#: src/ui/preferences.rs:457
+#: src/ui/preferences.rs:462
 msgid "Updates"
 msgstr ""
 
-#: src/ui/preferences.rs:466
+#: src/ui/preferences.rs:471
 msgid "Donation Prompts"
 msgstr ""
 
-#: src/ui/preferences.rs:466
+#: src/ui/preferences.rs:471
 msgid "Show the Ko-fi and GitHub Sponsors banner under the release notes"
 msgstr ""
 
-#: src/ui/preferences.rs:484
+#: src/ui/preferences.rs:489
 msgid "System Default"
 msgstr ""
 
-#: src/ui/preferences.rs:488
+#: src/ui/preferences.rs:493
 msgid "Language"
 msgstr ""
 
-#: src/ui/preferences.rs:488
+#: src/ui/preferences.rs:493
 msgid "Applies on next launch."
 msgstr ""
 
-#: src/ui/preferences.rs:496
+#: src/ui/preferences.rs:501
 msgid "Restart Mixtapes?"
 msgstr ""
 
-#: src/ui/preferences.rs:496
+#: src/ui/preferences.rs:501
 msgid "The language changes after a restart. Playback stops."
 msgstr ""
 
 #. Translators: moves the lyrics later against the song.
-#: src/ui/preferences.rs:497 src/ui/widgets/lyrics_view.rs:334
+#: src/ui/preferences.rs:502 src/ui/widgets/lyrics_view.rs:334
 msgid "Later"
 msgstr ""
 
-#: src/ui/preferences.rs:497
+#: src/ui/preferences.rs:502
 msgid "Restart Now"
 msgstr ""
 
-#: src/ui/preferences.rs:504
+#: src/ui/preferences.rs:509
 msgid "Could not restart. Start Mixtapes again to apply the language."
 msgstr ""
 
-#: src/ui/preferences.rs:518
+#: src/ui/preferences.rs:523
 msgid "Troubleshooting"
 msgstr ""
 
-#: src/ui/preferences.rs:524
+#: src/ui/preferences.rs:530
 msgid "Renderer"
 msgstr ""
 
-#: src/ui/preferences.rs:524
+#: src/ui/preferences.rs:530
 msgid "Switch if you hit GPU-related crashes. Applies on next launch."
 msgstr ""
 
-#: src/ui/preferences.rs:535
+#: src/ui/preferences.rs:541
 msgid "Enable Debug Logs"
 msgstr ""
 
-#: src/ui/preferences.rs:535
+#: src/ui/preferences.rs:541
 msgid "Print diagnostic information to the terminal"
 msgstr ""
 
-#: src/ui/preferences.rs:542
+#: src/ui/preferences.rs:548
 msgid "Show format, protocol and seek range of the current stream"
 msgstr ""
 
-#: src/ui/preferences.rs:558
+#: src/ui/preferences.rs:564
 msgid ""
 "Sign out, clear settings and caches, and run the setup again. Downloads and "
 "playlists kept on this device stay."
 msgstr ""
 
-#: src/ui/preferences.rs:560
+#: src/ui/preferences.rs:566
 msgid "Reset Mixtapes"
 msgstr ""
 
-#: src/ui/preferences.rs:578
+#: src/ui/preferences.rs:584
 msgid "Reset Mixtapes?"
 msgstr ""
 
-#: src/ui/preferences.rs:579
+#: src/ui/preferences.rs:585
 msgid ""
 "This signs you out, clears your settings and every cache, and restarts into "
 "the setup. Downloaded songs and the playlists and likes kept on this device "
 "stay."
 msgstr ""
 
-#: src/ui/preferences.rs:582
+#: src/ui/preferences.rs:588
 msgid "Reset and Restart"
 msgstr ""
 
-#: src/ui/preferences.rs:608
+#: src/ui/preferences.rs:614
 msgid "Reset done. Start Mixtapes again to run the setup."
 msgstr ""
 
-#: src/ui/preferences.rs:632
+#: src/ui/preferences.rs:638
 msgid "Theme"
 msgstr ""
 
-#: src/ui/preferences.rs:634
+#: src/ui/preferences.rs:640
 msgid "Use the current track's cover as a blurred window background"
 msgstr ""
 
-#: src/ui/preferences.rs:650
+#: src/ui/preferences.rs:656
 msgid "Match the app accent color to the current track's cover"
 msgstr ""
 
-#: src/ui/preferences.rs:655
+#: src/ui/preferences.rs:661
 msgid "Tinted Background"
 msgstr ""
 
-#: src/ui/preferences.rs:655
+#: src/ui/preferences.rs:661
 msgid "Tint the app background with accent color"
 msgstr ""
 
-#: src/ui/preferences.rs:684
+#: src/ui/preferences.rs:690
 msgid "Layout"
 msgstr ""
 
-#: src/ui/preferences.rs:686
+#: src/ui/preferences.rs:692
 msgid "Queue on the Right"
 msgstr ""
 
-#: src/ui/preferences.rs:686
+#: src/ui/preferences.rs:692
 msgid "Place the queue sidebar on the right edge of the window"
 msgstr ""
 
-#: src/ui/preferences.rs:704
+#: src/ui/preferences.rs:710
 msgid "Visualizer"
 msgstr ""
 
-#: src/ui/preferences.rs:704
+#: src/ui/preferences.rs:710
 msgid "Bar visualizer beneath the cover art in the expanded player"
 msgstr ""
 
-#: src/ui/preferences.rs:710
+#: src/ui/preferences.rs:716
 msgid "Enable Visualizer"
 msgstr ""
 
-#: src/ui/preferences.rs:710
+#: src/ui/preferences.rs:716
 msgid "Show audio bars beneath the cover art"
 msgstr ""
 
-#: src/ui/preferences.rs:711
+#: src/ui/preferences.rs:717
 msgid "Bar Count"
 msgstr ""
 
-#: src/ui/preferences.rs:711
+#: src/ui/preferences.rs:717
 msgid "Number of bars in the visualizer (more = finer)"
 msgstr ""
 
-#: src/ui/preferences.rs:712
+#: src/ui/preferences.rs:718
 msgid "Smoothing"
 msgstr ""
 
-#: src/ui/preferences.rs:712
+#: src/ui/preferences.rs:718
 msgid "Higher = tighter spikes, lower = peaks bleed into neighbors"
 msgstr ""
 
-#: src/ui/preferences.rs:774
+#: src/ui/preferences.rs:780
 msgid "Connection Status"
 msgstr ""
 
-#: src/ui/preferences.rs:780
+#: src/ui/preferences.rs:786
 msgid "Enable Discord RPC"
 msgstr ""
 
-#: src/ui/preferences.rs:780
+#: src/ui/preferences.rs:786
 msgid "Show what you're listening to on Discord"
 msgstr ""
 
-#: src/ui/preferences.rs:783
+#: src/ui/preferences.rs:789
 msgid "Status Display"
 msgstr ""
 
-#: src/ui/preferences.rs:783
+#: src/ui/preferences.rs:789
 msgid "What appears in the status line under your name"
 msgstr ""
 
-#: src/ui/preferences.rs:784
+#: src/ui/preferences.rs:790
 msgid "Hide on Pause"
 msgstr ""
 
-#: src/ui/preferences.rs:784
+#: src/ui/preferences.rs:790
 msgid "Hide Discord RPC when music is paused"
 msgstr ""
 
-#: src/ui/preferences.rs:785
+#: src/ui/preferences.rs:791
 msgid "Show Play/Pause Icon"
 msgstr ""
 
-#: src/ui/preferences.rs:785
+#: src/ui/preferences.rs:791
 msgid "Display a small play or pause indicator on the album art"
 msgstr ""
 
-#: src/ui/preferences.rs:863
+#: src/ui/preferences.rs:869
 msgid "This build ships without Last.fm API credentials"
 msgstr ""
 
-#: src/ui/preferences.rs:864 src/ui/preferences.rs:880
-#: src/ui/preferences.rs:1002
+#: src/ui/preferences.rs:870 src/ui/preferences.rs:886
+#: src/ui/preferences.rs:1008
 msgid "Connect"
 msgstr ""
 
-#: src/ui/preferences.rs:871
+#: src/ui/preferences.rs:877
 #, rust-format
 msgid "Connected as {name}"
 msgstr ""
 
-#: src/ui/preferences.rs:873
+#: src/ui/preferences.rs:879
 msgid "Disconnect"
 msgstr ""
 
-#: src/ui/preferences.rs:878
+#: src/ui/preferences.rs:884
 msgid "Not connected"
 msgstr ""
 
-#: src/ui/preferences.rs:887
+#: src/ui/preferences.rs:893
 #, rust-format
 msgid "{n} play saved while offline, retried automatically"
 msgid_plural "{n} plays saved while offline, retried automatically"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/preferences.rs:898
+#: src/ui/preferences.rs:904
 msgid "Could not open your browser"
 msgstr ""
 
 #. Translators: {service} is Last.fm or ListenBrainz.
-#: src/ui/preferences.rs:909
+#: src/ui/preferences.rs:915
 #, rust-format
 msgid "Disconnected from {service}"
 msgstr ""
 
-#: src/ui/preferences.rs:939
+#: src/ui/preferences.rs:945
 msgid "Authorize Mixtapes"
 msgstr ""
 
-#: src/ui/preferences.rs:940
+#: src/ui/preferences.rs:946
 msgid ""
 "Approve access in the browser tab that just opened. This closes on its own "
 "once Last.fm confirms."
 msgstr ""
 
-#: src/ui/preferences.rs:967
+#: src/ui/preferences.rs:973
 msgid "Connected to Last.fm"
 msgstr ""
 
-#: src/ui/preferences.rs:967
+#: src/ui/preferences.rs:973
 #, rust-format
 msgid "Scrobbling to Last.fm as {name}"
 msgstr ""
 
-#: src/ui/preferences.rs:972
+#: src/ui/preferences.rs:978
 msgid "Last.fm authorization timed out"
 msgstr ""
 
-#: src/ui/preferences.rs:979
+#: src/ui/preferences.rs:985
 msgid "Connect ListenBrainz"
 msgstr ""
 
-#: src/ui/preferences.rs:980
+#: src/ui/preferences.rs:986
 msgid "Paste the user token from your ListenBrainz settings."
 msgstr ""
 
-#: src/ui/preferences.rs:984
+#: src/ui/preferences.rs:990
 msgid "User Token"
 msgstr ""
 
-#: src/ui/preferences.rs:987
+#: src/ui/preferences.rs:993
 msgid "Get Your Token"
 msgstr ""
 
-#: src/ui/preferences.rs:1017
+#: src/ui/preferences.rs:1023
 msgid "Connected to ListenBrainz"
 msgstr ""
 
-#: src/ui/preferences.rs:1017
+#: src/ui/preferences.rs:1023
 #, rust-format
 msgid "Scrobbling to ListenBrainz as {name}"
 msgstr ""
 
-#: src/ui/preferences.rs:1029
+#: src/ui/preferences.rs:1035
 msgid "Submit the tracks you play to Last.fm and ListenBrainz"
 msgstr ""
 
-#: src/ui/preferences.rs:1031
+#: src/ui/preferences.rs:1037
 msgid "Enable Scrobbling"
 msgstr ""
 
-#: src/ui/preferences.rs:1031
+#: src/ui/preferences.rs:1037
 msgid "Submit a play once you've heard half a track, or four minutes"
 msgstr ""
 
-#: src/ui/preferences.rs:1041
+#: src/ui/preferences.rs:1047
 msgid "Send \"Now Playing\""
 msgstr ""
 
-#: src/ui/preferences.rs:1041
+#: src/ui/preferences.rs:1047
 msgid "Show the current track on your profile while it plays"
 msgstr ""
 
-#: src/ui/preferences.rs:1059
+#: src/ui/preferences.rs:1065
 msgid "Queued Listens"
 msgstr ""
 
-#: src/ui/preferences.rs:1077
+#: src/ui/preferences.rs:1083
 msgid "Choose Download Folder"
 msgstr ""
 
-#: src/ui/preferences.rs:1090
+#: src/ui/preferences.rs:1096
 msgid "Wait for downloads to finish first"
 msgstr ""
 
-#: src/ui/preferences.rs:1094
+#: src/ui/preferences.rs:1100
 msgid "Move Your Downloads?"
 msgstr ""
 
-#: src/ui/preferences.rs:1094
+#: src/ui/preferences.rs:1100
 #, rust-format
 msgid ""
 "Mixtapes restarts to use the new folder, and playback stops. {n} downloaded "
@@ -2630,35 +2733,35 @@ msgid_plural ""
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/preferences.rs:1095
+#: src/ui/preferences.rs:1101
 msgid "Leave Them"
 msgstr ""
 
-#: src/ui/preferences.rs:1095
+#: src/ui/preferences.rs:1101
 msgid "Move Them"
 msgstr ""
 
-#: src/ui/preferences.rs:1109
+#: src/ui/preferences.rs:1115
 msgid "Moving downloads..."
 msgstr ""
 
-#: src/ui/preferences.rs:1118
+#: src/ui/preferences.rs:1124
 msgid "Could not move your downloads. Nothing was changed."
 msgstr ""
 
-#: src/ui/preferences.rs:1127
+#: src/ui/preferences.rs:1133
 msgid "The new folder is used after a restart"
 msgstr ""
 
-#: src/ui/preferences.rs:1136
+#: src/ui/preferences.rs:1142
 msgid "Reorganizing downloads..."
 msgstr ""
 
-#: src/ui/preferences.rs:1143
+#: src/ui/preferences.rs:1149
 msgid "Downloads already organized"
 msgstr ""
 
-#: src/ui/preferences.rs:1144
+#: src/ui/preferences.rs:1150
 #, rust-format
 msgid "Reorganized {n} file(s)"
 msgid_plural "Reorganized {n} file(s)"
@@ -2666,62 +2769,62 @@ msgstr[0] ""
 msgstr[1] ""
 
 #. Translators: {n} files were moved, {errors} is how many were left where they are.
-#: src/ui/preferences.rs:1146
+#: src/ui/preferences.rs:1152
 #, rust-format
 msgid "Reorganized {n} file(s); {errors} skipped"
 msgid_plural "Reorganized {n} file(s); {errors} skipped"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/preferences.rs:1159
+#: src/ui/preferences.rs:1165
 #, rust-format
 msgid "Songs are saved to {folder}"
 msgstr ""
 
-#: src/ui/preferences.rs:1160
+#: src/ui/preferences.rs:1166
 msgid "Audio Format"
 msgstr ""
 
-#: src/ui/preferences.rs:1175
+#: src/ui/preferences.rs:1181
 msgid "Folder Structure"
 msgstr ""
 
-#: src/ui/preferences.rs:1175
+#: src/ui/preferences.rs:1181
 msgid "How new downloads are organized on disk"
 msgstr ""
 
-#: src/ui/preferences.rs:1186
+#: src/ui/preferences.rs:1192
 msgid ""
 "Structure saved. Existing files will be reorganized after downloads finish."
 msgstr ""
 
-#: src/ui/preferences.rs:1192
+#: src/ui/preferences.rs:1198
 msgid "Download Folder"
 msgstr ""
 
-#: src/ui/preferences.rs:1193
+#: src/ui/preferences.rs:1199
 msgid "Change…"
 msgstr ""
 
-#: src/ui/preferences.rs:1204
+#: src/ui/preferences.rs:1210
 msgid "Use Songs Subfolder"
 msgstr ""
 
-#: src/ui/preferences.rs:1204
+#: src/ui/preferences.rs:1210
 msgid "Place downloads inside a Songs/ subfolder within the music directory"
 msgstr ""
 
-#: src/ui/preferences.rs:1211
+#: src/ui/preferences.rs:1217
 msgid ""
 "Subfolder setting saved. Existing files will be reorganized after downloads "
 "finish."
 msgstr ""
 
-#: src/ui/preferences.rs:1217
+#: src/ui/preferences.rs:1223
 msgid "Download Liked Songs"
 msgstr ""
 
-#: src/ui/preferences.rs:1217
+#: src/ui/preferences.rs:1223
 msgid "Download a song when you like it"
 msgstr ""
 
@@ -2767,12 +2870,6 @@ msgstr ""
 
 #: src/ui/preferences_lyrics.rs:32
 msgid "Strict"
-msgstr ""
-
-#. Translators: the choices for the second lyric line. "Background" is the background vocals of a song.
-#: src/ui/preferences_lyrics.rs:34 src/ui/preferences_lyrics.rs:35
-#: src/ui/widgets/lyrics_view.rs:38
-msgid "Off"
 msgstr ""
 
 #: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:38
@@ -2913,31 +3010,31 @@ msgstr[1] ""
 msgid "No cached lyrics to clear"
 msgstr ""
 
-#: src/ui/queue_panel.rs:116
+#: src/ui/queue_panel.rs:121
 msgid "Shuffle Queue"
 msgstr ""
 
-#: src/ui/queue_panel.rs:139
+#: src/ui/queue_panel.rs:144
 msgid "Repeat Mode"
 msgstr ""
 
-#: src/ui/queue_panel.rs:167
+#: src/ui/queue_panel.rs:172
 msgid "Add all to Playlist"
 msgstr ""
 
-#: src/ui/queue_panel.rs:171
+#: src/ui/queue_panel.rs:176
 msgid "Clear Queue"
 msgstr ""
 
-#: src/ui/queue_panel.rs:218
+#: src/ui/queue_panel.rs:223
 msgid "Go to the Playing Song"
 msgstr ""
 
-#: src/ui/queue_panel.rs:664
+#: src/ui/queue_panel.rs:669
 msgid "Remove from Queue"
 msgstr ""
 
-#: src/ui/queue_panel.rs:768
+#: src/ui/queue_panel.rs:773
 #, rust-format
 msgid "{n} track"
 msgid_plural "{n} tracks"
@@ -2945,7 +3042,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #. Translators: the queue's track count and its length, {m} is minutes.
-#: src/ui/queue_panel.rs:770
+#: src/ui/queue_panel.rs:775
 #, rust-format
 msgid "{n} track · {m} min"
 msgid_plural "{n} tracks · {m} min"
@@ -2953,7 +3050,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #. Translators: the queue's track count and its length, {h} is hours and {m} is minutes.
-#: src/ui/queue_panel.rs:772
+#: src/ui/queue_panel.rs:777
 #, rust-format
 msgid "{n} track · {h} h {m} min"
 msgid_plural "{n} tracks · {h} h {m} min"
@@ -2984,10 +3081,6 @@ msgstr ""
 
 #: src/ui/release_notes.rs:126
 msgid "Thanks for reading, and have a great day!"
-msgstr ""
-
-#: src/ui/release_notes.rs:138 src/ui/window.rs:2285
-msgid "What's New"
 msgstr ""
 
 #: src/ui/release_notes.rs:170
@@ -3196,7 +3289,7 @@ msgstr ""
 msgid "Nothing found"
 msgstr ""
 
-#: src/ui/window.rs:146 src/ui/window.rs:2878
+#: src/ui/window.rs:146 src/ui/window.rs:2990
 msgid "Search"
 msgstr ""
 
@@ -3224,111 +3317,99 @@ msgstr ""
 msgid "Uploads complete"
 msgstr ""
 
-#: src/ui/window.rs:640
+#: src/ui/window.rs:642
 msgid "Back online"
 msgstr ""
 
-#: src/ui/window.rs:659
+#: src/ui/window.rs:661
 msgid "Offline - downloaded songs still available"
 msgstr ""
 
-#: src/ui/window.rs:694
+#: src/ui/window.rs:696
 msgid "No internet - running in offline mode"
 msgstr ""
 
-#: src/ui/window.rs:720
+#: src/ui/window.rs:722
 msgid "Already downloaded"
 msgstr ""
 
-#: src/ui/window.rs:742
+#: src/ui/window.rs:744
 msgid "Downloads complete"
 msgstr ""
 
-#: src/ui/window.rs:1086
+#: src/ui/window.rs:1088
 msgid "Uploaded artists are not available yet"
 msgstr ""
 
-#: src/ui/window.rs:1161 src/ui/window.rs:1184
-msgid "Uploaded Songs"
-msgstr ""
-
-#: src/ui/window.rs:1183 src/ui/window.rs:1220
+#: src/ui/window.rs:1185 src/ui/window.rs:1222
 #, rust-format
 msgid "{n} uploaded song"
 msgid_plural "{n} uploaded songs"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/window.rs:1275
+#: src/ui/window.rs:1277
 msgid "Couldn't open your channel"
 msgstr ""
 
-#: src/ui/window.rs:1300
+#: src/ui/window.rs:1302
 msgid "Mixtapes cannot open this link"
 msgstr ""
 
-#: src/ui/window.rs:1303
+#: src/ui/window.rs:1305
 msgid "Could not open the link"
-msgstr ""
-
-#: src/ui/window.rs:1962
-#, rust-format
-msgid "Couldn't play track: {reason}"
 msgstr ""
 
 #: src/ui/window.rs:1964
 #, rust-format
+msgid "Couldn't play track: {reason}"
+msgstr ""
+
+#: src/ui/window.rs:1966
+#, rust-format
 msgid "Couldn't play '{title}': {reason}"
 msgstr ""
 
-#: src/ui/window.rs:2193 src/ui/window.rs:2866
-msgid "Refresh"
-msgstr ""
-
-#: src/ui/window.rs:2283 src/ui/window.rs:2865
-msgid "Keyboard Shortcuts"
-msgstr ""
-
-#: src/ui/window.rs:2284 src/ui/window.rs:2864
+#: src/ui/window.rs:2376 src/ui/window.rs:2972
 msgid "Preferences"
 msgstr ""
 
-#: src/ui/window.rs:2286
+#: src/ui/window.rs:2378
 msgid "About Mixtapes"
 msgstr ""
 
-#: src/ui/window.rs:2296
+#: src/ui/window.rs:2388
 msgid "Main Menu"
 msgstr ""
 
-#: src/ui/window.rs:2317
+#: src/ui/window.rs:2409
 msgid "Follow System Style"
 msgstr ""
 
-#: src/ui/window.rs:2318
+#: src/ui/window.rs:2410
 msgid "Light Style"
 msgstr ""
 
-#: src/ui/window.rs:2319
+#: src/ui/window.rs:2411
 msgid "Dark Style"
 msgstr ""
 
-#: src/ui/window.rs:2470
-msgid "Your Channel"
-msgstr ""
-
-#: src/ui/window.rs:2481
+#: src/ui/window.rs:2573
 msgid "Log Out"
 msgstr ""
 
-#: src/ui/window.rs:2867
+#: src/ui/window.rs:2975
 msgid "Go Back / Close Search"
 msgstr ""
 
-#: src/ui/window.rs:2874
+#: src/ui/window.rs:2980
+msgid "Minimize"
+msgstr ""
+
+#: src/ui/window.rs:2986
 msgid "Play / Pause"
 msgstr ""
 
-#: src/ui/window.rs:2875
+#: src/ui/window.rs:2987
 msgid "Open / Close Player"
 msgstr ""

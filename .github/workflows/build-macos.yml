@@ -1,0 +1,141 @@
+name: Build macOS
+
+# Both architectures build on an Apple silicon runner. arm64 builds natively
+# against Homebrew. Intel is cross-compiled against a prebuilt x86_64 GTK stack
+# from MacPorts (mac/deps.sh), attached to the release named in DEPS_TAG:
+# Homebrew no longer builds Intel bottles and GitHub retires its Intel runners
+# in 2027. The Intel tests run under Rosetta. mac/bundle.sh then assembles
+# Mixtapes.app and the DMG for each.
+
+on:
+  # A branch with an open pull request is built through the pull_request
+  # event. Listening to its pushes as well ran the same commit twice.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # The x86_64 stack. A new one needs mac/deps.sh run on an Intel Mac, the
+  # tarball attached to a new release, and both values here updated.
+  DEPS_TAG: macos-deps-1
+  DEPS_SHA256: feb6c7e52134d39b203d768a49dc4169432fef60b22bc6f58b14d0a57fc24c61
+  # The oldest macOS the builds run on: the Homebrew bottles and the MacPorts
+  # stack are both built for Sequoia.
+  MACOSX_DEPLOYMENT_TARGET: "15.0"
+
+jobs:
+  icon:
+    # Xcode 26's actool compiles the layered icon only on macOS 26. The build
+    # jobs stay on macOS 15, so the app keeps running there.
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compile the icon
+        run: |
+          xcodebuild -version
+          bash mac/icon.sh icon "$MACOSX_DEPLOYMENT_TARGET"
+
+      - name: Upload the icon
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-icon
+          path: icon/Assets.car
+          if-no-files-found: error
+
+  build-macos:
+    needs: icon
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            target: aarch64-apple-darwin
+            prefix: /opt/homebrew
+          - arch: x86_64
+            target: x86_64-apple-darwin
+            prefix: /opt/local
+    name: build-macos (${{ matrix.arch }})
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download the icon
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-icon
+          path: icon
+
+      - name: Homebrew packages
+        # The tools run on the runner itself, so they are arm64 for both builds.
+        # The arm64 build also links against Homebrew's GTK stack.
+        run: |
+          brew install pkgconf glib dylibbundler create-dmg
+          if [[ "${{ matrix.arch }}" == arm64 ]]; then
+            brew install gtk4 libadwaita gstreamer glib-networking libsoup
+          fi
+
+      - name: Intel GTK stack
+        if: matrix.arch == 'x86_64'
+        run: |
+          curl -fsSL --retry 5 -o deps.tar.xz \
+            "https://github.com/${{ github.repository }}/releases/download/$DEPS_TAG/mixtapes-macos-deps-x86_64.tar.xz"
+          echo "$DEPS_SHA256  deps.tar.xz" | shasum -a 256 -c -
+          sudo mkdir -p /opt/local
+          sudo tar -xJf deps.tar.xz -C /opt/local
+          rm deps.tar.xz
+          # The x86_64 tests and gst-plugin-scanner run through Rosetta.
+          softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-${{ matrix.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: macos-${{ matrix.arch }}-cargo-
+
+      - name: Cross-build environment
+        # pkg-config sees only MacPorts' prefix, so the Intel build cannot pick
+        # up Homebrew's arm64 libraries. The arm64 build keeps Homebrew's own
+        # search path, which also covers keg-only libffi.
+        if: matrix.arch == 'x86_64'
+        run: |
+          echo "PKG_CONFIG_LIBDIR=/opt/local/lib/pkgconfig:/opt/local/share/pkgconfig" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+
+      - name: Toolchain versions
+        run: |
+          rustc -vV
+          pkg-config --modversion gtk4 libadwaita-1 gstreamer-1.0
+
+      - name: Build
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Test
+        # Network tests are #[ignore]d, as on Linux.
+        run: cargo test --locked --release --target ${{ matrix.target }}
+
+      - name: Bundle
+        env:
+          PREFIX: ${{ matrix.prefix }}
+          TARGET: ${{ matrix.target }}
+          ICON_CAR: icon/Assets.car
+        run: bash mac/bundle.sh
+
+      - name: Upload disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: mixtapes-macos-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error

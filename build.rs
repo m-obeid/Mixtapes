@@ -59,6 +59,12 @@ fn main() {
     println!("cargo:rerun-if-changed=resources");
     glib_build_tools::compile_resources(&["resources", "assets/icons"], "resources/resources.gresource.xml", "mixtapes.gresource");
 
+    // Room in the macOS binary's header for mac/bundle.sh, which rewrites every
+    // library path to point into Mixtapes.app/Contents/Frameworks.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rustc-link-arg-bins=-Wl,-headerpad_max_install_names");
+    }
+
     // The exe's icon and file details on Windows. The target, not the host, decides.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rerun-if-changed=windows/mixtapes.rc");
