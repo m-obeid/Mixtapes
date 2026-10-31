@@ -31,6 +31,8 @@ pub struct Release {
     pub items: Vec<String>,
     /// The entries of any further list, shown under their own heading.
     pub fixes: Vec<String>,
+    /// Where "Full Release Notes" goes when not this version's own page, for a hotfix of a bigger release.
+    pub details_url: Option<String>,
 }
 
 /// Each version's GitHub release, with its full changelog.
@@ -57,12 +59,14 @@ fn parse_latest(xml: &str) -> Option<Release> {
     let entries = |list: roxmltree::Node| list.children().filter(|n| n.has_tag_name("li")).map(text).filter(|s| !s.is_empty()).collect::<Vec<_>>();
     let items = lists.next().map(entries).unwrap_or_default();
     let fixes = lists.flat_map(entries).collect();
+    let details_url = release.children().find(|n| n.has_tag_name("url") && n.attribute("type") == Some("details")).and_then(|n| n.text()).map(|url| url.trim().to_owned());
     Some(Release {
         version: release.attribute("version")?.to_owned(),
         date: release.attribute("date").unwrap_or_default().to_owned(),
         summary,
         items,
         fixes,
+        details_url,
     })
 }
 
@@ -129,7 +133,7 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
     column.append(&gtk::Label::builder().label(tr!("Thanks for reading, and have a great day!")).wrap(true).xalign(0.0).margin_top(8).build());
     let full = gtk::Button::builder().halign(gtk::Align::Center).margin_top(12).css_classes(["pill"]).build();
     full.set_child(Some(&adw::ButtonContent::builder().label(tr!("Full Release Notes")).icon_name("external-link-symbolic").build()));
-    let address = format!("{RELEASES_URL}/{}", release.version);
+    let address = release.details_url.clone().unwrap_or_else(|| format!("{RELEASES_URL}/{}", release.version));
     full.connect_clicked(move |button| open_url(button, &address));
     column.append(&full);
 
@@ -204,6 +208,13 @@ mod tests {
         assert_eq!(release.summary, "Small screens.");
         assert_eq!(release.items, vec!["One thing", "Two"]);
         assert_eq!(release.fixes, vec!["Fix a", "Fix b", "Fix c"]);
+        assert_eq!(release.details_url, None);
+    }
+
+    #[test]
+    fn a_hotfix_can_point_at_the_release_it_fixes() {
+        let xml = r#"<component><releases><release version="1.1"><url type="details"> https://example.org/1.0 </url></release></releases></component>"#;
+        assert_eq!(parse_latest(xml).unwrap().details_url.as_deref(), Some("https://example.org/1.0"));
     }
 
     #[test]
