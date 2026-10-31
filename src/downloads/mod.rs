@@ -120,12 +120,21 @@ impl Downloads {
     }
 
     pub fn is_downloaded(&self, video_id: &str) -> bool {
-        self.store.is_downloaded(video_id)
+        self.stored_id(video_id).is_some()
+    }
+
+    /// The id a song's file is filed under. A page can list a song under another id
+    /// than the download did, once a video's song version is known.
+    fn stored_id(&self, video_id: &str) -> Option<String> {
+        if self.store.is_downloaded(video_id) {
+            return Some(video_id.to_owned());
+        }
+        crate::net::twins::other_ids(video_id).into_iter().find(|id| self.store.is_downloaded(id))
     }
 
     /// The file to play instead of a stream. Works offline, needs no resolve.
     pub fn local_path(&self, video_id: &str) -> Option<PathBuf> {
-        self.store.local_path(video_id)
+        self.store.local_path(&self.stored_id(video_id)?)
     }
 
     pub fn downloaded_count(&self) -> usize {
@@ -151,7 +160,7 @@ impl Downloads {
         if let Some(path) = self.cached_cover(video_id) {
             return Some(path);
         }
-        let source = self.store.local_path(video_id)?;
+        let source = self.local_path(video_id)?;
         let bytes = tags::embedded_cover(&source)?;
         self.write_cover(video_id, &bytes)
     }
@@ -252,8 +261,9 @@ impl Downloads {
 
     /// Delete the file and forget the track. Empty folders go with it.
     pub fn delete(&self, video_id: &str) -> bool {
-        let Some(path) = self.store.local_path(video_id) else {
-            self.store.forget(video_id);
+        let stored = self.stored_id(video_id).unwrap_or_else(|| video_id.to_owned());
+        let Some(path) = self.store.local_path(&stored) else {
+            self.store.forget(&stored);
             return false;
         };
         if let Err(err) = std::fs::remove_file(&path) {
@@ -262,8 +272,8 @@ impl Downloads {
         if let Some(dir) = path.parent() {
             prune_empty(&self.paths, dir);
         }
-        self.store.forget(video_id);
-        let _ = std::fs::remove_file(self.cover_file(video_id));
+        self.store.forget(&stored);
+        let _ = std::fs::remove_file(self.cover_file(&stored));
         m3u::prune(&self.paths);
         self.emit(Event::Removed { video_id: video_id.to_owned() });
         true
