@@ -1382,21 +1382,21 @@ impl MainWindow {
         self.visible_pushed_page().filter(PushedPage::is_filterable)
     }
 
+    /// The Library tab itself, not a playlist or artist opened from it.
+    fn on_library_root(&self) -> bool {
+        self.view_stack.visible_child_name().as_deref() == Some("library")
+            && self.active_nav().and_then(|nav| nav.visible_page().map(|page| nav.previous_page(&page).is_none())).unwrap_or(false)
+    }
+
     /// What the search bar types into instead of searching YouTube.
     ///
     /// Python finds it by asking the visible page for a `filter_content`, so
     /// the library root answers too: typing on the Library tab filters its
     /// own cards. Here the library is not a pushed page, so it is named.
     fn active_filter(&self) -> Option<SearchFilter> {
-        if self.view_stack.visible_child_name().as_deref() == Some("library") {
-            let at_root = self
-                .active_nav()
-                .and_then(|nav| nav.visible_page().map(|page| nav.previous_page(&page).is_none()))
-                .unwrap_or(false);
-            if at_root {
-                let library = self.library.clone();
-                return Some(Rc::new(move |text: &str| library.filter_content(text)));
-            }
+        if self.on_library_root() {
+            let library = self.library.clone();
+            return Some(Rc::new(move |text: &str| library.filter_content(text)));
         }
         let page = self.active_filterable()?;
         Some(Rc::new(move |text: &str| page.filter_content(text)))
@@ -1748,16 +1748,12 @@ impl MainWindow {
                 w.search_bar.set_search_mode(false);
                 return;
             }
-            // The library, a playlist or a discography filters its own rows instead.
-            if let Some(filter) = w.active_filter() {
-                filter(&text);
-                w.applied_filter.replace((!text.trim().is_empty()).then_some(filter));
-                return;
-            }
+            let filter = w.active_filter();
             if let Some(id) = w.recent_timer.borrow_mut().take() {
                 id.remove();
             }
-            if text.trim().chars().count() >= SEARCH_MIN_CHARS {
+            // A playlist or discography filter is about that page, so only the library's is kept.
+            if (filter.is_none() || w.on_library_root()) && text.trim().chars().count() >= SEARCH_MIN_CHARS {
                 let weak = Rc::downgrade(&w);
                 let query = text.clone();
                 let id = glib::timeout_add_local_once(RECENT_SETTLE, move || {
@@ -1769,6 +1765,12 @@ impl MainWindow {
                     }
                 });
                 w.recent_timer.replace(Some(id));
+            }
+            // The library, a playlist or a discography filters its own rows instead.
+            if let Some(filter) = filter {
+                filter(&text);
+                w.applied_filter.replace((!text.trim().is_empty()).then_some(filter));
+                return;
             }
             let weak = Rc::downgrade(&w);
             let id = glib::timeout_add_local_once(SEARCH_DEBOUNCE, move || {
@@ -1791,10 +1793,10 @@ impl MainWindow {
         });
     }
 
-    /// The recent list shows on an open, empty search bar, where a search would go to YouTube.
+    /// The recent list shows on an open, empty search bar, on Explore and on the Library tab.
     fn sync_recent_searches(&self) {
         let Some(recent) = self.recent_searches.borrow().clone() else { return };
-        let wanted = self.search_bar.is_search_mode() && self.search_entry.text().is_empty() && self.active_filter().is_none();
+        let wanted = self.search_bar.is_search_mode() && self.search_entry.text().is_empty() && (self.active_filter().is_none() || self.on_library_root());
         if wanted { recent.show() } else { recent.hide() }
     }
 
