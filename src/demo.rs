@@ -67,7 +67,7 @@
 //! MIXTAPES_DEMO_ARTIST=id    open an artist page 1.5 s in
 //! MIXTAPES_DEMO_CLICK=ms,text[,tab]  click the mapped button with that tooltip or label, then optionally show a tab
 //! MIXTAPES_DEMO_ARTIST_RADIO=1  press the artist page's radio button six seconds in
-//! MIXTAPES_DEMO_STEPS="ms:step;ms:step"  timed steps: tab=name, type=text, esc, hide, show, minimize, state, expand, queue, next, results=tab, like-row, playlist=id, album=id[,mode], list=id|local[,mode], click=label, action=name, bottom, snap=name
+//! MIXTAPES_DEMO_STEPS="ms:step;ms:step"  timed steps: tab=name, type=text, esc, hide, show, minimize, state, expand, queue, next, results=tab, like-row, playlist=id, album=id[,mode], list=id|local[,mode], click=label, action=name, bottom, queue-scroll=px, queue-remove=index, snap=name
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -1073,6 +1073,27 @@ fn run_step(mw: &Rc<MainWindow>, ctx: &Rc<App>, name: &str, arg: &str, prefix: O
             for scroller in scrollers.iter().filter(|s| s.is_mapped()) {
                 let adj = scroller.vadjustment();
                 adj.set_value((adj.upper() - adj.page_size()).max(0.0));
+            }
+        }
+        "queue-scroll" => {
+            let mut scrollers = Vec::new();
+            collect_scrollers(root, &mut scrollers);
+            if let Some(scroller) = scrollers.into_iter().find(|s| s.has_css_class("queue-scroller")) {
+                scroller.vadjustment().set_value(arg.parse().unwrap_or(0.0));
+            }
+        }
+        "queue-remove" => {
+            let mut scrollers = Vec::new();
+            collect_scrollers(root, &mut scrollers);
+            let scroller = scrollers.into_iter().find(|s| s.has_css_class("queue-scroller"));
+            let value = || scroller.as_ref().map(|s| s.vadjustment().value());
+            tracing::info!(before = ?value(), "demo: queue scroll");
+            ctx.player.remove_from_queue(arg.parse().unwrap_or(0));
+            for delay in [100, 600] {
+                let scroller = scroller.clone();
+                glib::timeout_add_local_once(Duration::from_millis(delay), move || {
+                    tracing::info!(delay, after = ?scroller.map(|s| s.vadjustment().value()), "demo: queue scroll");
+                });
             }
         }
         "snap" => {

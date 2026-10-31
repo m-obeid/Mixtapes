@@ -403,6 +403,18 @@ impl QueuePanel {
         });
     }
 
+    /// Keep the list where it was for the next frames. The row a menu hung off is gone
+    /// with the menu, and the list must not move while focus finds a new home.
+    fn hold_scroll(self: &Rc<Self>, value: f64) {
+        let adj = self.scrolled.vadjustment();
+        let frames = Cell::new(0);
+        self.list.add_tick_callback(move |_, _| {
+            adj.set_value(value);
+            frames.set(frames.get() + 1);
+            if frames.get() < 3 { glib::ControlFlow::Continue } else { glib::ControlFlow::Break }
+        });
+    }
+
     /// Where the playing row sits in the list, as (top, height) in the adjustment's
     /// pixels. Every row is the same height, so the list's length divides evenly.
     fn current_row(&self) -> Option<(f64, f64)> {
@@ -635,13 +647,19 @@ impl QueuePanel {
                 let player = self.player.clone();
                 let ctx = self.ctx.clone();
                 let row = row.clone();
+                let panel = Rc::downgrade(self);
                 Rc::new(move |x: f64, y: f64| {
                     let Some(entry) = entry_of() else { return };
                     let index = entry.index() as usize;
                     let remove = {
                         let player = player.clone();
+                        let panel = panel.clone();
+                        let scrolled_to = panel.upgrade().map(|p| p.scrolled.vadjustment().value());
                         MenuAction::new("Remove from Queue", Section::Remove, move || {
-                            player.remove_from_queue(index)
+                            player.remove_from_queue(index);
+                            if let (Some(panel), Some(value)) = (panel.upgrade(), scrolled_to) {
+                                panel.hold_scroll(value);
+                            }
                         })
                     };
                     let opts = SongMenuOptions {
