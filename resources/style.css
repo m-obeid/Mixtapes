@@ -937,3 +937,12 @@ button.view-all image {
   border-radius: 999px;
   font-weight: 500;
 }
+
+/* Earlier, the offset and Later in the lyrics picker */
+.timing-value {
+  font-feature-settings: "tnum";
+}
+
+.timing-value:disabled {
+  opacity: 1;
+}

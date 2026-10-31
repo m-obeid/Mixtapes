@@ -121,8 +121,7 @@ pub struct LyricsView {
     spinner_row: gtk::ListBoxRow,
     second_line_section: gtk::Box,
     timing_section: gtk::Box,
-    timing_label: gtk::Label,
-    timing_reset: gtk::Button,
+    timing_value: gtk::Button,
     /// Seconds the lyrics run ahead of the song, as the listener set them.
     offset: Cell<f64>,
     second_line_list: gtk::ListBox,
@@ -328,16 +327,15 @@ impl LyricsView {
         let timing_header = heading(&tr!("Timing"));
         timing_header.set_margin_start(10);
         timing_section.append(&timing_header);
-        let timing_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).margin_start(6).margin_end(6).margin_bottom(6).build();
+        let timing_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).homogeneous(true).css_classes(["linked"]).margin_start(6).margin_end(6).margin_bottom(6).build();
         // Translators: moves the lyrics earlier against the song.
         let earlier = gtk::Button::builder().label(tr!("Earlier")).tooltip_text(tr!("Lyrics are late")).build();
         // Translators: moves the lyrics later against the song.
         let later = gtk::Button::builder().label(tr!("Later")).tooltip_text(tr!("Lyrics are early")).build();
-        let timing_label = gtk::Label::builder().hexpand(true).build();
-        let timing_reset = gtk::Button::builder().icon_name("view-refresh-symbolic").css_classes(["flat"]).tooltip_text(tr!("Reset timing")).build();
+        // The value is the reset: there is nothing to reset while it reads in time.
+        let timing_value = gtk::Button::builder().css_classes(["timing-value"]).tooltip_text(tr!("Reset timing")).build();
         timing_row.append(&earlier);
-        timing_row.append(&timing_label);
-        timing_row.append(&timing_reset);
+        timing_row.append(&timing_value);
         timing_row.append(&later);
         timing_section.append(&timing_row);
         sources_page.append(&timing_section);
@@ -381,8 +379,7 @@ impl LyricsView {
             spinner_row,
             second_line_section,
             timing_section,
-            timing_label,
-            timing_reset,
+            timing_value,
             offset: Cell::new(0.0),
             second_line_list,
             matches_title,
@@ -530,7 +527,7 @@ impl LyricsView {
         self.search_list.connect_row_activated(weak!(|v, _, row| v.on_match_row_activated(row.index(), true)));
         earlier.connect_clicked(weak!(|v, _| v.nudge(Some(TIMING_STEP))));
         later.connect_clicked(weak!(|v, _| v.nudge(Some(-TIMING_STEP))));
-        self.timing_reset.connect_clicked(weak!(|v, _| v.nudge(None)));
+        self.timing_value.connect_clicked(weak!(|v, _| v.nudge(None)));
         matches_back.connect_clicked(weak!(|v, _| v.show_picker_page("sources")));
         search_back.connect_clicked(weak!(|v, _| v.show_picker_page("sources")));
         self.search_entry.connect_activate(weak!(|v, _| v.on_manual_search()));
@@ -742,8 +739,8 @@ impl LyricsView {
     fn use_offset(&self, seconds: f64) {
         let moved = seconds - self.offset.replace(seconds);
         self.last_pos.set(self.last_pos.get() + moved);
-        self.timing_label.set_label(&if seconds == 0.0 { tr!("In time") } else { format!("{seconds:+.2} s") });
-        self.timing_reset.set_visible(seconds != 0.0);
+        self.timing_value.set_label(&if seconds == 0.0 { "0.00 s".to_owned() } else { format!("{seconds:+.2} s") });
+        self.timing_value.set_sensitive(seconds != 0.0);
     }
 
     /// The Earlier and Later buttons, and reset with None. Remembered for this song and source.
@@ -774,7 +771,7 @@ impl LyricsView {
         let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&editor).build();
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
         body.append(&scroller);
-        let hint = gtk::Label::builder().label(tr!("Plain text works. For timing, start a line with [minutes:seconds], like [01:23.45].")).wrap(true).xalign(0.0).margin_start(12).margin_end(12).margin_bottom(12).css_classes(["dim-label", "caption"]).build();
+        let hint = gtk::Label::builder().label(tr!("Plain text works. For timing, start a line with [01:23.45]. For word by word timing, put <01:23.45> before each word, or paste TTML.")).wrap(true).xalign(0.0).margin_start(12).margin_end(12).margin_bottom(12).css_classes(["dim-label", "caption"]).build();
         body.append(&hint);
         if is_written {
             let delete = gtk::Button::builder().label(tr!("Delete My Lyrics")).css_classes(["destructive-action"]).halign(gtk::Align::Center).margin_bottom(12).build();
