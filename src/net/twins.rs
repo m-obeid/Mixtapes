@@ -9,19 +9,32 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
 use crate::model::Track;
+use crate::net::browse::Browse;
 use crate::paths::Paths;
 
 /// The pref that turns the swap off, for a listener who wants the videos as YouTube lists them.
 pub const PREF: &str = "prefer_song_versions";
 
 static PATH: OnceLock<PathBuf> = OnceLock::new();
+static SEARCH_CLIENT: OnceLock<Arc<dyn Browse>> = OnceLock::new();
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static KNOWN: LazyLock<Mutex<HashMap<String, Option<Track>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Read what earlier runs found. Without this call nothing touches the disk, which is how the tests run.
+/// Hand over a client without a session. The song search that finds a twin goes
+/// through it: sent with the session, YouTube files it in the account's search history.
+pub fn set_search_client(client: Arc<dyn Browse>) {
+    let _ = SEARCH_CLIENT.set(client);
+}
+
+/// The client for that search, once the app has one.
+pub fn search_client() -> Option<Arc<dyn Browse>> {
+    SEARCH_CLIENT.get().cloned()
+}
+
 pub fn init(paths: &Paths) {
     set_enabled(paths.read_prefs().get(PREF).and_then(|v| v.as_bool()).unwrap_or(true));
     let path = paths.cache_dir.join("audio_twins.json");

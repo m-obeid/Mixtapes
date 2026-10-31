@@ -121,6 +121,10 @@ impl YtMusic {
     pub fn new(paths: &Paths) -> anyhow::Result<Arc<Self>> {
         let http = crate::net::offline::client_builder().timeout(std::time::Duration::from_secs(30)).gzip(true).build()?;
         let (auth, _) = watch::channel(AuthState::Anonymous);
+        // A test's own Browse answers its searches.
+        if !cfg!(test) {
+            crate::net::twins::set_search_client(Arc::new(YTMusicClient::builder().build()?));
+        }
         let anonymous = YTMusicClient::builder().build()?;
         let page_id = paths.read_prefs().get(CHANNEL_PREF).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned);
         let client = Arc::new(Self {

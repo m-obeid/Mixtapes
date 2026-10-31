@@ -426,7 +426,8 @@ async fn search_audio_version(api: &dyn Browse, title: &str, artists: &[String],
         Some(a) => format!("{title} {a}"),
         None => title.to_owned(),
     };
-    let results = search(api, &query, Some(SearchFilter::Songs)).await?;
+    let search_client = twins::search_client();
+    let results = search(search_client.as_deref().unwrap_or(api), &query, Some(SearchFilter::Songs)).await?;
     let by_artist = |item: &&MediaItem| {
         let names: Vec<String> = item.artists.iter().map(|a| a.name.to_lowercase()).collect();
         item.kind == ItemKind::Song && (artists.is_empty() || artists.iter().any(|a| names.contains(a)))
