@@ -14,7 +14,7 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 [![AUR](https://img.shields.io/aur/version/mixtapes-git)](https://aur.archlinux.org/packages/mixtapes-git)
 [![Flatpak CI](https://img.shields.io/github/actions/workflow/status/m-obeid/Mixtapes/build-flatpak.yml?label=Flatpak%20Build)](https://github.com/m-obeid/Mixtapes/actions/workflows/build-flatpak.yml)
 [![Windows Build](https://img.shields.io/github/actions/workflow/status/m-obeid/Mixtapes/build-windows.yml?label=Windows%20Build)](https://github.com/m-obeid/Mixtapes/actions/workflows/build-windows.yml)
-[![Windows Download](https://img.shields.io/badge/Windows-Download%20Installer-blue?logo=windows)](https://nightly.link/m-obeid/Mixtapes/workflows/build-windows/main/mixtapes-windows-x86_64-setup.zip)
+[![Windows Download](https://img.shields.io/badge/Windows-Download%20Installer-blue?logo=windows)](https://github.com/m-obeid/Mixtapes/releases)
 [![macOS Build](https://img.shields.io/github/actions/workflow/status/m-obeid/Mixtapes/build-macos.yml?label=macOS%20Build)](https://github.com/m-obeid/Mixtapes/actions/workflows/build-macos.yml)
 [![macOS Download](https://img.shields.io/badge/macOS-Download%20DMG-blue?logo=apple)](#macos)
 
@@ -107,17 +107,16 @@ Both `x86_64` and `aarch64` builds are available.
 
 ### Windows
 
-Get the installer from the
-[latest Windows build](https://nightly.link/m-obeid/Mixtapes/workflows/build-windows/main/mixtapes-windows-x86_64-setup.zip),
-or the portable folder from the same CI run. The installer adds the Microsoft
+Get the installer or the portable zip from the
+[latest release](https://github.com/m-obeid/Mixtapes/releases).
+The installer adds the Microsoft
 Edge WebView2 Runtime, which the sign-in page needs, where Windows lacks it
 (Windows 10 LTSC, for one).
 
 ### macOS
 
-Download the disk image for your Mac from the latest CI build:
-[Apple silicon](https://nightly.link/m-obeid/Mixtapes/workflows/build-macos/main/mixtapes-macos-arm64.zip)
-or [Intel](https://nightly.link/m-obeid/Mixtapes/workflows/build-macos/main/mixtapes-macos-x86_64.zip).
+Download the disk image for your Mac, Apple silicon or Intel, from the
+[latest release](https://github.com/m-obeid/Mixtapes/releases).
 Open it and drag Mixtapes to Applications. It needs macOS 15 Sequoia or newer.
 
 The app is not notarized. On first launch macOS blocks it: open

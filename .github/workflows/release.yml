@@ -1,7 +1,8 @@
 name: Release
 
 # When the newest <release> in the metainfo has no GitHub release yet, this
-# builds the app on Arch, publishes it, and updates mixtapes-bin on the AUR.
+# builds the app on Arch, macOS and Windows, publishes all of it, and updates
+# mixtapes-bin on the AUR. Nothing goes out unless every platform built.
 # Arch, because the binary links the system libraries an Arch install has.
 # A release therefore goes out by merging a metainfo bump to main.
 
@@ -74,15 +75,37 @@ jobs:
           name: mixtapes-linux
           path: mixtapes-*.tar.zst
 
+  macos:
+    needs: check
+    if: needs.check.outputs.fresh == 'true'
+    uses: ./.github/workflows/build-macos.yml
+
+  windows:
+    needs: check
+    if: needs.check.outputs.fresh == 'true'
+    uses: ./.github/workflows/build-windows.yml
+
   publish:
-    needs: [check, build]
+    needs: [check, build, macos, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
         with:
-          name: mixtapes-linux
+          path: built
+
+      - name: Name the files
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          mkdir release
+          cp built/mixtapes-linux/*.tar.zst release/
+          cp built/mixtapes-macos-arm64/*.dmg "release/Mixtapes-$TAG-macos-apple-silicon.dmg"
+          cp built/mixtapes-macos-x86_64/*.dmg "release/Mixtapes-$TAG-macos-intel.dmg"
+          cp built/mixtapes-windows-x86_64-setup/MixtapesSetup.exe "release/Mixtapes-$TAG-windows-setup.exe"
+          (cd built/mixtapes-windows-x86_64-portable && zip -qr "$GITHUB_WORKSPACE/release/Mixtapes-$TAG-windows-portable.zip" .)
+          ls -la release
 
       # release-notes/<version>.md is the full changelog. The app shows the short notes in the metainfo.
       - name: Write the release notes
@@ -107,13 +130,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.check.outputs.tag }}
-        run: gh release create "$TAG" "mixtapes-$TAG-x86_64.tar.zst" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md --prerelease
+        run: gh release create "$TAG" release/* --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md --prerelease
 
       - name: Fill in the PKGBUILD
         env:
           TAG: ${{ needs.check.outputs.tag }}
         run: |
-          SHA=$(sha256sum "mixtapes-$TAG-x86_64.tar.zst" | cut -d' ' -f1)
+          SHA=$(sha256sum "release/mixtapes-$TAG-x86_64.tar.zst" | cut -d' ' -f1)
           sed -e "s/@PKGVER@/$(echo "$TAG" | tr '-' '.')/" -e "s/@TAG@/$TAG/" -e "s/@SHA256@/$SHA/" aur-package-bin/PKGBUILD.in > aur-package-bin/PKGBUILD
 
       - name: Publish on the AUR
