@@ -33,6 +33,9 @@ pub struct Release {
     pub fixes: Vec<String>,
 }
 
+/// Each version's GitHub release, with its full changelog.
+const RELEASES_URL: &str = "https://github.com/m-obeid/Mixtapes/releases/tag";
+
 static LATEST: LazyLock<Option<Release>> = LazyLock::new(|| parse_latest(METAINFO));
 
 /// The version the packages carry, from the metainfo. Falls back to the crate version.
@@ -108,7 +111,7 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
     if !release.summary.is_empty() {
         column.append(&gtk::Label::builder().label(&release.summary).wrap(true).xalign(0.0).build());
     }
-    // Every entry is shown. The reader has the update already, so nothing is cut or sent elsewhere.
+    // The metainfo holds the short version. The GitHub release has the rest.
     for (heading, entries) in [(tr!("Changes"), &release.items), (tr!("Fixes"), &release.fixes)] {
         if entries.is_empty() {
             continue;
@@ -124,6 +127,11 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
         column.append(&list);
     }
     column.append(&gtk::Label::builder().label(tr!("Thanks for reading, and have a great day!")).wrap(true).xalign(0.0).margin_top(8).build());
+    let full = gtk::Button::builder().halign(gtk::Align::Center).margin_top(12).css_classes(["pill"]).build();
+    full.set_child(Some(&adw::ButtonContent::builder().label(tr!("Full Release Notes")).icon_name("external-link-symbolic").build()));
+    let address = format!("{RELEASES_URL}/{}", release.version);
+    full.connect_clicked(move |button| open_url(button, &address));
+    column.append(&full);
 
     let clamp = adw::Clamp::builder().maximum_size(NOTES_WIDTH).child(&column).build();
     let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();

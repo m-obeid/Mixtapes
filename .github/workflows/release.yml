@@ -84,8 +84,15 @@ jobs:
         with:
           name: mixtapes-linux
 
+      # release-notes/<version>.md is the full changelog. The app shows the short notes in the metainfo.
       - name: Write the release notes
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
         run: |
+          if [ -f "release-notes/$TAG.md" ]; then
+            cp "release-notes/$TAG.md" notes.md
+            exit 0
+          fi
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           release = ET.parse("com.pocoguy.Muse.metainfo.xml").getroot().find("releases/release")

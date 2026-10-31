@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 21:24+0100\n"
+"POT-Creation-Date: 2026-10-31 21:56+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -381,7 +381,7 @@ msgstr ""
 msgid "Keyboard Shortcuts"
 msgstr ""
 
-#: src/macos.rs:199 src/ui/release_notes.rs:138 src/ui/window.rs:2377
+#: src/macos.rs:199 src/ui/release_notes.rs:146 src/ui/window.rs:2377
 msgid "What's New"
 msgstr ""
 
@@ -3061,33 +3061,37 @@ msgstr[1] ""
 msgid "Clear Recent Searches"
 msgstr ""
 
-#: src/ui/release_notes.rs:103
+#: src/ui/release_notes.rs:106
 #, rust-format
 msgid "What's New in {version}?"
 msgstr ""
 
-#: src/ui/release_notes.rs:106
+#: src/ui/release_notes.rs:109
 #, rust-format
 msgid "Released on {date}"
 msgstr ""
 
-#: src/ui/release_notes.rs:112
+#: src/ui/release_notes.rs:115
 msgid "Changes"
 msgstr ""
 
-#: src/ui/release_notes.rs:112
+#: src/ui/release_notes.rs:115
 msgid "Fixes"
 msgstr ""
 
-#: src/ui/release_notes.rs:126
+#: src/ui/release_notes.rs:129
 msgid "Thanks for reading, and have a great day!"
 msgstr ""
 
-#: src/ui/release_notes.rs:170
+#: src/ui/release_notes.rs:131
+msgid "Full Release Notes"
+msgstr ""
+
+#: src/ui/release_notes.rs:178
 msgid "This version of Mixtapes was made possible by users like you!"
 msgstr ""
 
-#: src/ui/release_notes.rs:171
+#: src/ui/release_notes.rs:179
 msgid ""
 "I love making Mixtapes and my other projects, but I can't do it without "
 "help. Support my work with a donation:"
