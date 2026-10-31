@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use super::model::LyricLine;
+use super::model::{LyricLine, LyricPart};
 
 /// Store watermarks Apple prepends to some tracks. Matched only against the opening lines, so a lyric that mentions buying something mid-song is untouched.
 const LYRIC_WATERMARKS: [&str; 4] = ["purchase your tracks", "lyrics licensed", "lyrics provided by", "unauthorized reproduction"];
@@ -19,6 +19,11 @@ const CREDIT_KEYWORDS: [&str; 19] =
 const SECONDARY_TOLERANCE: f64 = 0.45;
 
 static TIMESTAMP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[(\d+):(\d{1,2})(?:[.:](\d{1,3}))?\]").unwrap());
+
+static WORD_STAMP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<(\d+):(\d{1,2})(?:[.:](\d{1,3}))?>").unwrap());
+
+/// How long the last word of a line lasts when nothing says when it ends, in seconds.
+const LAST_WORD: f64 = 1.5;
 
 /// Which field a parallel LRC track fills.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +52,64 @@ pub fn parse_lrc_text(lrc: &str) -> Vec<LyricLine> {
     }
     out.sort_by(|a, b| a.start.unwrap_or(0.0).total_cmp(&b.start.unwrap_or(0.0)));
     out
+}
+
+/// Read enhanced LRC, a `<mm:ss.xx>` stamp in front of each word: `[00:12.00]<00:12.00>Hey <00:12.40>you <00:13.00>`.
+/// A stamp with no word behind it ends the word before. A line without stamps is left as it is.
+pub fn read_word_stamps(lines: &mut [LyricLine]) {
+    let next_starts: Vec<Option<f64>> = lines.iter().skip(1).map(|l| l.start).chain([None]).collect();
+    for (line, next_start) in lines.iter_mut().zip(next_starts) {
+        let stamps: Vec<_> = WORD_STAMP_RE.captures_iter(&line.text).collect();
+        if stamps.is_empty() {
+            continue;
+        }
+        let mut parts: Vec<LyricPart> = Vec::new();
+        let mut text = line.text[..stamps[0].get(0).map_or(0, |m| m.start())].to_owned();
+        for (index, stamp) in stamps.iter().enumerate() {
+            let whole = stamp.get(0).expect("the match itself");
+            let until = stamps.get(index + 1).and_then(|s| s.get(0)).map_or(line.text.len(), |m| m.start());
+            let word = &line.text[whole.end()..until];
+            let at = stamp[1].parse::<f64>().unwrap_or(0.0) * 60.0 + stamp[2].parse::<f64>().unwrap_or(0.0) + stamp.get(3).and_then(|f| format!("0.{}", f.as_str()).parse::<f64>().ok()).unwrap_or(0.0);
+            if let Some(last) = parts.last_mut() {
+                last.end = Some(at);
+            }
+            if !word.trim().is_empty() {
+                parts.push(LyricPart { start: Some(at), end: None, text: word.trim().to_owned(), space_after: word.ends_with(char::is_whitespace) });
+                text.push_str(word);
+            }
+        }
+        if let Some(last) = parts.last_mut().filter(|p| p.end.is_none()) {
+            let by_itself = last.start.unwrap_or(0.0) + LAST_WORD;
+            last.end = Some(next_start.map_or(by_itself, |next| next.min(by_itself)));
+        }
+        line.text = text.trim().to_owned();
+        line.parts = parts;
+    }
+}
+
+/// `mm:ss.xx`, the stamp both LRC and its word stamps use.
+fn stamp(seconds: f64) -> String {
+    let hundredths = (seconds * 100.0).round() as u64;
+    format!("{:02}:{:02}.{:02}", hundredths / 6000, hundredths / 100 % 60, hundredths % 100)
+}
+
+/// Lines as LRC, with word stamps where a line has word timing. Unsynced lines stay bare text.
+pub fn to_lrc(lines: &[LyricLine]) -> String {
+    let line = |l: &LyricLine| {
+        let Some(start) = l.start else { return l.text.clone() };
+        if l.parts.is_empty() {
+            return format!("[{}]{}", stamp(start), l.text);
+        }
+        let mut out = format!("[{}]", stamp(start));
+        for part in &l.parts {
+            out.push_str(&format!("<{}>{}{}", stamp(part.start.unwrap_or(start)), part.text, if part.space_after { " " } else { "" }));
+        }
+        if let Some(end) = l.parts.last().and_then(|p| p.end) {
+            out.push_str(&format!("<{}>", stamp(end)));
+        }
+        out
+    };
+    lines.iter().map(line).collect::<Vec<_>>().join("\n")
 }
 
 /// Unsynced lyrics: one line per non-blank row of text.

@@ -3,8 +3,9 @@
 
 use std::path::PathBuf;
 
-use super::lrc::{parse_lrc_text, plain_lines};
+use super::lrc::{parse_lrc_text, plain_lines, read_word_stamps, to_lrc};
 use super::model::{LyricLine, LyricsResult};
+use super::ttml::ttml_to_lines;
 use crate::paths::Paths;
 
 /// The source name of written lyrics, in the cache's pin and the picker.
@@ -14,23 +15,22 @@ pub struct OwnLyrics {
     dir: PathBuf,
 }
 
-/// Lines with a timestamp make synced lyrics, anything else is plain text.
+/// TTML is read as it comes. Otherwise timestamps make synced lyrics, word stamps make
+/// them word-level, and anything else is plain text.
 pub fn parse(text: &str) -> LyricsResult {
-    let synced = parse_lrc_text(text);
-    let lines = if synced.is_empty() { plain_lines(text) } else { synced };
+    let lines = if text.trim_start().starts_with("<tt") || text.trim_start().starts_with("<?xml") {
+        ttml_to_lines(text)
+    } else {
+        let mut lines = parse_lrc_text(text);
+        read_word_stamps(&mut lines);
+        if lines.is_empty() { plain_lines(text) } else { lines }
+    };
     LyricsResult::from_lines(lines, SOURCE)
 }
 
-/// Lines as text to edit: LRC when timed.
+/// Lines as text to edit.
 pub fn to_text(lines: &[LyricLine]) -> String {
-    let line = |l: &LyricLine| match l.start {
-        Some(start) => {
-            let hundredths = (start * 100.0).round() as u64;
-            format!("[{:02}:{:02}.{:02}]{}", hundredths / 6000, hundredths / 100 % 60, hundredths % 100, l.text)
-        }
-        None => l.text.clone(),
-    };
-    lines.iter().map(line).collect::<Vec<_>>().join("\n")
+    to_lrc(lines)
 }
 
 impl OwnLyrics {
@@ -74,6 +74,38 @@ mod tests {
         let plain = parse("one\ntwo");
         assert!(!plain.synced);
         assert_eq!(plain.lines.len(), 2);
+    }
+
+    #[test]
+    fn word_stamps_make_lyrics_word_level() {
+        let result = parse("[00:12.00]<00:12.00>Hey <00:12.40>you <00:13.00>\n[00:14.00]<00:14.00>and <00:14.50>me");
+        assert_eq!(result.rank(), 3);
+        let first = &result.lines[0];
+        assert_eq!(first.text, "Hey you");
+        assert_eq!(first.parts.iter().map(|p| p.text.as_str()).collect::<Vec<_>>(), ["Hey", "you"]);
+        assert_eq!((first.parts[0].start, first.parts[0].end), (Some(12.0), Some(12.4)));
+        assert_eq!(first.parts[1].end, Some(13.0), "the closing stamp ends the last word");
+        assert_eq!(result.lines[1].parts[1].end, Some(16.0), "with no closing stamp a word gets a moment of its own");
+    }
+
+    #[test]
+    fn a_syllable_with_no_space_after_it_stays_joined() {
+        let result = parse("[00:01.00]<00:01.00>少<00:01.50>年 <00:02.00>よ");
+        assert_eq!(result.lines[0].text, "少年 よ");
+        assert!(!result.lines[0].parts[0].space_after);
+        assert!(result.lines[0].parts[1].space_after);
+    }
+
+    #[test]
+    fn word_timing_survives_a_trip_through_the_editor() {
+        let lines = parse("[00:12.00]<00:12.00>Hey <00:12.40>you <00:13.00>\n[00:14.00]plain line").lines;
+        assert_eq!(parse(&to_text(&lines)).lines, lines);
+    }
+
+    #[test]
+    fn pasted_ttml_is_word_level() {
+        let ttml = r#"<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="1.0" end="2.0"><span begin="1.0" end="1.5">Hey</span> <span begin="1.5" end="2.0">you</span></p></div></body></tt>"#;
+        assert_eq!(parse(ttml).rank(), 3);
     }
 
     #[test]
