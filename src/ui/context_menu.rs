@@ -311,6 +311,11 @@ pub fn show_item_menu_with(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, item:
         }
     }
 
+    if !is_artist && !item.id.is_empty() && ctx.downloads.downloaded_count() > 0 {
+        let (ctx, item, anchor) = (ctx.clone(), item.clone(), anchor_w.clone());
+        builder.add(Section::Actions, &tr!("Remove All Downloads"), "remove-downloads", false, Rc::new(move || remove_collection_downloads(&ctx, &anchor, &item)));
+    }
+
     let request = match item.kind {
         ItemKind::Album => NavRequest::Album { id: item.id.clone(), title: item.title.clone(), thumb: item.thumb.clone() },
         ItemKind::Playlist => NavRequest::Playlist { id: item.id.clone(), title: item.title.clone(), thumb: item.thumb.clone() },
@@ -399,6 +404,35 @@ async fn collection_tracks(api: &dyn crate::net::browse::Browse, item: &MediaIte
             tracing::warn!(%err, id = %item.id, "loading the collection failed");
             (Vec::new(), None)
         }
+    }
+}
+
+/// Delete what a card's list has on disk. Its rows come from the device or the page cache where they can, so this works offline.
+fn remove_collection_downloads(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) {
+    let cached = if is_on_device(item) { Some(device_tracks(ctx, item)) } else { ctx.net.caches().disk().get(&item.id).map(|c| c.tracks).filter(|t| !t.is_empty()) };
+    if let Some(tracks) = cached {
+        confirm_removing(ctx, anchor, &tracks);
+        return;
+    }
+    if !ctx.online.is_online() {
+        toast(anchor, &tr!("Nothing here is downloaded"));
+        return;
+    }
+    let api = ctx.net.client().api();
+    let wanted = item.clone();
+    let handle = ctx.net.spawn(async move { collection_tracks(&*api, &wanted).await.0 });
+    let (ctx, anchor) = (ctx.clone(), anchor.clone());
+    glib::spawn_future_local(async move {
+        confirm_removing(&ctx, &anchor, &handle.await.unwrap_or_default());
+    });
+}
+
+fn confirm_removing(ctx: &Rc<UiContext>, anchor: &gtk::Widget, tracks: &[Track]) {
+    let downloaded: Vec<String> = tracks.iter().map(|t| t.video_id.0.clone()).filter(|id| ctx.downloads.is_downloaded(id)).collect();
+    if downloaded.is_empty() {
+        toast(anchor, &tr!("Nothing here is downloaded"));
+    } else {
+        confirm_remove_downloads(ctx, anchor, downloaded);
     }
 }
 

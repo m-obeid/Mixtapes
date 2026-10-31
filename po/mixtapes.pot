@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 18:39+0100\n"
+"POT-Creation-Date: 2026-10-31 19:20+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -22,7 +22,7 @@ msgstr ""
 #. Translators: a lyrics search result whose catalog entry has no title.
 #. Translators: stands in for a missing artist name
 #: src/discord.rs:92 src/lyrics/providers/mod.rs:212
-#: src/ui/pages/playlist.rs:2984
+#: src/ui/pages/playlist.rs:2987
 msgid "Unknown"
 msgstr ""
 
@@ -238,7 +238,7 @@ msgid "On this device"
 msgstr ""
 
 #: src/local_library.rs:521 src/ui/pages/library.rs:788
-#: src/ui/pages/playlist.rs:3007
+#: src/ui/pages/playlist.rs:3010
 #, rust-format
 msgid "{n} song"
 msgid_plural "{n} songs"
@@ -598,11 +598,11 @@ msgstr ""
 msgid "Similar to"
 msgstr ""
 
-#: src/net/playlists.rs:629
+#: src/net/playlists.rs:646
 msgid "Your Likes"
 msgstr ""
 
-#: src/net/playlists.rs:630
+#: src/net/playlists.rs:647
 msgid "Your liked songs from YouTube Music."
 msgstr ""
 
@@ -620,15 +620,15 @@ msgstr ""
 msgid "Couldn't update rating"
 msgstr ""
 
-#: src/player.rs:1101
+#: src/player.rs:1119
 msgid "Offline mode is on, and this song is not downloaded"
 msgstr ""
 
-#: src/player.rs:1755
+#: src/player.rs:1773
 msgid "Radio"
 msgstr ""
 
-#: src/player.rs:1755
+#: src/player.rs:1773
 #, rust-format
 msgid "Radio of {seed_name}"
 msgstr ""
@@ -698,7 +698,7 @@ msgstr[1] ""
 msgid "Play Next"
 msgstr ""
 
-#: src/ui/context_menu.rs:121 src/ui/context_menu.rs:434
+#: src/ui/context_menu.rs:121 src/ui/context_menu.rs:468
 #: src/ui/pages/playlist.rs:1850
 #, rust-format
 msgid "Playing {n} track next"
@@ -722,7 +722,7 @@ msgstr[1] ""
 msgid "Add to Queue"
 msgstr ""
 
-#: src/ui/context_menu.rs:130 src/ui/context_menu.rs:438
+#: src/ui/context_menu.rs:130 src/ui/context_menu.rs:472
 #: src/ui/pages/playlist.rs:1859
 #, rust-format
 msgid "Added {n} track to queue"
@@ -734,8 +734,8 @@ msgstr[1] ""
 msgid "Added to queue"
 msgstr ""
 
-#: src/ui/context_menu.rs:139 src/ui/context_menu.rs:322
-#: src/ui/context_menu.rs:329
+#: src/ui/context_menu.rs:139 src/ui/context_menu.rs:327
+#: src/ui/context_menu.rs:334
 msgid "Go to Artist"
 msgstr ""
 
@@ -753,13 +753,13 @@ msgstr ""
 msgid "Album pages not ported yet ({name})"
 msgstr ""
 
-#: src/ui/context_menu.rs:161 src/ui/context_menu.rs:334
+#: src/ui/context_menu.rs:161 src/ui/context_menu.rs:339
 #: src/ui/pages/artist.rs:205 src/ui/pages/playlist.rs:1828
 msgid "Start Radio"
 msgstr ""
 
-#: src/ui/context_menu.rs:163 src/ui/context_menu.rs:456
-#: src/ui/context_menu.rs:477 src/ui/pages/playlist.rs:1868
+#: src/ui/context_menu.rs:163 src/ui/context_menu.rs:490
+#: src/ui/context_menu.rs:511 src/ui/pages/playlist.rs:1868
 msgid "Starting radio..."
 msgstr ""
 
@@ -804,12 +804,12 @@ msgstr ""
 msgid "Refresh Metadata"
 msgstr ""
 
-#: src/ui/context_menu.rs:223 src/ui/context_menu.rs:347
+#: src/ui/context_menu.rs:223 src/ui/context_menu.rs:352
 #: src/ui/pages/playlist.rs:1831
 msgid "Copy Link"
 msgstr ""
 
-#: src/ui/context_menu.rs:227 src/ui/context_menu.rs:349
+#: src/ui/context_menu.rs:227 src/ui/context_menu.rs:354
 msgid "Link copied"
 msgstr ""
 
@@ -828,8 +828,8 @@ msgstr ""
 
 #: src/ui/context_menu.rs:239 src/ui/crop_dialog.rs:146
 #: src/ui/download_queue.rs:88 src/ui/pages/library.rs:1005
-#: src/ui/pages/library.rs:1043 src/ui/pages/playlist.rs:2407
-#: src/ui/pages/playlist.rs:2583 src/ui/playlist_ops.rs:50
+#: src/ui/pages/library.rs:1043 src/ui/pages/playlist.rs:2410
+#: src/ui/pages/playlist.rs:2586 src/ui/playlist_ops.rs:50
 #: src/ui/preferences.rs:566 src/ui/preferences.rs:928
 #: src/ui/preferences.rs:986 src/ui/widgets/lyrics_view.rs:764
 msgid "Cancel"
@@ -846,40 +846,49 @@ msgid_plural "Removed {n} downloads"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/context_menu.rs:320
+#: src/ui/context_menu.rs:316 src/ui/pages/playlist.rs:1834
+msgid "Remove All Downloads"
+msgstr ""
+
+#: src/ui/context_menu.rs:325
 msgid "Open Album"
 msgstr ""
 
-#: src/ui/context_menu.rs:321
+#: src/ui/context_menu.rs:326
 msgid "Open Playlist"
 msgstr ""
 
-#: src/ui/context_menu.rs:412 src/ui/pages/playlist.rs:795
+#: src/ui/context_menu.rs:418 src/ui/context_menu.rs:433
+#: src/ui/pages/playlist.rs:1890
+msgid "Nothing here is downloaded"
+msgstr ""
+
+#: src/ui/context_menu.rs:446 src/ui/pages/playlist.rs:795
 msgid "Loading..."
 msgstr ""
 
-#: src/ui/context_menu.rs:426
+#: src/ui/context_menu.rs:460
 msgid "Nothing to play"
 msgstr ""
 
-#: src/ui/context_menu.rs:470 src/ui/context_menu.rs:485
-#: src/ui/context_menu.rs:491
+#: src/ui/context_menu.rs:504 src/ui/context_menu.rs:519
+#: src/ui/context_menu.rs:525
 msgid "Radio unavailable"
 msgstr ""
 
-#: src/ui/context_menu.rs:498
+#: src/ui/context_menu.rs:532
 msgid "Refreshing metadata..."
 msgstr ""
 
-#: src/ui/context_menu.rs:508
+#: src/ui/context_menu.rs:542
 msgid "Metadata refreshed"
 msgstr ""
 
-#: src/ui/context_menu.rs:510
+#: src/ui/context_menu.rs:544
 msgid "No metadata found"
 msgstr ""
 
-#: src/ui/context_menu.rs:514
+#: src/ui/context_menu.rs:548
 msgid "Failed to refresh metadata"
 msgstr ""
 
@@ -1550,11 +1559,11 @@ msgstr ""
 msgid "Failed to remove"
 msgstr ""
 
-#: src/ui/pages/library.rs:1002 src/ui/pages/playlist.rs:2406
+#: src/ui/pages/library.rs:1002 src/ui/pages/playlist.rs:2409
 msgid "Delete Upload?"
 msgstr ""
 
-#: src/ui/pages/library.rs:1003 src/ui/pages/playlist.rs:2406
+#: src/ui/pages/library.rs:1003 src/ui/pages/playlist.rs:2409
 #, rust-format
 msgid ""
 "Are you sure you want to delete \"{title}\"?\n"
@@ -1562,7 +1571,7 @@ msgid ""
 msgstr ""
 
 #: src/ui/pages/library.rs:1006 src/ui/pages/library.rs:1044
-#: src/ui/pages/playlist.rs:2408 src/ui/pages/playlist.rs:2584
+#: src/ui/pages/playlist.rs:2411 src/ui/pages/playlist.rs:2587
 msgid "Delete"
 msgstr ""
 
@@ -1574,11 +1583,11 @@ msgstr ""
 msgid "Failed to delete the upload"
 msgstr ""
 
-#: src/ui/pages/library.rs:1040 src/ui/pages/playlist.rs:2582
+#: src/ui/pages/library.rs:1040 src/ui/pages/playlist.rs:2585
 msgid "Delete Playlist?"
 msgstr ""
 
-#: src/ui/pages/library.rs:1041 src/ui/pages/playlist.rs:2582
+#: src/ui/pages/library.rs:1041 src/ui/pages/playlist.rs:2585
 #, rust-format
 msgid ""
 "Are you sure you want to delete \"{title}\"?\n"
@@ -1669,11 +1678,11 @@ msgstr ""
 msgid "More"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:237 src/ui/pages/playlist.rs:2384
+#: src/ui/pages/playlist.rs:237 src/ui/pages/playlist.rs:2387
 msgid "Select All"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:238 src/ui/pages/playlist.rs:2386
+#: src/ui/pages/playlist.rs:238 src/ui/pages/playlist.rs:2389
 msgid "Deselect All"
 msgstr ""
 
@@ -1756,21 +1765,13 @@ msgstr ""
 msgid "Download All"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:1834
-msgid "Remove All Downloads"
-msgstr ""
-
-#: src/ui/pages/playlist.rs:1836 src/ui/pages/playlist.rs:2559
-#: src/ui/pages/playlist.rs:2640
+#: src/ui/pages/playlist.rs:1836 src/ui/pages/playlist.rs:2562
+#: src/ui/pages/playlist.rs:2643
 msgid "Edit Playlist"
 msgstr ""
 
 #: src/ui/pages/playlist.rs:1879
 msgid "Downloads need an internet connection"
-msgstr ""
-
-#: src/ui/pages/playlist.rs:1890
-msgid "Nothing here is downloaded"
 msgstr ""
 
 #: src/ui/pages/playlist.rs:1916
@@ -1792,29 +1793,29 @@ msgid_plural "{n} of {total} selected"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/pages/playlist.rs:2127 src/ui/pages/playlist.rs:2140
+#: src/ui/pages/playlist.rs:2129 src/ui/pages/playlist.rs:2143
 msgid "Could not move the song"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2172 src/ui/pages/playlist.rs:2189
+#: src/ui/pages/playlist.rs:2175 src/ui/pages/playlist.rs:2192
 #, rust-format
 msgid "Removed {n} track"
 msgid_plural "Removed {n} tracks"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/pages/playlist.rs:2196
+#: src/ui/pages/playlist.rs:2199
 msgid "Failed to remove tracks"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2218
+#: src/ui/pages/playlist.rs:2221
 #, rust-format
 msgid "Copied debug data for {n} track"
 msgid_plural "Copied debug data for {n} tracks"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/pages/playlist.rs:2307
+#: src/ui/pages/playlist.rs:2310
 #, rust-format
 msgid "Only {ranked} of {n} song has view counts — the rest stay at the end"
 msgid_plural ""
@@ -1822,7 +1823,7 @@ msgid_plural ""
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/pages/playlist.rs:2309
+#: src/ui/pages/playlist.rs:2312
 #, rust-format
 msgid "Only {ranked} of {n} song has add dates — the rest stay at the end"
 msgid_plural ""
@@ -1830,166 +1831,166 @@ msgid_plural ""
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/pages/playlist.rs:2316
+#: src/ui/pages/playlist.rs:2319
 msgid "View counts need an internet connection"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2317
+#: src/ui/pages/playlist.rs:2320
 msgid "View counts aren't available for this list"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2318
+#: src/ui/pages/playlist.rs:2321
 msgid "Add dates need an internet connection"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2319
+#: src/ui/pages/playlist.rs:2322
 msgid "Add dates aren't available for this list"
 msgstr ""
 
 #. Translators: {n} is the number of selected songs
-#: src/ui/pages/playlist.rs:2363
+#: src/ui/pages/playlist.rs:2366
 #, rust-format
 msgid "Remove {n} from Playlist"
 msgid_plural "Remove {n} from Playlist"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/pages/playlist.rs:2367
+#: src/ui/pages/playlist.rs:2370
 msgid "Remove from Playlist"
 msgstr ""
 
 #. Translators: stands in for a missing song title in "Are you sure you want to delete "{title}"?" and "Deleted {title}"
-#: src/ui/pages/playlist.rs:2374
+#: src/ui/pages/playlist.rs:2377
 msgid "this song"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2375
+#: src/ui/pages/playlist.rs:2378
 msgid "Delete Upload"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2382
+#: src/ui/pages/playlist.rs:2385
 msgid "Deselect This"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2382
+#: src/ui/pages/playlist.rs:2385
 msgid "Select This"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2389
+#: src/ui/pages/playlist.rs:2392
 msgid "Copy Selection Data (Debug)"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2429
+#: src/ui/pages/playlist.rs:2432
 #, rust-format
 msgid "Deleted {title}"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2481 src/ui/window.rs:1309
+#: src/ui/pages/playlist.rs:2484 src/ui/window.rs:1309
 msgid "History requires an internet connection"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2485
+#: src/ui/pages/playlist.rs:2488
 msgid "Refresh requires an internet connection"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2509
+#: src/ui/pages/playlist.rs:2512
 #, rust-format
 msgid "{n} song available offline"
 msgid_plural "{n} songs available offline"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/pages/playlist.rs:2510 src/ui/window.rs:1128 src/ui/window.rs:2236
+#: src/ui/pages/playlist.rs:2513 src/ui/window.rs:1128 src/ui/window.rs:2236
 msgid "Downloaded Songs"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2553
+#: src/ui/pages/playlist.rs:2556
 msgid "Copy Cover URL"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2645 src/ui/widgets/lyrics_view.rs:765
+#: src/ui/pages/playlist.rs:2648 src/ui/widgets/lyrics_view.rs:765
 msgid "Save"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2649 src/ui/playlist_ops.rs:97
+#: src/ui/pages/playlist.rs:2652 src/ui/playlist_ops.rs:97
 msgid "Playlist Details"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2651 src/ui/playlist_ops.rs:98
+#: src/ui/pages/playlist.rs:2654 src/ui/playlist_ops.rs:98
 msgid "Title"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2653 src/ui/playlist_ops.rs:99
+#: src/ui/pages/playlist.rs:2656 src/ui/playlist_ops.rs:99
 msgid "Description"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2655 src/ui/playlist_ops.rs:100
+#: src/ui/pages/playlist.rs:2658 src/ui/playlist_ops.rs:100
 msgid "Visibility"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2974
+#: src/ui/pages/playlist.rs:2659 src/ui/pages/playlist.rs:2977
 #: src/ui/playlist_ops.rs:100
 msgid "Public"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2975
+#: src/ui/pages/playlist.rs:2659 src/ui/pages/playlist.rs:2978
 #: src/ui/playlist_ops.rs:100
 msgid "Private"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2656 src/ui/pages/playlist.rs:2976
+#: src/ui/pages/playlist.rs:2659 src/ui/pages/playlist.rs:2979
 #: src/ui/playlist_ops.rs:100
 msgid "Unlisted"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2660
+#: src/ui/pages/playlist.rs:2663
 msgid "Playlist Cover"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2660
+#: src/ui/pages/playlist.rs:2663
 msgid "No file selected"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2664
+#: src/ui/pages/playlist.rs:2667
 msgid "Choose File..."
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2671
+#: src/ui/pages/playlist.rs:2674
 msgid "Images"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2676
+#: src/ui/pages/playlist.rs:2679
 msgid "Select Cover Image"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:2702
+#: src/ui/pages/playlist.rs:2705
 #, rust-format
 msgid "Cropped PNG: {basename}"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:3000 src/ui/pages/playlist.rs:3015
+#: src/ui/pages/playlist.rs:3003 src/ui/pages/playlist.rs:3018
 #, rust-format
 msgid "{hours} hr {minutes} min"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:3000
+#: src/ui/pages/playlist.rs:3003
 #, rust-format
 msgid "{minutes} min {seconds} sec"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:3006
+#: src/ui/pages/playlist.rs:3009
 #, rust-format
 msgid "{n} episode"
 msgid_plural "{n} episodes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/pages/playlist.rs:3015
+#: src/ui/pages/playlist.rs:3018
 #, rust-format
 msgid "{minutes} min"
 msgstr ""
 
-#: src/ui/pages/playlist.rs:3140
+#: src/ui/pages/playlist.rs:3143
 msgid "Failed to fetch playlist after retries"
 msgstr ""
 
