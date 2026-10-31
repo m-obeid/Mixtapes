@@ -33,9 +33,10 @@ struct Section {
     list: gtk::ListBox,
     grid: CardGrid,
     store: gio::ListStore,
-    /// What the list and the grid show: the store with the search applied.
-    filtered: gtk::FilterListModel,
+    /// What the list and the grid show: the store searched and sorted.
+    shown: gtk::SortListModel,
     filter: gtk::CustomFilter,
+    sorter: gtk::CustomSorter,
     cards: Rc<RefCell<Vec<Rc<MediaCard>>>>,
 }
 
@@ -61,6 +62,7 @@ pub struct LibraryPage {
     compact: Rc<Cell<bool>>,
     /// What the search bar last typed, lowercased. Shared with every filter.
     query: Rc<RefCell<String>>,
+    sort: Rc<Cell<u32>>,
     on_refresh_done: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
@@ -71,19 +73,24 @@ impl LibraryPage {
 
         // Tab row: Library / Uploads toggles, then per-tab actions.
         let tab_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).margin_bottom(8).build();
-        let lib_tab = gtk::ToggleButton::builder().label("Library").active(true).build();
-        let upl_tab = gtk::ToggleButton::builder().label("Uploads").group(&lib_tab).build();
+        let lib_tab = gtk::ToggleButton::builder().label(tr!("Library")).active(true).build();
+        let upl_tab = gtk::ToggleButton::builder().label(tr!("Uploads")).group(&lib_tab).build();
         tab_row.append(&lib_tab);
         tab_row.append(&upl_tab);
         tab_row.append(&gtk::Box::builder().hexpand(true).build());
         let lib_actions = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).build();
         let view_toggle = gtk::Button::builder().css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
+        let sort_labels = SORT_LABELS.map(crate::i18n::gettext);
+        let sort_dropdown = gtk::DropDown::from_strings(&sort_labels.each_ref().map(String::as_str));
+        sort_dropdown.set_valign(gtk::Align::Center);
+        sort_dropdown.add_css_class("sort-dropdown");
+        lib_actions.append(&sort_dropdown);
         lib_actions.append(&view_toggle);
         tab_row.append(&lib_actions);
         let uploads_actions = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).visible(false).build();
-        let all_songs = gtk::Button::builder().icon_name("audio-x-generic-symbolic").css_classes(["flat", "circular"]).valign(gtk::Align::Center).tooltip_text("All Uploaded Songs").build();
+        let all_songs = gtk::Button::builder().icon_name("audio-x-generic-symbolic").css_classes(["flat", "circular"]).valign(gtk::Align::Center).tooltip_text(tr!("All Uploaded Songs")).build();
         uploads_actions.append(&all_songs);
-        let upload = gtk::Button::builder().icon_name("document-send-symbolic").css_classes(["flat", "circular"]).valign(gtk::Align::Center).tooltip_text("Upload Songs").build();
+        let upload = gtk::Button::builder().icon_name("document-send-symbolic").css_classes(["flat", "circular"]).valign(gtk::Align::Center).tooltip_text(tr!("Upload Songs")).build();
         uploads_actions.append(&upload);
         tab_row.append(&uploads_actions);
         content_box.append(&tab_row);
@@ -92,32 +99,33 @@ impl LibraryPage {
         content_box.append(&lib_stack);
 
         let lib_content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).build();
-        let new_playlist = gtk::Button::builder().icon_name("list-add-symbolic").css_classes(["flat", "circular"]).valign(gtk::Align::Center).tooltip_text("New Playlist").build();
+        let new_playlist = gtk::Button::builder().icon_name("list-add-symbolic").css_classes(["flat", "circular"]).valign(gtk::Align::Center).tooltip_text(tr!("New Playlist")).build();
         // One query behind every section, library and uploads alike: the
         // search bar filters whichever sub-tab is showing, like Python's.
         let query: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
-        let playlists = Section::new("Playlists", Some(&new_playlist), &query);
-        let albums = Section::new("Albums", None, &query);
-        let artists = Section::new("Artists", None, &query);
+        let sort = Rc::new(Cell::new(ctx.paths.read_prefs().get(SORT_PREF).and_then(|v| v.as_u64()).map_or(SORT_RECENT, |v| v as u32)));
+        let playlists = Section::new(&tr!("Playlists"), Some(&new_playlist), &query, &sort);
+        let albums = Section::new(&tr!("Albums"), None, &query, &sort);
+        let artists = Section::new(&tr!("Artists"), None, &query, &sort);
         for s in [&playlists, &albums, &artists] {
             lib_content.append(&s.root);
         }
-        lib_stack.add_titled(&lib_content, Some("library"), "Library");
+        lib_stack.add_titled(&lib_content, Some("library"), &tr!("Library"));
 
         let uploads_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).vexpand(true).build();
-        let up_albums = Section::new("Albums", None, &query);
-        let up_artists = Section::new("Artists", None, &query);
+        let up_albums = Section::new(&tr!("Albums"), None, &query, &sort);
+        let up_artists = Section::new(&tr!("Artists"), None, &query, &sort);
         uploads_box.append(&up_albums.root);
         uploads_box.append(&up_artists.root);
-        let empty_uploads = gtk::Label::builder().label("No uploaded music").css_classes(["dim-label"]).visible(false).build();
+        let empty_uploads = gtk::Label::builder().label(tr!("No uploaded music")).css_classes(["dim-label"]).visible(false).build();
         uploads_box.append(&empty_uploads);
-        lib_stack.add_titled(&uploads_box, Some("uploads"), "Uploads");
+        lib_stack.add_titled(&uploads_box, Some("uploads"), &tr!("Uploads"));
 
         let clamp = adw::Clamp::builder().maximum_size(1124).tightening_threshold(600).child(&content_box).build();
         let scrolled = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&clamp).build();
         crate::ui::suppress_hover_while_scrolling(&scrolled);
-        let loading = overlay_loader("Refreshing Library...");
-        let uploads_loading = overlay_loader("Loading uploads...");
+        let loading = overlay_loader(&tr!("Refreshing Library..."));
+        let uploads_loading = overlay_loader(&tr!("Loading uploads..."));
         let overlay = gtk::Overlay::builder().vexpand(true).child(&scrolled).build();
         overlay.add_overlay(&loading);
         overlay.add_overlay(&uploads_loading);
@@ -142,6 +150,7 @@ impl LibraryPage {
             loaded_at: Cell::new(None),
             compact: Rc::new(Cell::new(false)),
             query,
+            sort,
             on_refresh_done: RefCell::new(None),
         });
         for section in page.sections.iter().chain(page.upload_sections.iter()) {
@@ -171,6 +180,20 @@ impl LibraryPage {
             });
         }
         {
+            let saved = page.sort.get();
+            sort_dropdown.set_selected(saved.min(SORT_LABELS.len() as u32 - 1));
+            let weak = Rc::downgrade(&page);
+            sort_dropdown.connect_selected_notify(move |dropdown| {
+                let Some(p) = weak.upgrade() else { return };
+                let sort = dropdown.selected();
+                p.sort.set(sort);
+                p.ctx.paths.update_prefs(|prefs| {
+                    prefs.insert(SORT_PREF.into(), serde_json::json!(sort));
+                });
+                for section in p.sections.iter().chain(p.upload_sections.iter()) {
+                    section.sorter.changed(gtk::SorterChange::Different);
+                }
+            });
             let weak = Rc::downgrade(&page);
             page.view_toggle.connect_clicked(move |_| {
                 if let Some(p) = weak.upgrade() {
@@ -333,7 +356,7 @@ impl LibraryPage {
                 let available = |id: &str| id == DOWNLOADS_ID || crate::local_library::is_local(id) || (*cacheable && cached.contains(id));
                 // The list shows the filtered model, so its rows follow that order.
                 for (i, row) in list_rows(&section.list).into_iter().enumerate() {
-                    let id = section.filtered.item(i as u32).and_downcast::<MediaObject>().map(|o| o.id()).unwrap_or_default();
+                    let id = section.shown.item(i as u32).and_downcast::<MediaObject>().map(|o| o.id()).unwrap_or_default();
                     set_available(row.upcast_ref(), available(&id));
                 }
                 for card in section.cards.borrow().iter() {
@@ -467,10 +490,10 @@ impl LibraryPage {
     fn sync_view_toggle(&self) {
         if self.view_mode() == "grid" {
             self.view_toggle.set_icon_name("view-list-symbolic");
-            self.view_toggle.set_tooltip_text(Some("Switch to list view"));
+            self.view_toggle.set_tooltip_text(Some(&tr!("Switch to list view")));
         } else {
             self.view_toggle.set_icon_name("view-grid-symbolic");
-            self.view_toggle.set_tooltip_text(Some("Switch to grid view"));
+            self.view_toggle.set_tooltip_text(Some(&tr!("Switch to grid view")));
         }
     }
 
@@ -491,7 +514,7 @@ impl LibraryPage {
         for section in self.sections.iter().chain(self.upload_sections.iter()) {
             section.list.set_visible(!show_grid);
             section.grid.set_visible(show_grid);
-            section.root.set_visible(section.filtered.n_items() > 0);
+            section.root.set_visible(section.shown.n_items() > 0);
         }
         self.sync_view_toggle();
     }
@@ -582,7 +605,7 @@ impl LibraryPage {
 
     fn bind_section(self: &Rc<Self>, section: &Rc<Section>) {
         let ctx = self.ctx.clone();
-        section.list.bind_model(Some(&section.filtered), move |object| {
+        section.list.bind_model(Some(&section.shown), move |object| {
             let item = object.downcast_ref::<MediaObject>().map(MediaObject::item).unwrap_or_default();
             let row = list_row(&ctx, &item);
             if item.id != DOWNLOADS_ID {
@@ -595,13 +618,13 @@ impl LibraryPage {
         section.list.connect_row_activated(move |list, row| {
             let (Some(page), Some(section)) = (weak_page.upgrade(), weak_section.upgrade()) else { return };
             let _ = list;
-            if let Some(item) = section.filtered.item(row.index().max(0) as u32).and_downcast::<MediaObject>() {
+            if let Some(item) = section.shown.item(row.index().max(0) as u32).and_downcast::<MediaObject>() {
                 page.activate(&item.item());
             }
         });
         let weak_page = Rc::downgrade(self);
         let weak_section = Rc::downgrade(section);
-        section.filtered.connect_items_changed(move |_, _, _, _| {
+        section.shown.connect_items_changed(move |_, _, _, _| {
             if let (Some(page), Some(section)) = (weak_page.upgrade(), weak_section.upgrade()) {
                 page.rebuild_grid(&section);
             }
@@ -611,8 +634,8 @@ impl LibraryPage {
     fn rebuild_grid(self: &Rc<Self>, section: &Rc<Section>) {
         section.grid.remove_all();
         section.cards.borrow_mut().clear();
-        for i in 0..section.filtered.n_items() {
-            let Some(item) = section.filtered.item(i).and_downcast::<MediaObject>().map(|o| o.item()) else { continue };
+        for i in 0..section.shown.n_items() {
+            let Some(item) = section.shown.item(i).and_downcast::<MediaObject>().map(|o| o.item()) else { continue };
             let (subtitle, fallback_icon, custom_icon) = card_style(&item);
             let card = MediaCard::new(&self.ctx, item.clone(), CardOptions { title_lines: 2, subtitle: Some(subtitle), fallback_icon, custom_icon });
             let weak = Rc::downgrade(self);
@@ -654,7 +677,7 @@ impl LibraryPage {
 }
 
 impl Section {
-    fn new(title: &str, action: Option<&gtk::Button>, query: &Rc<RefCell<String>>) -> Rc<Self> {
+    fn new(title: &str, action: Option<&gtk::Button>, query: &Rc<RefCell<String>>, sort: &Rc<Cell<u32>>) -> Rc<Self> {
         let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).visible(false).build();
         let header = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).height_request(34).build();
         header.append(&gtk::Label::builder().label(title).css_classes(["heading"]).halign(gtk::Align::Start).valign(gtk::Align::Center).hexpand(true).build());
@@ -675,8 +698,43 @@ impl Section {
             query.is_empty() || object.downcast_ref::<MediaObject>().is_some_and(|object| matches_query(&object.item(), &query))
         });
         let filtered = gtk::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
-        Rc::new(Self { root, list, grid, store, filtered, filter, cards: Rc::new(RefCell::new(Vec::new())) })
+        let (sort, positions) = (sort.clone(), store.clone());
+        let sorter = gtk::CustomSorter::new(move |a, b| {
+            let row = |object: &glib::Object| {
+                let item = object.downcast_ref::<MediaObject>().map(MediaObject::item).unwrap_or_default();
+                SortRow { pinned: PINNED.contains(&item.id.as_str()), title: item.title.to_lowercase(), position: positions.find(object).unwrap_or(0) }
+            };
+            compare_rows(sort.get(), &row(a), &row(b)).into()
+        });
+        let shown = gtk::SortListModel::new(Some(filtered), Some(sorter.clone()));
+        Rc::new(Self { root, list, grid, store, shown, filter, sorter, cards: Rc::new(RefCell::new(Vec::new())) })
     }
+}
+
+/// The lists every library starts with. They stay on top whatever the order.
+const PINNED: [&str; 5] = ["LM", "SS", "SE", DOWNLOADS_ID, crate::local_library::LIKED_ID];
+const SORT_PREF: &str = "library_sort";
+const SORT_RECENT: u32 = 0;
+const SORT_OLDEST: u32 = 1;
+const SORT_NAME: u32 = 2;
+const SORT_NAME_REVERSED: u32 = 3;
+const SORT_LABELS: [&str; 4] = [tr_noop!("Recent"), tr_noop!("Oldest"), tr_noop!("Name (A-Z)"), tr_noop!("Name (Z-A)")];
+
+struct SortRow {
+    pinned: bool,
+    title: String,
+    /// Where the row sits in the order YouTube sent, most recent first.
+    position: u32,
+}
+
+fn compare_rows(sort: u32, a: &SortRow, b: &SortRow) -> std::cmp::Ordering {
+    let order = match sort {
+        SORT_OLDEST => b.position.cmp(&a.position),
+        SORT_NAME => a.title.cmp(&b.title),
+        SORT_NAME_REVERSED => b.title.cmp(&a.title),
+        SORT_RECENT | _ => a.position.cmp(&b.position),
+    };
+    b.pinned.cmp(&a.pinned).then(if a.pinned && b.pinned { a.position.cmp(&b.position) } else { order })
 }
 
 /// Port of _apply_library_filter's match: the title, and for an album the
@@ -721,7 +779,7 @@ fn forget_library(paths: &crate::paths::Paths) {
 }
 
 fn downloads_entry() -> MediaItem {
-    MediaItem { kind: ItemKind::Playlist, id: DOWNLOADS_ID.to_owned(), title: "Downloads".to_owned(), description: Some("Downloaded songs".to_owned()), ..MediaItem::default() }
+    MediaItem { kind: ItemKind::Playlist, id: DOWNLOADS_ID.to_owned(), title: tr!("Downloads"), description: Some(tr!("Downloaded songs")), ..MediaItem::default() }
 }
 
 /// The account's playlists with what lives on this device: YouTube's likes
@@ -757,11 +815,11 @@ fn saved_albums(ctx: &UiContext) -> Vec<MediaItem> {
 /// Subtitle and icons for a grid card, following _rebuild_*_grid.
 fn card_style(item: &MediaItem) -> (String, &'static str, Option<&'static str>) {
     match item.kind {
-        ItemKind::Playlist if item.id == DOWNLOADS_ID => (item.description.clone().unwrap_or_default(), "media-playlist-audio-symbolic", Some("folder-download-symbolic")),
+        ItemKind::Playlist if item.id == DOWNLOADS_ID => (item.description.clone().unwrap_or_default(), "audio-x-generic-symbolic", Some("folder-download-symbolic")),
         // An empty playlist on this device has no art yet. It gets the tile Downloads wears.
         ItemKind::Playlist if crate::local_library::is_local(&item.id) && item.thumb.is_none() => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", Some("audio-x-generic-symbolic")),
-        ItemKind::Playlist if item.id.len() == 2 || crate::local_library::is_local(&item.id) => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", None),
-        ItemKind::Playlist => (item.count.as_ref().map(|c| format!("{c} songs")).unwrap_or_default(), "folder-music-symbolic", None),
+        ItemKind::Playlist if item.id.len() == 2 || crate::local_library::is_local(&item.id) => (crate::i18n::youtube(item.description.as_deref().unwrap_or_default()), "folder-music-symbolic", None),
+        ItemKind::Playlist => (item.count.as_deref().map(songs_text).unwrap_or_default(), "folder-music-symbolic", None),
         ItemKind::Album => (album_subtitle(item), "media-optical-symbolic", None),
         ItemKind::Artist => (artist_subtitle(item), "avatar-default-symbolic", None),
         _ => (item.detail(), "folder-music-symbolic", None),
@@ -782,6 +840,15 @@ fn album_subtitle(item: &MediaItem) -> String {
     parts.join(" • ")
 }
 
+/// "12 songs" for a playlist's count. YouTube sends the count as text, and one with a separator in it stays as sent.
+fn songs_text(count: &str) -> String {
+    match count.parse::<u64>() {
+        Ok(n) => trn!("{n} song", "{n} songs", n),
+        // Translators: {count} is a number YouTube sends as text, like 1,204
+        Err(_) => tr!("{count} songs", count),
+    }
+}
+
 /// "12M" or "1,204": a number with at most a magnitude letter, no unit of its own.
 fn is_bare_count(text: &str) -> bool {
     let text = text.trim();
@@ -792,8 +859,9 @@ fn is_bare_count(text: &str) -> bool {
 fn artist_subtitle(item: &MediaItem) -> String {
     match &item.subscribers {
         // A bare count is subscribers. An uploaded artist says "5 songs", which already names its unit.
-        Some(s) if is_bare_count(s) => format!("{s} subscribers"),
-        Some(s) => s.clone(),
+        // Translators: {count} is a short number YouTube sends, like 1.2M
+        Some(s) if is_bare_count(s) => tr!("{count} subscribers", count = s),
+        Some(s) => crate::i18n::youtube(s),
         None => String::new(),
     }
 }
@@ -825,19 +893,19 @@ fn list_row(ctx: &Rc<UiContext>, item: &MediaItem) -> gtk::ListBoxRow {
 
     let subtitle = match item.kind {
         ItemKind::Playlist if item.id.len() == 2 => {
-            let mut text = "Automatic Playlist".to_owned();
+            let mut text = tr!("Automatic Playlist");
             if let Some(count) = &item.count {
-                text.push_str(&format!(" • {count} songs"));
+                text.push_str(&format!(" • {}", songs_text(count)));
             }
             text
         }
-        ItemKind::Playlist => item.count.as_ref().map(|c| format!("{c} songs")).unwrap_or_default(),
+        ItemKind::Playlist => item.count.as_deref().map(songs_text).unwrap_or_default(),
         ItemKind::Album => album_subtitle(item),
         ItemKind::Artist => artist_subtitle(item),
         _ => item.detail(),
     };
     let text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).valign(gtk::Align::Center).hexpand(true).build();
-    text.append(&gtk::Label::builder().label(&item.title).halign(gtk::Align::Start).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).lines(1).width_chars(1).build());
+    text.append(&gtk::Label::builder().label(item.shown_title()).halign(gtk::Align::Start).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).lines(1).width_chars(1).build());
     let subtitle_label = gtk::Label::builder().label(&subtitle).halign(gtk::Align::Start).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).lines(1).width_chars(1).css_classes(["dim-label", "caption"]).visible(!subtitle.is_empty()).build();
     text.append(&subtitle_label);
     inner.append(&text);
@@ -911,20 +979,20 @@ fn playlist_extras(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) 
             return Vec::new();
         }
         let (ctx, anchor) = (ctx.clone(), anchor.clone());
-        return vec![MenuAction::new("Delete Playlist", context_menu::Section::Remove, move || confirm_delete(&ctx, &anchor, &id, &title))];
+        return vec![MenuAction::new(&tr!("Delete Playlist"), context_menu::Section::Remove, move || confirm_delete(&ctx, &anchor, &id, &title))];
     }
     if !ctx.net.client().is_authenticated() {
         if item.kind != ItemKind::Artist && ctx.local.is_saved(&id) {
             let (ctx, anchor, item) = (ctx.clone(), anchor.clone(), item.clone());
-            return vec![MenuAction::new("Remove from Library", context_menu::Section::Remove, move || {
+            return vec![MenuAction::new(&tr!("Remove from Library"), context_menu::Section::Remove, move || {
                 ctx.local.set_saved(&item, false);
-                toast(&anchor, "Removed from library");
+                toast(&anchor, &tr!("Removed from library"));
                 ctx.nav.refresh_library();
             })];
         }
         if item.kind == ItemKind::Artist && ctx.local.is_subscribed(&id) {
             let ctx = ctx.clone();
-            return vec![MenuAction::new("Unsubscribe", context_menu::Section::Remove, move || {
+            return vec![MenuAction::new(&tr!("Unsubscribe"), context_menu::Section::Remove, move || {
                 ctx.local.set_subscribed(&MediaItem { kind: ItemKind::Artist, id: id.clone(), title: title.clone(), ..MediaItem::default() }, false);
                 ctx.nav.refresh_library();
             })];
@@ -933,14 +1001,14 @@ fn playlist_extras(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) 
     }
     if is_upload_album(item) {
         let (ctx, anchor) = (ctx.clone(), anchor.clone());
-        return vec![MenuAction::new("Delete Album", context_menu::Section::Remove, move || confirm_delete_upload(&ctx, &anchor, &id, &title))];
+        return vec![MenuAction::new(&tr!("Delete Album"), context_menu::Section::Remove, move || confirm_delete_upload(&ctx, &anchor, &id, &title))];
     }
     if owns_playlist(account_name(ctx).as_deref(), item) {
         let (ctx, anchor) = (ctx.clone(), anchor.clone());
-        return vec![MenuAction::new("Delete Playlist", context_menu::Section::Remove, move || confirm_delete(&ctx, &anchor, &id, &title))];
+        return vec![MenuAction::new(&tr!("Delete Playlist"), context_menu::Section::Remove, move || confirm_delete(&ctx, &anchor, &id, &title))];
     }
     let (ctx, anchor) = (ctx.clone(), anchor.clone());
-    vec![MenuAction::new("Remove from Library", context_menu::Section::Remove, move || {
+    vec![MenuAction::new(&tr!("Remove from Library"), context_menu::Section::Remove, move || {
         let api = ctx.net.client().api();
         let pid = id.clone();
         let handle = ctx.net.spawn(async move { crate::net::playlists::rate_playlist(&api, &pid, LikeStatus::Indifferent).await });
@@ -949,12 +1017,12 @@ fn playlist_extras(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) 
             match handle.await {
                 Ok(Ok(())) => {
                     ctx.net.caches().clear_library_ids();
-                    toast(&anchor, "Removed from library");
+                    toast(&anchor, &tr!("Removed from library"));
                     ctx.nav.refresh_library();
                 }
                 Ok(Err(err)) => {
                     tracing::warn!(%err, "remove from library failed");
-                    toast(&anchor, "Failed to remove");
+                    toast(&anchor, &tr!("Failed to remove"));
                 }
                 Err(_) => {}
             }
@@ -989,11 +1057,11 @@ fn account_name(ctx: &Rc<UiContext>) -> Option<String> {
 /// Port of _confirm_delete_upload: an uploaded album and its songs, gone.
 fn confirm_delete_upload(ctx: &Rc<UiContext>, anchor: &gtk::Widget, entity_id: &str, title: &str) {
     let dialog = adw::AlertDialog::builder()
-        .heading("Delete Upload?")
-        .body(format!("Are you sure you want to delete \"{title}\"?\nThis cannot be undone."))
+        .heading(tr!("Delete Upload?"))
+        .body(tr!("Are you sure you want to delete \"{title}\"?\nThis cannot be undone.", title))
         .build();
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("delete", "Delete");
+    dialog.add_response("cancel", &tr!("Cancel"));
+    dialog.add_response("delete", &tr!("Delete"));
     dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");
@@ -1010,12 +1078,12 @@ fn confirm_delete_upload(ctx: &Rc<UiContext>, anchor: &gtk::Widget, entity_id: &
         glib::spawn_future_local(async move {
             match handle.await {
                 Ok(Ok(())) => {
-                    toast(&anchor, "Upload deleted");
+                    toast(&anchor, &tr!("Upload deleted"));
                     ctx.nav.refresh_library();
                 }
                 Ok(Err(err)) => {
                     tracing::warn!(%err, "delete upload failed");
-                    toast(&anchor, "Failed to delete the upload");
+                    toast(&anchor, &tr!("Failed to delete the upload"));
                 }
                 Err(_) => {}
             }
@@ -1027,11 +1095,11 @@ fn confirm_delete_upload(ctx: &Rc<UiContext>, anchor: &gtk::Widget, entity_id: &
 /// Port of _confirm_delete_playlist, the same wording the playlist page uses.
 fn confirm_delete(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: &str, title: &str) {
     let dialog = adw::AlertDialog::builder()
-        .heading("Delete Playlist?")
-        .body(format!("Are you sure you want to delete \"{title}\"?\nThis action cannot be undone."))
+        .heading(tr!("Delete Playlist?"))
+        .body(tr!("Are you sure you want to delete \"{title}\"?\nThis action cannot be undone.", title))
         .build();
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("delete", "Delete");
+    dialog.add_response("cancel", &tr!("Cancel"));
+    dialog.add_response("delete", &tr!("Delete"));
     dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");
@@ -1043,7 +1111,7 @@ fn confirm_delete(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: &str, 
         }
         if crate::local_library::is_local(&id) {
             ctx.local.delete(&id);
-            toast(&anchor, "Playlist deleted");
+            toast(&anchor, &tr!("Playlist deleted"));
             ctx.nav.refresh_library();
             return;
         }
@@ -1054,12 +1122,12 @@ fn confirm_delete(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: &str, 
         glib::spawn_future_local(async move {
             match handle.await {
                 Ok(Ok(())) => {
-                    toast(&anchor, "Playlist deleted");
+                    toast(&anchor, &tr!("Playlist deleted"));
                     ctx.nav.refresh_library();
                 }
                 Ok(Err(err)) => {
                     tracing::warn!(%err, "delete playlist failed");
-                    toast(&anchor, "Failed to delete the playlist");
+                    toast(&anchor, &tr!("Failed to delete the playlist"));
                 }
                 Err(_) => {}
             }
@@ -1071,6 +1139,21 @@ fn confirm_delete(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: &str, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sorted(sort: u32) -> Vec<&'static str> {
+        let row = |title: &str, position: u32, pinned: bool| SortRow { pinned, title: title.to_lowercase(), position };
+        let mut rows = [row("Liked", 0, true), row("banana", 1, false), row("Apple", 2, false), row("cherry", 3, false)];
+        rows.sort_by(|a, b| compare_rows(sort, a, b));
+        rows.iter().map(|r| match r.title.as_str() { "liked" => "Liked", "banana" => "banana", "apple" => "Apple", _ => "cherry" }).collect()
+    }
+
+    #[test]
+    fn every_order_keeps_the_pinned_lists_on_top() {
+        assert_eq!(sorted(SORT_RECENT), ["Liked", "banana", "Apple", "cherry"]);
+        assert_eq!(sorted(SORT_OLDEST), ["Liked", "cherry", "Apple", "banana"]);
+        assert_eq!(sorted(SORT_NAME), ["Liked", "Apple", "banana", "cherry"]);
+        assert_eq!(sorted(SORT_NAME_REVERSED), ["Liked", "cherry", "banana", "Apple"]);
+    }
     use crate::model::Person;
 
     #[test]

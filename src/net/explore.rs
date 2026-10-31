@@ -3,6 +3,7 @@
 //! `get_mood_categories` and `get_charts` plus MusicClient.get_category_page,
 //! kept row for row so the page sees what the Python page saw.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -83,6 +84,8 @@ pub struct ExploreData {
 #[derive(Clone, Debug)]
 pub struct CategorySection {
     pub title: String,
+    /// The title in the app's language, when YouTube was asked in one. `title` stays English for the checks reading it.
+    pub shown_title: Option<String>,
     pub items: Vec<MediaItem>,
 }
 
@@ -91,7 +94,11 @@ pub struct CategorySection {
 /// Port of _fetch_explore. The feed decides whether the page has anything to
 /// show; the categories and the charts ride alongside it and are dropped if
 /// they fail, exactly as the Python threads did.
-pub async fn load_explore(api: Arc<dyn Browse>, country: String) -> Result<ExploreData, NetError> {
+///
+/// `labels` is a client asking in the app's language. The pills take their
+/// names from it, paired by params, and everything else is read from `api`.
+pub async fn load_explore(api: Arc<dyn Browse>, labels: Option<Arc<dyn Browse>>, country: String) -> Result<ExploreData, NetError> {
+    let names = labels.map(|labels| tokio::spawn(async move { get_mood_categories(&labels).await }));
     let categories = {
         let api = api.clone();
         tokio::spawn(async move { get_mood_categories(&api).await })
@@ -115,6 +122,22 @@ pub async fn load_explore(api: Arc<dyn Browse>, country: String) -> Result<Explo
         Ok(Ok(charts)) => data.charts = Some(charts),
         Ok(Err(err)) => tracing::warn!(%err, "charts failed"),
         Err(_) => {}
+    }
+    if let Some(names) = names {
+        match names.await {
+            Ok(Ok(sections)) => {
+                let names = category_names(&sections);
+                for pills in [&mut data.for_you, &mut data.moods, &mut data.genres, &mut data.feed.moods_and_genres] {
+                    rename_categories(pills, &names);
+                }
+                // YouTube lists these two by name, which the new names put out of order.
+                for pills in [&mut data.moods, &mut data.genres] {
+                    pills.sort_by_key(|pill| pill.title.to_lowercase());
+                }
+            }
+            Ok(Err(err)) => tracing::warn!(%err, "localized category names failed"),
+            Err(_) => {}
+        }
     }
     Ok(data)
 }
@@ -145,6 +168,47 @@ pub async fn get_category_page(api: &dyn Browse, params: &str) -> Result<Vec<Cat
     let body = json!({ "browseId": "FEmusic_moods_and_genres_category", "params": params });
     let response = api.post("browse", body).await?;
     Ok(parse_category_page(&response))
+}
+
+/// A category page whose section and playlist titles come from `labels`, a
+/// client asking in the app's language. A failure there leaves the page in English.
+pub async fn get_localized_category_page(api: &dyn Browse, labels: &dyn Browse, params: &str) -> Result<Vec<CategorySection>, NetError> {
+    let (sections, local) = tokio::join!(get_category_page(api, params), get_category_page(labels, params));
+    let mut sections = sections?;
+    match local {
+        Ok(local) => relabel_sections(&mut sections, &local),
+        Err(err) => tracing::warn!(%err, "localized category page failed"),
+    }
+    Ok(sections)
+}
+
+/// Every pill's name by its params, which are the same in each language.
+fn category_names(sections: &[(String, Vec<Category>)]) -> HashMap<String, String> {
+    sections.iter().flat_map(|(_, pills)| pills).map(|pill| (pill.params.clone(), pill.title.clone())).collect()
+}
+
+/// A pill missing from `names` keeps its English name. The catalog goes first, for a name YouTube got wrong.
+fn rename_categories(pills: &mut [Category], names: &HashMap<String, String>) {
+    for pill in pills {
+        if let Some(name) = crate::i18n::translated(&pill.title).or_else(|| names.get(&pill.params).cloned()) {
+            pill.title = name;
+        }
+    }
+}
+
+/// Take the titles of the same page read in another language. Items pair by
+/// id, sections by the item they lead with.
+fn relabel_sections(sections: &mut [CategorySection], local: &[CategorySection]) {
+    let item_titles: HashMap<&str, &str> = local.iter().flat_map(|section| &section.items).filter(|item| !item.id.is_empty()).map(|item| (item.id.as_str(), item.title.as_str())).collect();
+    let section_titles: HashMap<&str, &str> = local.iter().filter_map(|section| Some((section.items.first()?.id.as_str(), section.title.as_str()))).collect();
+    for section in sections {
+        section.shown_title = section.items.first().and_then(|item| section_titles.get(item.id.as_str())).map(|title| (*title).to_owned());
+        for item in &mut section.items {
+            if let Some(title) = item_titles.get(item.id.as_str()) {
+                item.title = (*title).to_owned();
+            }
+        }
+    }
 }
 
 /// The pills of one named grid, empty when the grid is not in the response.
@@ -228,7 +292,7 @@ fn parse_category_shelf(shelf: &Value) -> Option<CategorySection> {
     let carousel = shelf.get("musicCarouselShelfRenderer")?;
     let title = owned_at(carousel, CAROUSEL_TITLE)?;
     let items: Vec<MediaItem> = array_at(carousel, "/contents").iter().filter_map(|entry| parse_category_item(entry, &title)).collect();
-    (!items.is_empty()).then_some(CategorySection { title, items })
+    (!items.is_empty()).then_some(CategorySection { title, shown_title: None, items })
 }
 
 /// What the category page is handed to show podcasts instead of a mood.
@@ -363,23 +427,23 @@ fn parse_chart_artist(data: &Value) -> ChartArtist {
 /// The country names search.py spells out for the chart menu. A code with no
 /// name here shows as the code itself.
 const COUNTRY_NAMES: &[(&str, &str)] = &[
-    ("ZZ", "Global"), ("AR", "Argentina"), ("AU", "Australia"), ("AT", "Austria"),
-    ("BE", "Belgium"), ("BO", "Bolivia"), ("BR", "Brazil"), ("CA", "Canada"),
-    ("CL", "Chile"), ("CO", "Colombia"), ("CR", "Costa Rica"), ("CZ", "Czechia"),
-    ("DK", "Denmark"), ("DO", "Dominican Republic"), ("EC", "Ecuador"),
-    ("EG", "Egypt"), ("SV", "El Salvador"), ("EE", "Estonia"), ("FI", "Finland"),
-    ("FR", "France"), ("DE", "Germany"), ("GT", "Guatemala"), ("HN", "Honduras"),
-    ("HU", "Hungary"), ("IS", "Iceland"), ("IN", "India"), ("ID", "Indonesia"),
-    ("IE", "Ireland"), ("IL", "Israel"), ("IT", "Italy"), ("JP", "Japan"),
-    ("KE", "Kenya"), ("LU", "Luxembourg"), ("MX", "Mexico"), ("NL", "Netherlands"),
-    ("NZ", "New Zealand"), ("NI", "Nicaragua"), ("NG", "Nigeria"), ("NO", "Norway"),
-    ("PA", "Panama"), ("PY", "Paraguay"), ("PE", "Peru"), ("PH", "Philippines"),
-    ("PL", "Poland"), ("PT", "Portugal"), ("RO", "Romania"), ("RU", "Russia"),
-    ("SA", "Saudi Arabia"), ("RS", "Serbia"), ("ZA", "South Africa"),
-    ("KR", "South Korea"), ("ES", "Spain"), ("SE", "Sweden"), ("CH", "Switzerland"),
-    ("TZ", "Tanzania"), ("TR", "Turkey"), ("UG", "Uganda"), ("UA", "Ukraine"),
-    ("AE", "UAE"), ("GB", "United Kingdom"), ("US", "United States"),
-    ("UY", "Uruguay"), ("VE", "Venezuela"), ("VN", "Vietnam"), ("ZW", "Zimbabwe"),
+    ("ZZ", tr_noop!("Global")), ("AR", tr_noop!("Argentina")), ("AU", tr_noop!("Australia")), ("AT", tr_noop!("Austria")),
+    ("BE", tr_noop!("Belgium")), ("BO", tr_noop!("Bolivia")), ("BR", tr_noop!("Brazil")), ("CA", tr_noop!("Canada")),
+    ("CL", tr_noop!("Chile")), ("CO", tr_noop!("Colombia")), ("CR", tr_noop!("Costa Rica")), ("CZ", tr_noop!("Czechia")),
+    ("DK", tr_noop!("Denmark")), ("DO", tr_noop!("Dominican Republic")), ("EC", tr_noop!("Ecuador")),
+    ("EG", tr_noop!("Egypt")), ("SV", tr_noop!("El Salvador")), ("EE", tr_noop!("Estonia")), ("FI", tr_noop!("Finland")),
+    ("FR", tr_noop!("France")), ("DE", tr_noop!("Germany")), ("GT", tr_noop!("Guatemala")), ("HN", tr_noop!("Honduras")),
+    ("HU", tr_noop!("Hungary")), ("IS", tr_noop!("Iceland")), ("IN", tr_noop!("India")), ("ID", tr_noop!("Indonesia")),
+    ("IE", tr_noop!("Ireland")), ("IL", tr_noop!("Israel")), ("IT", tr_noop!("Italy")), ("JP", tr_noop!("Japan")),
+    ("KE", tr_noop!("Kenya")), ("LU", tr_noop!("Luxembourg")), ("MX", tr_noop!("Mexico")), ("NL", tr_noop!("Netherlands")),
+    ("NZ", tr_noop!("New Zealand")), ("NI", tr_noop!("Nicaragua")), ("NG", tr_noop!("Nigeria")), ("NO", tr_noop!("Norway")),
+    ("PA", tr_noop!("Panama")), ("PY", tr_noop!("Paraguay")), ("PE", tr_noop!("Peru")), ("PH", tr_noop!("Philippines")),
+    ("PL", tr_noop!("Poland")), ("PT", tr_noop!("Portugal")), ("RO", tr_noop!("Romania")), ("RU", tr_noop!("Russia")),
+    ("SA", tr_noop!("Saudi Arabia")), ("RS", tr_noop!("Serbia")), ("ZA", tr_noop!("South Africa")),
+    ("KR", tr_noop!("South Korea")), ("ES", tr_noop!("Spain")), ("SE", tr_noop!("Sweden")), ("CH", tr_noop!("Switzerland")),
+    ("TZ", tr_noop!("Tanzania")), ("TR", tr_noop!("Turkey")), ("UG", tr_noop!("Uganda")), ("UA", tr_noop!("Ukraine")),
+    ("AE", tr_noop!("UAE")), ("GB", tr_noop!("United Kingdom")), ("US", tr_noop!("United States")),
+    ("UY", tr_noop!("Uruguay")), ("VE", tr_noop!("Venezuela")), ("VN", tr_noop!("Vietnam")), ("ZW", tr_noop!("Zimbabwe")),
 ];
 
 /// Chart countries as (code, name), Global first and the rest by name.
@@ -387,7 +451,7 @@ pub fn country_options(codes: &[String]) -> Vec<(String, String)> {
     let mut options: Vec<(String, String)> = codes
         .iter()
         .map(|code| {
-            let name = COUNTRY_NAMES.iter().find(|(c, _)| c == code).map(|(_, n)| (*n).to_owned()).unwrap_or_else(|| code.clone());
+            let name = COUNTRY_NAMES.iter().find(|(c, _)| c == code).map(|(_, n)| crate::i18n::gettext(n)).unwrap_or_else(|| code.clone());
             (code.clone(), name)
         })
         .collect();
@@ -401,6 +465,29 @@ pub fn country_options(codes: &[String]) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_category_page_takes_its_titles_from_the_other_language() {
+        let playlist = |id: &str, title: &str| MediaItem { kind: ItemKind::Playlist, id: id.to_owned(), title: title.to_owned(), ..MediaItem::default() };
+        let section = |title: &str, items: Vec<MediaItem>| CategorySection { title: title.to_owned(), shown_title: None, items };
+        let mut english = vec![section("Chill pop", vec![playlist("a", "Unwind"), playlist("b", "Pop Gold")]), section("Yoga", vec![playlist("c", "Flow")])];
+        // The other language sends its shelves in another order and lacks one playlist.
+        let german = vec![section("Yoga DE", vec![playlist("c", "Fluss")]), section("Chill-Pop", vec![playlist("a", "Entspannen")])];
+        relabel_sections(&mut english, &german);
+        assert_eq!(english[0].title, "Chill pop");
+        assert_eq!(english[0].shown_title.as_deref(), Some("Chill-Pop"));
+        assert_eq!(english[0].items.iter().map(|item| item.title.as_str()).collect::<Vec<_>>(), ["Entspannen", "Pop Gold"]);
+        assert_eq!(english[1].shown_title.as_deref(), Some("Yoga DE"));
+    }
+
+    #[test]
+    fn a_pill_without_a_name_in_the_other_language_keeps_its_own() {
+        let pill = |title: &str, params: &str| Category { title: title.to_owned(), params: params.to_owned() };
+        let names = category_names(&[("Genres".to_owned(), vec![pill("Klassische Musik", "p1")])]);
+        let mut pills = vec![pill("Classical", "p1"), pill("J-Rap", "p2")];
+        rename_categories(&mut pills, &names);
+        assert_eq!(pills.iter().map(|pill| pill.title.as_str()).collect::<Vec<_>>(), ["Klassische Musik", "J-Rap"]);
+    }
 
     fn carousel(browse_id: &str, contents: Value) -> Value {
         json!({ "musicCarouselShelfRenderer": {
@@ -541,7 +628,7 @@ mod tests {
     async fn live_explore() {
         let paths = crate::paths::Paths::discover();
         let api = crate::net::ytmusic::YtMusic::new(&paths).unwrap().api();
-        let data = load_explore(api, "ZZ".into()).await.expect("explore");
+        let data = load_explore(api, None, "ZZ".into()).await.expect("explore");
         println!("moods {} genres {}", data.moods.len(), data.genres.len());
         println!("first mood {:?}", data.moods.first());
         println!("first genre {:?}", data.genres.first());

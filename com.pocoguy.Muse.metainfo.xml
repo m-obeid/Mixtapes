@@ -89,6 +89,12 @@
 
   <releases>
 
+    <release version="2026-10-31.0" date="2026-10-31">
+      <description>
+        <p>Mixtapes comes to macOS and speaks German now, with more languages to come, lyrics now have new sources with more word-timed results, and the like button in the player no longer crashes the app.</p>
+      </description>
+    </release>
+
     <release version="2026-10-07.2" date="2026-10-11">
       <description>
         <ul>

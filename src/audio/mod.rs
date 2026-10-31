@@ -16,8 +16,9 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use anyhow::Context;
 use async_channel::{Receiver, Sender};
 use gst::prelude::*;
 use gst_audio::prelude::*;
@@ -28,6 +29,12 @@ const TELEMETRY_CAPACITY: usize = 64;
 const POSITION_TICK: Duration = Duration::from_millis(100);
 const SPECTRUM_BANDS: u32 = 128;
 const SPECTRUM_THRESHOLD_DB: i32 = -80;
+/// How long a playing position may stand still before the network counts as behind.
+const STALL_AFTER: Duration = Duration::from_millis(400);
+/// How long a stalled stream holds to let audio arrive.
+const REFILL_WAIT: Duration = Duration::from_secs(3);
+/// How long after a start or a seek a standing position means nothing.
+const STALL_SETTLE: Duration = Duration::from_secs(2);
 const SPECTRUM_INTERVAL_NS: u64 = 33_000_000;
 
 #[derive(Debug)]
@@ -47,6 +54,8 @@ pub enum AudioCommand {
     Describe { reply: async_channel::Sender<String> },
     SetVolume(f64),
     SetMute(bool),
+    /// What the song in the speakers is multiplied by, from its measured loudness.
+    SetGain(f64),
     Shutdown,
 }
 
@@ -137,12 +146,21 @@ pub fn is_live_uri(uri: &str) -> bool {
 
 struct Engine {
     playbin: gst::Element,
+    /// Turns a loud song down. Separate from the listener's volume, which playbin holds.
+    normalizer: Option<gst::Element>,
     /// The sink playbin plays into, held so its remembered device can be cleared.
     audio_sink: Option<gst::Element>,
     shared: Arc<Shared>,
     control: Sender<AudioEvent>,
     telemetry: Sender<AudioTelemetry>,
     loading: Cell<bool>,
+    /// The last position seen moving, and when: a position that stands still while
+    /// playing means the network fell behind.
+    moved: Cell<Option<(gst::ClockTime, Instant)>>,
+    /// While set, the pipeline sits in Paused to let the network catch up, until then.
+    refill_until: Cell<Option<Instant>>,
+    /// Starting and seeking stand still for a moment by nature.
+    settles_at: Cell<Instant>,
     last_status: Cell<PlaybackStatus>,
     main_loop: glib::MainLoop,
     /// The last mute and volume asked for. Every load builds a new sink, and
@@ -265,6 +283,22 @@ fn set_download_buffering(playbin: &gst::Element, uri: &str) {
     }
 }
 
+/// Chain the elements that exist. Playbin takes one filter, so two go in a bin.
+fn audio_filter(spectrum: Option<&gst::Element>, normalizer: Option<&gst::Element>) -> anyhow::Result<Option<gst::Element>> {
+    let (first, second) = match (spectrum, normalizer) {
+        (Some(first), Some(second)) => (first, second),
+        (one, other) => return Ok(one.or(other).cloned()),
+    };
+    let bin = gst::Bin::new();
+    bin.add_many([first, second])?;
+    first.link(second)?;
+    let sink = gst::GhostPad::builder_with_target(&first.static_pad("sink").context("no sink pad")?)?.name("sink").build();
+    let src = gst::GhostPad::builder_with_target(&second.static_pad("src").context("no src pad")?)?.name("src").build();
+    bin.add_pad(&sink)?;
+    bin.add_pad(&src)?;
+    Ok(Some(bin.upcast()))
+}
+
 impl Engine {
     fn build(control: Sender<AudioEvent>, telemetry: Sender<AudioTelemetry>, main_loop: glib::MainLoop) -> anyhow::Result<Self> {
         let playbin = gst::ElementFactory::make("playbin").name("player").build()?;
@@ -277,8 +311,9 @@ impl Engine {
             }
         }
 
-        // Passthrough spectrum analyzer feeding the visualizer.
-        match gst::ElementFactory::make("spectrum")
+        // Passthrough spectrum analyzer feeding the visualizer. It sits in front of
+        // the normalizer so the bars do not shrink on a song that is turned down.
+        let spectrum = match gst::ElementFactory::make("spectrum")
             .name("visualizer-spectrum")
             .property("post-messages", true)
             .property("message-magnitude", true)
@@ -289,8 +324,17 @@ impl Engine {
             .property("multi-channel", false)
             .build()
         {
-            Ok(spectrum) => playbin.set_property("audio-filter", &spectrum),
-            Err(err) => tracing::warn!(%err, "spectrum element unavailable; visualizer stays inert"),
+            Ok(spectrum) => Some(spectrum),
+            Err(err) => {
+                tracing::warn!(%err, "spectrum element unavailable; visualizer stays inert");
+                None
+            }
+        };
+        let normalizer = gst::ElementFactory::make("volume").name("normalizer").build().inspect_err(|err| tracing::warn!(%err, "volume element unavailable; songs play as they are")).ok();
+        match audio_filter(spectrum.as_ref(), normalizer.as_ref()) {
+            Ok(Some(filter)) => playbin.set_property("audio-filter", &filter),
+            Ok(None) => {}
+            Err(err) => tracing::warn!(%err, "audio filter not built"),
         }
 
         // Our own sink, so `clear_remembered_device` has something to reach.
@@ -371,11 +415,15 @@ impl Engine {
 
         Ok(Self {
             playbin,
+            normalizer,
             audio_sink,
             shared,
             control,
             telemetry,
             loading: Cell::new(false),
+            moved: Cell::new(None),
+            refill_until: Cell::new(None),
+            settles_at: Cell::new(Instant::now()),
             last_status: Cell::new(PlaybackStatus::Stopped),
             main_loop,
             wanted_mute: Cell::new(None),
@@ -479,6 +527,7 @@ impl Engine {
                 *self.shared.http_auth.lock().unwrap() = auth;
                 self.shared.live.store(is_live_uri(&uri), Ordering::Release);
                 self.loading.set(true);
+                self.reset_stall();
                 self.last_status.set(PlaybackStatus::Loading);
                 self.emit(AudioEvent::StateChanged { generation, status: PlaybackStatus::Loading });
                 self.shared.levels_settling.store(true, Ordering::Release);
@@ -507,13 +556,16 @@ impl Engine {
                 *self.shared.armed_next.lock().unwrap() = None;
             }
             AudioCommand::Play => {
+                self.reset_stall();
                 let _ = self.playbin.set_state(gst::State::Playing);
             }
             AudioCommand::Pause => {
+                self.reset_stall();
                 let _ = self.playbin.set_state(gst::State::Paused);
             }
             AudioCommand::Stop => {
                 tracing::debug!(generation = self.generation(), "audio: stop");
+                self.reset_stall();
                 *self.shared.armed_next.lock().unwrap() = None;
                 *self.shared.pending_gapless.lock().unwrap() = None;
                 self.loading.set(false);
@@ -522,6 +574,7 @@ impl Engine {
                 self.set_status(PlaybackStatus::Stopped);
             }
             AudioCommand::Seek { seconds } => {
+                self.reset_stall();
                 let target = gst::ClockTime::from_seconds_f64(seconds.max(0.0));
                 // Accurate first, like Player.seek. A key-unit seek lands on the
                 // previous keyframe or cluster, which is the jump back the user sees.
@@ -533,6 +586,12 @@ impl Engine {
             }
             AudioCommand::Describe { reply } => {
                 let _ = reply.send_blocking(self.describe());
+            }
+            AudioCommand::SetGain(gain) => {
+                tracing::debug!(gain, "audio: normalizer");
+                if let Some(normalizer) = &self.normalizer {
+                    normalizer.set_property("volume", gain);
+                }
             }
             AudioCommand::SetVolume(v) => {
                 let v = v.clamp(0.0, 1.0);
@@ -548,6 +607,43 @@ impl Engine {
             AudioCommand::Shutdown => return glib::ControlFlow::Break,
         }
         glib::ControlFlow::Continue
+    }
+
+    /// Forget any stall: the listener or a new song took over.
+    fn reset_stall(&self) {
+        self.moved.set(None);
+        self.refill_until.set(None);
+        self.settles_at.set(Instant::now() + STALL_SETTLE);
+    }
+
+    /// A slow connection plays in crumbs when it just runs. Once the position stands still,
+    /// hold playback for a few seconds so a stretch has arrived before it goes on.
+    fn watch_for_stall(&self, state: gst::State, position: gst::ClockTime) {
+        let now = Instant::now();
+        if let Some(until) = self.refill_until.get() {
+            if now >= until {
+                tracing::debug!("audio: resuming after the wait");
+                self.reset_stall();
+                let _ = self.playbin.set_state(gst::State::Playing);
+            }
+            return;
+        }
+        if state != gst::State::Playing || self.loading.get() || now < self.settles_at.get() || self.shared.live.load(Ordering::Acquire) {
+            self.moved.set(None);
+            return;
+        }
+        match self.moved.get() {
+            Some((last, _)) if last != position => self.moved.set(Some((position, now))),
+            Some((_, since)) if now.duration_since(since) >= STALL_AFTER => {
+                tracing::debug!(position = %position, "audio: stalled, waiting for the network");
+                self.refill_until.set(Some(now + REFILL_WAIT));
+                self.moved.set(None);
+                let _ = self.playbin.set_state(gst::State::Paused);
+                self.set_status(PlaybackStatus::Loading);
+            }
+            Some(_) => {}
+            None => self.moved.set(Some((position, now))),
+        }
     }
 
     fn on_message(&self, msg: &gst::Message) {
@@ -593,7 +689,7 @@ impl Engine {
                     self.set_status(PlaybackStatus::Playing);
                 }
                 // Preroll passes through Paused; only report it once loading is over.
-                gst::State::Paused if !self.loading.get() => self.set_status(PlaybackStatus::Paused),
+                gst::State::Paused if !self.loading.get() && self.refill_until.get().is_none() => self.set_status(PlaybackStatus::Paused),
                 gst::State::Null | gst::State::Ready if !self.loading.get() => self.set_status(PlaybackStatus::Stopped),
                 _ => {}
             },
@@ -620,6 +716,7 @@ impl Engine {
             return;
         }
         let Some(position) = self.playbin.query_position::<gst::ClockTime>() else { return };
+        self.watch_for_stall(state, position);
         // Some upload streams report a zero duration; treat that as unknown.
         let duration = self.playbin.query_duration::<gst::ClockTime>().filter(|d| !d.is_zero()).map(|d| d.seconds_f64());
         let _ = self.telemetry.force_send(AudioTelemetry::Position { generation: self.generation(), position: position.seconds_f64(), duration });

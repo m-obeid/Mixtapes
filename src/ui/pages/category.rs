@@ -146,12 +146,15 @@ impl CategoryPage {
         }
         self.loading_wrap.set_visible(true);
         let api = self.ctx.net.client().api();
+        let labels = self.ctx.net.client().localized_api();
         let params = params.to_owned();
         let handle = self.ctx.net.spawn(async move {
             if params == explore::PODCASTS_KEY {
-                explore::get_podcasts_page(&api).await
-            } else {
-                explore::get_category_page(&api, &params).await
+                return explore::get_podcasts_page(&api).await;
+            }
+            match labels {
+                Some(labels) => explore::get_localized_category_page(&api, &labels, &params).await,
+                None => explore::get_category_page(&api, &params).await,
             }
         });
         let weak = Rc::downgrade(self);
@@ -189,10 +192,13 @@ impl CategoryPage {
     fn render_sections(self: &Rc<Self>) {
         self.clear_sections();
         for section in self.sections.borrow().iter() {
+            // The catalog first, then YouTube's own wording. A shelf of other playlists than the English one has neither.
+            let title = crate::i18n::translated(&section.title).or_else(|| section.shown_title.clone()).unwrap_or_else(|| section.title.clone());
+            let title = title.as_str();
             if is_song_section(section) {
-                self.add_songs_list(&section.title, &section.items);
+                self.add_songs_list(title, &section.items);
             } else {
-                self.add_carousel(&section.title, &section.items);
+                self.add_carousel(title, &section.items);
             }
         }
         self.set_compact_mode(self.ctx.compact.get());
@@ -255,7 +261,7 @@ impl CategoryPage {
         section.append(&list);
 
         if items.len() > limit {
-            let button = gtk::Button::builder().label("View All").css_classes(["pill"]).halign(gtk::Align::Center).margin_top(12).build();
+            let button = gtk::Button::builder().label(tr!("View All")).css_classes(["pill"]).halign(gtk::Align::Center).margin_top(12).build();
             let weak = Rc::downgrade(self);
             let title = title.to_owned();
             button.connect_clicked(move |_| {
@@ -278,7 +284,7 @@ impl CategoryPage {
         let item = item.clone();
         let open = Rc::new(move |x: f64, y: f64| {
             let data = item.clone();
-            let extras = vec![MenuAction::new("Copy JSON (Debug)", Section::Clipboard, move || {
+            let extras = vec![MenuAction::new(&tr!("Copy JSON (Debug)"), Section::Clipboard, move || {
                 if let Ok(text) = serde_json::to_string_pretty(&data) {
                     copy_to_clipboard(&text);
                 }

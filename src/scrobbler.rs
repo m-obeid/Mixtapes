@@ -142,6 +142,14 @@ struct Due {
 }
 
 /// In offline mode a submission fails like a dropped connection, so the listen waits in the backlog.
+fn love_method(score: i8) -> &'static str {
+    if score > 0 { "track.love" } else { "track.unlove" }
+}
+
+fn feedback_body(recording_mbid: &str, score: i8) -> Value {
+    json!({ "recording_mbid": recording_mbid, "score": score })
+}
+
 fn refuse_offline() -> Result<(), ScrobbleError> {
     if crate::net::offline::sealed() { Err(Transient(crate::net::offline::REFUSAL.to_owned())) } else { Ok(()) }
 }
@@ -189,6 +197,8 @@ fn tick(cur: &mut Current, duration: f64, is_playing: bool, now: Instant) -> Due
 enum Op {
     NowPlaying(Entry),
     Scrobble(Entry),
+    /// A like or dislike: artist, title and the ListenBrainz score.
+    Feedback(String, String, i8),
     Flush,
     Stop,
 }
@@ -386,6 +396,13 @@ impl Scrobbler {
         SERVICES.iter().any(|s| self.is_connected(*s))
     }
 
+    /// Pass a like (1), a dislike (-1) or a cleared rating (0) on to the connected services.
+    pub fn send_feedback(&self, artist: &str, title: &str, score: i8) {
+        if SERVICES.iter().any(|s| self.is_connected(*s)) && self.enabled() && !self.lock().muted && !artist.is_empty() && !title.is_empty() {
+            let _ = self.tx.send(Op::Feedback(artist.to_owned(), title.to_owned(), score));
+        }
+    }
+
     // -- worker ---------------------------------------------------------------
 
     async fn run(self: Arc<Self>, mut rx: UnboundedReceiver<Op>) {
@@ -405,6 +422,18 @@ impl Scrobbler {
             match op {
                 Op::Stop => break,
                 Op::NowPlaying(entry) => self.do_now_playing(&entry).await,
+                Op::Feedback(artist, title, score) => {
+                    if self.is_connected(Service::ListenBrainz) {
+                        if let Err(err) = self.listenbrainz_feedback(&artist, &title, score).await {
+                            tracing::warn!(%err, title, "ListenBrainz feedback failed");
+                        }
+                    }
+                    if self.is_connected(Service::LastFm) {
+                        if let Err(err) = self.lastfm_love(&artist, &title, score).await {
+                            tracing::warn!(%err, title, "Last.fm love failed");
+                        }
+                    }
+                }
                 Op::Scrobble(entry) => {
                     self.append_pending(entry);
                     last_flush = Instant::now();
@@ -566,6 +595,13 @@ impl Scrobbler {
         classify_lastfm(data)
     }
 
+    /// Last.fm has loved and not loved, so a dislike takes a love away.
+    async fn lastfm_love(&self, artist: &str, title: &str, score: i8) -> Result<(), ScrobbleError> {
+        let params = BTreeMap::from([("artist".to_owned(), artist.to_owned()), ("track".to_owned(), title.to_owned())]);
+        let sk = self.credential(Service::LastFm);
+        self.lastfm_call(love_method(score), params, true, Some(&sk)).await.map(|_| ())
+    }
+
     async fn lastfm_now_playing(&self, entry: &Entry) -> Result<(), ScrobbleError> {
         let mut params = BTreeMap::new();
         params.insert("artist".to_owned(), entry.artist.clone());
@@ -601,12 +637,12 @@ impl Scrobbler {
     /// Start the desktop auth flow. Returns (token, url) for the caller to open in a browser.
     pub async fn lastfm_request_token(&self) -> Result<(String, String), ScrobbleError> {
         if !self.lastfm_configured() {
-            return Err(Permanent("This build has no Last.fm API credentials".into()));
+            return Err(Permanent(tr!("This build has no Last.fm API credentials")));
         }
         let data = self.lastfm_call("auth.getToken", BTreeMap::new(), false, None).await?;
         let token = data.get("token").and_then(Value::as_str).unwrap_or_default().to_owned();
         if token.is_empty() {
-            return Err(Permanent("Last.fm returned no token".into()));
+            return Err(Permanent(tr!("Last.fm returned no token")));
         }
         let url = reqwest::Url::parse_with_params(LASTFM_AUTH_URL, [("api_key", self.api_key.as_str()), ("token", token.as_str())])
             .map(String::from)
@@ -646,7 +682,8 @@ impl Scrobbler {
         let status = response.status().as_u16();
         match status {
             200 => Ok(()),
-            401 | 403 => Err(Auth("user token rejected".into())),
+            // Translators: follows the service name and a colon, as in "ListenBrainz: user token rejected".
+            401 | 403 => Err(Auth(tr!("user token rejected"))),
             429 => Err(Transient(format!("HTTP {status}"))),
             s if s >= 500 => Err(Transient(format!("HTTP {status}"))),
             _ => {
@@ -654,6 +691,36 @@ impl Scrobbler {
                 Err(Permanent(format!("HTTP {status}: {text}")))
             }
         }
+    }
+
+    /// Feedback hangs off a MusicBrainz recording, so the song is looked up by name first.
+    /// A song MusicBrainz does not know cannot be rated, and is not an error.
+    async fn listenbrainz_feedback(&self, artist: &str, title: &str, score: i8) -> Result<(), ScrobbleError> {
+        let token = format!("Token {}", self.credential(Service::ListenBrainz));
+        refuse_offline()?;
+        let lookup = self
+            .http
+            .get(format!("{LISTENBRAINZ_API_ROOT}/1/metadata/lookup/"))
+            .query(&[("artist_name", artist), ("recording_name", title)])
+            .header("Authorization", &token)
+            .send()
+            .await
+            .map_err(|e| Transient(e.to_string()))?;
+        let found: Value = lookup.json().await.map_err(|e| Transient(e.to_string()))?;
+        let Some(recording) = found.get("recording_mbid").and_then(Value::as_str) else {
+            tracing::debug!(title, "no MusicBrainz recording to rate");
+            return Ok(());
+        };
+        let response = self
+            .http
+            .post(format!("{LISTENBRAINZ_API_ROOT}/1/feedback/recording-feedback"))
+            .header("Authorization", &token)
+            .json(&feedback_body(recording, score))
+            .send()
+            .await
+            .map_err(|e| Transient(e.to_string()))?;
+        let status = response.status().as_u16();
+        if status == 200 { Ok(()) } else { Err(Permanent(format!("HTTP {status}"))) }
     }
 
     async fn listenbrainz_now_playing(&self, entry: &Entry) -> Result<(), ScrobbleError> {
@@ -672,7 +739,7 @@ impl Scrobbler {
     pub async fn listenbrainz_connect(&self, token: &str) -> Result<String, ScrobbleError> {
         let token = token.trim();
         if token.is_empty() {
-            return Err(Permanent("Enter your ListenBrainz user token".into()));
+            return Err(Permanent(tr!("Enter your ListenBrainz user token")));
         }
         refuse_offline()?;
         let response = self
@@ -684,15 +751,16 @@ impl Scrobbler {
             .map_err(|e| Transient(e.to_string()))?;
         let status = response.status().as_u16();
         if status == 401 || status == 403 {
-            return Err(Auth("that token is not valid".into()));
+            // Translators: follows the service name and a colon, as in "ListenBrainz: that token is not valid".
+            return Err(Auth(tr!("that token is not valid")));
         }
         if status == 429 || status >= 500 {
             return Err(Transient(format!("HTTP {status}")));
         }
         let data: Value = response.json().await.map_err(|e| Transient(e.to_string()))?;
         if !data.get("valid").and_then(Value::as_bool).unwrap_or(false) {
-            let message = data.get("message").and_then(Value::as_str).unwrap_or("that token is not valid");
-            return Err(Auth(message.to_owned()));
+            let message = data.get("message").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| tr!("that token is not valid"));
+            return Err(Auth(message));
         }
         let name = data.get("user_name").and_then(Value::as_str).unwrap_or_default().to_owned();
         self.store_credentials(Service::ListenBrainz, json!({"token": token, "username": name}));
@@ -783,7 +851,8 @@ fn classify_lastfm(data: Value) -> Result<Value, ScrobbleError> {
     if code == 0 {
         return Ok(data);
     }
-    let message = data.get("message").and_then(Value::as_str).unwrap_or("unknown error").to_owned();
+    // Translators: follows the service name and a colon, as in "Last.fm: unknown error".
+    let message = data.get("message").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| tr!("unknown error"));
     match code {
         // All four mean "this credential is no longer good".
         4 | 9 | 14 | 15 => Err(Auth(message)),
@@ -925,6 +994,18 @@ fn write_json(path: &std::path::Path, data: &Value, private: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_like_loves() {
+        assert_eq!(love_method(1), "track.love");
+        assert_eq!(love_method(0), "track.unlove");
+        assert_eq!(love_method(-1), "track.unlove");
+    }
+
+    #[test]
+    fn feedback_names_the_recording_and_the_score() {
+        assert_eq!(feedback_body("abc", -1), json!({"recording_mbid": "abc", "score": -1}));
+    }
 
     fn current(duration: f64) -> Current {
         Current {

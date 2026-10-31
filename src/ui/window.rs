@@ -28,6 +28,7 @@ use crate::ui::pages::all_moods::AllMoodsPage;
 use crate::ui::pages::category::CategoryPage;
 use crate::ui::pages::discography::DiscographyPage;
 use crate::ui::pages::history::HistoryPage;
+use crate::ui::recent_searches::RecentSearches;
 use crate::ui::pages::explore::ExplorePage;
 use crate::ui::pages::home::HomePage;
 use crate::ui::pages::library::LibraryPage;
@@ -40,6 +41,8 @@ const APP_ID: &str = "com.pocoguy.Muse";
 const APP_NAME: &str = "Mixtapes";
 const NETWORK_SETTLE: Duration = Duration::from_millis(1500);
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(600);
+/// How long a search has to stand before it counts as one to remember.
+const RECENT_SETTLE: Duration = Duration::from_secs(2);
 const SEARCH_MIN_CHARS: usize = 3;
 
 /// Which appearance switch moved, so the window repaints only what it governs.
@@ -61,6 +64,9 @@ pub struct MainWindow {
     back_btn: gtk::Button,
     search_bar: gtk::SearchBar,
     search_entry: gtk::SearchEntry,
+    recent_searches: RefCell<Option<Rc<RecentSearches>>>,
+    /// Waits for the listener to settle on a search before remembering it.
+    recent_timer: RefCell<Option<glib::SourceId>>,
     root_content_view: adw::ToolbarView,
     player_bar_revealer: gtk::Revealer,
     /// Where the revealer lives on desktop widths. It stays in the toolbar view
@@ -137,13 +143,13 @@ impl MainWindow {
         header_bar.pack_start(&back_btn);
         let search_btn = gtk::ToggleButton::builder()
             .icon_name("system-search-symbolic")
-            .tooltip_text("Search")
+            .tooltip_text(tr!("Search"))
             .build();
         header_bar.pack_start(&search_btn);
         header_bar.set_title_widget(Some(&title_bin));
 
-        let upload_progress = ProgressButton::new("Upload Progress");
-        let download_progress = ProgressButton::new("Download Progress");
+        let upload_progress = ProgressButton::new(&tr!("Upload Progress"));
+        let download_progress = ProgressButton::new(&tr!("Download Progress"));
         let (avatar_btn, avatar_profile) = build_avatar_menu();
         let primary_btn = build_primary_menu(&window);
         header_bar.pack_end(&primary_btn);
@@ -158,32 +164,32 @@ impl MainWindow {
         for (name, title, icon, child) in [
             (
                 "home",
-                "Home",
+                tr!("Home"),
                 "user-home-symbolic",
                 home.widget().clone().upcast::<gtk::Widget>(),
             ),
             (
                 "library",
-                "Library",
+                tr!("Library"),
                 "media-optical-symbolic",
                 library.widget().clone().upcast(),
             ),
             (
                 "search",
-                "Explore",
+                tr!("Explore"),
                 "compass2-symbolic",
                 explore.widget().clone().upcast(),
             ),
         ] {
-            let nav = create_tab_nav(&child, title);
-            view_stack.add_titled_with_icon(&nav, Some(name), title, icon);
+            let nav = create_tab_nav(&child, &title);
+            view_stack.add_titled_with_icon(&nav, Some(name), &title, icon);
         }
         let lib_refresh = build_library_refresh();
         header_bar.pack_end(&lib_refresh.root);
 
         // -- search bar --------------------------------------------------
         let search_entry = gtk::SearchEntry::builder()
-            .placeholder_text("Search...")
+            .placeholder_text(tr!("Search..."))
             .hexpand(true)
             .build();
         let search_clamp = adw::Clamp::builder()
@@ -279,7 +285,7 @@ impl MainWindow {
                                 Some(album) => ui.nav.go(NavRequest::Album { id: album.id.unwrap_or_default(), title: album.name, thumb: None }),
                                 None => {
                                     if let Some(o) = overlay.upgrade() {
-                                        o.add_toast(adw::Toast::new("No album for this track"));
+                                        o.add_toast(adw::Toast::new(&tr!("No album for this track")));
                                     }
                                 }
                             }
@@ -324,6 +330,8 @@ impl MainWindow {
             back_btn,
             search_bar,
             search_entry,
+            recent_searches: RefCell::new(None),
+            recent_timer: RefCell::new(None),
             root_content_view,
             player_bar_revealer,
             player_bar_slot,
@@ -367,7 +375,7 @@ impl MainWindow {
                 if let Some(window) = weak.upgrade() {
                     window.upload_progress.set_fraction(fraction);
                     if fraction.is_none() {
-                        window.add_toast("Uploads complete");
+                        window.add_toast(&tr!("Uploads complete"));
                     }
                 }
             });
@@ -385,6 +393,8 @@ impl MainWindow {
         this.wire_state(&state);
         avatar_profile.bind(ctx, &this.window);
         this.install_key_controller();
+        #[cfg(target_os = "macos")]
+        this.install_swipe_back();
         install_close_handler(&this.window, ctx);
         this.install_network_state();
         this.sync_player_bar_visibility();
@@ -559,7 +569,7 @@ impl MainWindow {
         let overlay = self.toast_overlay.downgrade();
         dialog.set_on_success(move || {
             if let Some(o) = overlay.upgrade() {
-                o.add_toast(adw::Toast::new("Signed in"));
+                o.add_toast(adw::Toast::new(&tr!("Signed in")));
             }
             library.load_library(false);
         });
@@ -629,7 +639,7 @@ impl MainWindow {
     fn apply_network_state(self: &Rc<Self>, online: bool) {
         if online {
             tracing::info!("back online, refreshing library");
-            self.add_toast("Back online");
+            self.add_toast(&tr!("Back online"));
             // Covers that failed while offline stay placeholders until asked again.
             crate::ui::cover::retry_failed();
             // The list keeps its rows across a reload, so the offline grey is lifted here.
@@ -648,7 +658,7 @@ impl MainWindow {
             }
         } else {
             tracing::info!("went offline");
-            self.add_toast("Offline - downloaded songs still available");
+            self.add_toast(&tr!("Offline - downloaded songs still available"));
             self.library.apply_offline_state();
             self.explore.load_explore_data(true);
             self.home.refresh();
@@ -683,7 +693,7 @@ impl MainWindow {
                                 }
                             });
                         } else {
-                            w.add_toast("No internet - running in offline mode");
+                            w.add_toast(&tr!("No internet - running in offline mode"));
                         }
                         break;
                     }
@@ -709,7 +719,7 @@ impl MainWindow {
     pub fn download_tracks(&self, tracks: Vec<Track>, album_title: &str, album_id: &str) {
         let queued = self.download_queue.start(tracks, album_title, album_id);
         if queued == 0 {
-            self.add_toast("Already downloaded");
+            self.add_toast(&tr!("Already downloaded"));
             return;
         }
         self.download_progress.set_fraction(Some(0.0));
@@ -731,7 +741,7 @@ impl MainWindow {
                 }
                 crate::downloads::Event::Idle { downloaded } => {
                     if *downloaded > 0 {
-                        this.add_toast("Downloads complete");
+                        this.add_toast(&tr!("Downloads complete"));
                     }
                     this.download_queue.clear_later();
                     this.download_progress.set_fraction(None);
@@ -1075,7 +1085,7 @@ impl MainWindow {
     /// belong to the uploads page, which is not ported yet.
     pub fn open_artist(self: &Rc<Self>, channel_id: &str, initial_name: Option<&str>) {
         if channel_id.starts_with("FEmusic_library_privately_owned") {
-            self.add_toast("Uploaded artists are not available yet");
+            self.add_toast(&tr!("Uploaded artists are not available yet"));
             return;
         }
         let page = ArtistPage::new(self.ui.clone());
@@ -1125,7 +1135,7 @@ impl MainWindow {
         page.prepare_virtual("DOWNLOADS");
         let nav_page = adw::NavigationPage::builder()
             .child(page.widget())
-            .title("Downloaded Songs")
+            .title(tr!("Downloaded Songs"))
             .build();
         let weak = Rc::downgrade(self);
         page.set_on_header_title(move |title| {
@@ -1150,7 +1160,7 @@ impl MainWindow {
     pub fn open_uploads(self: &Rc<Self>) {
         let page = PlaylistPage::new(self.ui.clone());
         page.prepare_virtual("UPLOADS");
-        let nav_page = adw::NavigationPage::builder().child(page.widget()).title("Uploaded Songs").build();
+        let nav_page = adw::NavigationPage::builder().child(page.widget()).title(tr!("Uploaded Songs")).build();
         let weak = Rc::downgrade(self);
         page.set_on_header_title(move |title| {
             if let Some(w) = weak.upgrade() {
@@ -1172,8 +1182,8 @@ impl MainWindow {
                     }
                     Err(_) => return,
                 };
-                let meta = format!("{} uploaded {}", tracks.len(), if tracks.len() == 1 { "song" } else { "songs" });
-                page.show_virtual("Uploaded Songs", tracks, &meta);
+                let meta = trn!("{n} uploaded song", "{n} uploaded songs", tracks.len());
+                page.show_virtual(&tr!("Uploaded Songs"), tracks, &meta);
             });
         });
         unsafe { nav_page.set_data("pushed", PushedPage::Playlist(page)) };
@@ -1209,7 +1219,7 @@ impl MainWindow {
                     }
                     Err(_) => return,
                 };
-                let meta = format!("{} uploaded {}", tracks.len(), if tracks.len() == 1 { "song" } else { "songs" });
+                let meta = trn!("{n} uploaded song", "{n} uploaded songs", tracks.len());
                 page.show_virtual(&name, tracks, &meta);
             });
         });
@@ -1264,7 +1274,7 @@ impl MainWindow {
                     w.own_channel.replace(Some(channel.clone()));
                     w.open_artist(&channel, Some(&name));
                 }
-                _ => w.add_toast("Couldn't open your channel"),
+                _ => w.add_toast(&tr!("Couldn't open your channel")),
             }
         });
     }
@@ -1289,10 +1299,10 @@ impl MainWindow {
                 Ok(Ok(Some(Link::Playlist(id)))) => w.navigate(NavRequest::Playlist { id, title: String::new(), thumb: None }),
                 Ok(Ok(Some(Link::Album(id)))) => w.navigate(NavRequest::Album { id, title: String::new(), thumb: None }),
                 Ok(Ok(Some(Link::Artist(id)))) => w.navigate(NavRequest::Artist { id: Some(id), name: String::new() }),
-                Ok(Ok(None)) => w.add_toast("Mixtapes cannot open this link"),
+                Ok(Ok(None)) => w.add_toast(&tr!("Mixtapes cannot open this link")),
                 Ok(Err(err)) => {
                     tracing::warn!(%err, text, "link did not resolve");
-                    w.add_toast("Could not open the link");
+                    w.add_toast(&tr!("Could not open the link"));
                 }
                 Err(_) => {}
             }
@@ -1306,7 +1316,7 @@ impl MainWindow {
         // Signed out, the page lists the plays kept on this device, which needs no network.
         let signed_in = matches!(self.ui.net.client().auth_state(), AuthState::Authenticated(_));
         if signed_in && !self.ui.online.is_online() {
-            self.add_toast("History requires an internet connection");
+            self.add_toast(&tr!("History requires an internet connection"));
             return;
         }
         let page = HistoryPage::new(self.ui.clone());
@@ -1319,7 +1329,7 @@ impl MainWindow {
         });
         let nav_page = adw::NavigationPage::builder()
             .child(page.widget())
-            .title("Listening History")
+            .title(tr!("Listening History"))
             .build();
         let page_c = page.clone();
         nav_page.connect_shown(move |_| page_c.load());
@@ -1683,6 +1693,20 @@ impl MainWindow {
 
     fn wire_search(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
+        let recent = RecentSearches::new(self.ui.paths.clone(), &self.search_entry, move |query| {
+            if let Some(w) = weak.upgrade() {
+                w.search_entry.set_text(query);
+                w.search_entry.set_position(-1);
+            }
+        });
+        self.recent_searches.replace(Some(recent));
+        let weak = Rc::downgrade(self);
+        self.search_bar.connect_search_mode_enabled_notify(move |_| {
+            if let Some(w) = weak.upgrade() {
+                w.sync_recent_searches();
+            }
+        });
+        let weak = Rc::downgrade(self);
         self.search_bar
             .connect_search_mode_enabled_notify(move |bar| {
                 let Some(w) = weak.upgrade() else { return };
@@ -1716,6 +1740,7 @@ impl MainWindow {
                 id.remove();
             }
             let text = entry.text().to_string();
+            w.sync_recent_searches();
             // A pasted YouTube link opens what it points at instead of searching for it.
             if crate::net::links::is_youtube_url(&text) && w.open_link(&text) {
                 let entry = entry.clone();
@@ -1728,6 +1753,22 @@ impl MainWindow {
                 filter(&text);
                 w.applied_filter.replace((!text.trim().is_empty()).then_some(filter));
                 return;
+            }
+            if let Some(id) = w.recent_timer.borrow_mut().take() {
+                id.remove();
+            }
+            if text.trim().chars().count() >= SEARCH_MIN_CHARS {
+                let weak = Rc::downgrade(&w);
+                let query = text.clone();
+                let id = glib::timeout_add_local_once(RECENT_SETTLE, move || {
+                    if let Some(w) = weak.upgrade() {
+                        w.recent_timer.borrow_mut().take();
+                        if let Some(recent) = w.recent_searches.borrow().as_ref() {
+                            recent.remember(&query);
+                        }
+                    }
+                });
+                w.recent_timer.replace(Some(id));
             }
             let weak = Rc::downgrade(&w);
             let id = glib::timeout_add_local_once(SEARCH_DEBOUNCE, move || {
@@ -1748,6 +1789,13 @@ impl MainWindow {
                 }
             }
         });
+    }
+
+    /// The recent list shows on an open, empty search bar, where a search would go to YouTube.
+    fn sync_recent_searches(&self) {
+        let Some(recent) = self.recent_searches.borrow().clone() else { return };
+        let wanted = self.search_bar.is_search_mode() && self.search_entry.text().is_empty() && self.active_filter().is_none();
+        if wanted { recent.show() } else { recent.hide() }
     }
 
     /// Show everything again on the page the search bar filtered. True when there was one.
@@ -1913,9 +1961,9 @@ impl MainWindow {
                 .unwrap_or_default();
             if let Some(overlay) = overlay.upgrade() {
                 let text = if title.is_empty() {
-                    format!("Couldn't play track: {reason}")
+                    tr!("Couldn't play track: {reason}", reason)
                 } else {
-                    format!("Couldn't play '{title}': {reason}")
+                    tr!("Couldn't play '{title}': {reason}", title, reason)
                 };
                 overlay.add_toast(adw::Toast::builder().title(&text).use_markup(false).build());
             }
@@ -1932,6 +1980,82 @@ impl MainWindow {
             }
             None
         });
+    }
+
+    /// Two-finger swipe back on macOS. GTK reports trackpad scrolling there as a
+    /// mouse, and libadwaita's swipe tracker only follows touchpads, so the
+    /// navigation views never see the gesture. Relabelling the pointer fixes
+    /// that; if it cannot be done, a mostly sideways swipe toward the right
+    /// goes back once it has travelled far enough, unless it started over
+    /// something that scrolls sideways itself.
+    #[cfg(target_os = "macos")]
+    fn install_swipe_back(self: &Rc<Self>) {
+        // With the trackpad reported as one, libadwaita's own swipe takes over.
+        if crate::macos::report_trackpad_as_touchpad() {
+            tracing::debug!("trackpad reported as a touchpad, libadwaita handles swipes");
+            return;
+        }
+        const DISTANCE: f64 = 120.0;
+        // Travel along each axis since the fingers went down, and whether this
+        // swipe is spent: it went back already, or it belongs to a scroller.
+        let travel = Rc::new(Cell::new((0.0f64, 0.0f64)));
+        let spent = Rc::new(Cell::new(false));
+        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+        scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = Rc::downgrade(self);
+        scroll.connect_scroll(move |controller, dx, dy| {
+            let Some(event) = controller.current_event().and_then(|e| e.downcast::<gdk::ScrollEvent>().ok()) else {
+                return glib::Propagation::Proceed;
+            };
+            // macOS sends a stop as the fingers touch down and another as they lift.
+            if event.is_stop() {
+                travel.set((0.0, 0.0));
+                spent.set(false);
+                return glib::Propagation::Proceed;
+            }
+            if spent.get() || event.unit() != gdk::ScrollUnit::Surface {
+                return glib::Propagation::Proceed;
+            }
+            let Some(w) = weak.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            let (x, y) = travel.get();
+            if x == 0.0 && y == 0.0 && w.scrolls_sideways_at(&event) {
+                spent.set(true);
+                return glib::Propagation::Proceed;
+            }
+            // With natural scrolling the content follows the fingers, so the
+            // deltas point the other way from them.
+            let fingers_right = if natural_scrolling(&event) { -dx } else { dx };
+            let (x, y) = (x + fingers_right, y + dy.abs());
+            travel.set((x, y));
+            if x > DISTANCE && x > 2.0 * y && w.back_btn.is_visible() {
+                spent.set(true);
+                w.on_back_clicked();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        self.window.add_controller(scroll);
+    }
+
+    /// Whether the pointer is over something that scrolls sideways, such as a
+    /// card strip. A swipe there moves the strip, not the page.
+    #[cfg(target_os = "macos")]
+    fn scrolls_sideways_at(&self, event: &gdk::ScrollEvent) -> bool {
+        let Some((x, y)) = event.position() else { return false };
+        let (tx, ty) = self.window.surface_transform();
+        let mut widget = self.window.pick(x - tx, y - ty, gtk::PickFlags::DEFAULT);
+        while let Some(current) = widget {
+            if let Some(scroller) = current.downcast_ref::<gtk::ScrolledWindow>() {
+                let h = scroller.hadjustment();
+                if h.upper() - h.lower() > h.page_size() + 1.0 {
+                    return true;
+                }
+            }
+            widget = current.parent();
+        }
+        false
     }
 
     /// Escape closes search or goes back, space toggles playback, media keys skip,
@@ -1999,6 +2123,20 @@ impl MainWindow {
         });
         self.window.add_controller(ctrl);
     }
+}
+
+/// Whether the scroll came from a device set to natural scrolling. GTK 4.20
+/// API, above the version floor elsewhere, so it is called directly.
+#[cfg(target_os = "macos")]
+fn natural_scrolling(event: &gdk::ScrollEvent) -> bool {
+    use gtk::glib::translate::ToGlibPtr;
+    unsafe extern "C" {
+        fn gdk_scroll_event_get_relative_direction(event: *mut gdk::ffi::GdkEvent) -> std::ffi::c_int;
+    }
+    const GDK_SCROLL_RELATIVE_DIRECTION_INVERTED: std::ffi::c_int = 1;
+    let event: &gdk::Event = event.upcast_ref();
+    // SAFETY: a live scroll event; the call only reads it.
+    unsafe { gdk_scroll_event_get_relative_direction(event.to_glib_none().0) == GDK_SCROLL_RELATIVE_DIRECTION_INVERTED }
 }
 
 /// One AdwNavigationView per tab, its root page tagged "root".
@@ -2144,7 +2282,7 @@ fn build_library_refresh() -> LibraryRefresh {
         .icon_name("view-refresh-symbolic")
         .css_classes(["flat"])
         .valign(gtk::Align::Center)
-        .tooltip_text("Refresh")
+        .tooltip_text(tr!("Refresh"))
         .build();
     let spinner = adw::Spinner::builder()
         .valign(gtk::Align::Center)
@@ -2194,7 +2332,6 @@ pub enum PushedPage {
     /// Held only so the page outlives the call that pushed it.
     #[allow(dead_code)]
     Category(Rc<CategoryPage>),
-    #[allow(dead_code)]
     History(Rc<HistoryPage>),
     AllMoods(Rc<AllMoodsPage>),
 }
@@ -2205,13 +2342,14 @@ impl PushedPage {
             PushedPage::Playlist(p) => p.filter_content(text),
             PushedPage::Discography(p) => p.filter_content(text),
             PushedPage::AllMoods(p) => p.filter_content(text),
-            PushedPage::Artist(_) | PushedPage::Category(_) | PushedPage::History(_) => {}
+            PushedPage::History(p) => p.filter_content(text),
+            PushedPage::Artist(_) | PushedPage::Category(_) => {}
         }
     }
 
     /// Whether the search bar filters this page instead of running a search.
     fn is_filterable(&self) -> bool {
-        !matches!(self, PushedPage::Artist(_) | PushedPage::Category(_) | PushedPage::History(_))
+        !matches!(self, PushedPage::Artist(_) | PushedPage::Category(_))
     }
 }
 
@@ -2233,12 +2371,12 @@ fn build_primary_menu(window: &adw::ApplicationWindow) -> gtk::MenuButton {
     menu.append_section(None, &theme_section);
 
     let app_section = gio::Menu::new();
-    app_section.append(Some("Downloaded Songs"), Some("win.open-downloads"));
-    app_section.append(Some("Keyboard Shortcuts"), Some("win.shortcuts"));
-    app_section.append(Some("Preferences"), Some("win.preferences"));
-    app_section.append(Some("What's New"), Some("win.whats-new"));
-    app_section.append(Some("About Mixtapes"), Some("win.about"));
-    app_section.append(Some("Quit"), Some("win.quit"));
+    app_section.append(Some(&tr!("Downloaded Songs")), Some("win.open-downloads"));
+    app_section.append(Some(&tr!("Keyboard Shortcuts")), Some("win.shortcuts"));
+    app_section.append(Some(&tr!("Preferences")), Some("win.preferences"));
+    app_section.append(Some(&tr!("What's New")), Some("win.whats-new"));
+    app_section.append(Some(&tr!("About Mixtapes")), Some("win.about"));
+    app_section.append(Some(&tr!("Quit")), Some("win.quit"));
     menu.append_section(None, &app_section);
 
     let popover = gtk::PopoverMenu::from_model(Some(&menu));
@@ -2247,7 +2385,7 @@ fn build_primary_menu(window: &adw::ApplicationWindow) -> gtk::MenuButton {
     let btn = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
         .css_classes(["flat"])
-        .tooltip_text("Main Menu")
+        .tooltip_text(tr!("Main Menu"))
         .build();
     btn.set_popover(Some(&popover));
     btn
@@ -2268,9 +2406,9 @@ fn build_theme_swatches(window: &adw::ApplicationWindow) -> gtk::Box {
     let mut buttons: Vec<(&'static str, gtk::CheckButton)> = Vec::new();
     let mut head: Option<gtk::CheckButton> = None;
     for (value, variant, tooltip) in [
-        ("default", "follow", "Follow System Style"),
-        ("light", "light", "Light Style"),
-        ("dark", "dark", "Dark Style"),
+        ("default", "follow", tr!("Follow System Style")),
+        ("light", "light", tr!("Light Style")),
+        ("dark", "dark", tr!("Dark Style")),
     ] {
         let cb = gtk::CheckButton::builder()
             .css_classes(["theme-selector", variant])
@@ -2348,7 +2486,7 @@ impl AvatarProfile {
             let display = if authed && !name.is_empty() {
                 name.clone()
             } else {
-                "Not signed in".to_owned()
+                tr!("Not signed in")
             };
             profile.name_label.set_label(&display);
             profile.small.set_text(Some(&name));
@@ -2408,7 +2546,7 @@ fn build_avatar_menu() -> (gtk::MenuButton, Rc<AvatarProfile>) {
     let small = adw::Avatar::new(28, None, false);
     let menu_btn = gtk::MenuButton::builder()
         .css_classes(["flat", "circular"])
-        .tooltip_text("Account")
+        .tooltip_text(tr!("Account"))
         .child(&small)
         .build();
 
@@ -2421,19 +2559,19 @@ fn build_avatar_menu() -> (gtk::MenuButton, Rc<AvatarProfile>) {
 
     let authed_section = gio::Menu::new();
     for (label, action) in [
-        ("Your Channel", "win.open-channel"),
-        ("Upload Songs", "win.open-upload"),
-        ("Listening History", "win.open-history"),
+        (tr!("Your Channel"), "win.open-channel"),
+        (tr!("Upload Songs"), "win.open-upload"),
+        (tr!("Listening History"), "win.open-history"),
     ] {
-        let item = gio::MenuItem::new(Some(label), Some(action));
+        let item = gio::MenuItem::new(Some(&label), Some(action));
         item.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
         authed_section.append_item(&item);
     }
     menu.append_section(None, &authed_section);
 
     let auth_section = gio::Menu::new();
-    for (label, action) in [("Sign In", "win.sign-in"), ("Log Out", "win.logout")] {
-        let item = gio::MenuItem::new(Some(label), Some(action));
+    for (label, action) in [(tr!("Sign In"), "win.sign-in"), (tr!("Log Out"), "win.logout")] {
+        let item = gio::MenuItem::new(Some(&label), Some(action));
         item.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
         auth_section.append_item(&item);
     }
@@ -2461,7 +2599,7 @@ fn build_avatar_menu() -> (gtk::MenuButton, Rc<AvatarProfile>) {
         .hexpand(true)
         .build();
     let name_label = gtk::Label::builder()
-        .label("Not signed in")
+        .label(tr!("Not signed in"))
         .css_classes(["heading"])
         .halign(gtk::Align::Start)
         .ellipsize(gtk::pango::EllipsizeMode::End)
@@ -2791,12 +2929,22 @@ fn install_actions(
     }
     window.add_action(&scheme);
 
-    app.set_accels_for_action("win.preferences", &["<Primary>comma"]);
-    app.set_accels_for_action("win.shortcuts", &["<Primary>question", "<Primary>slash"]);
-    app.set_accels_for_action("win.quit", &["<Primary>q"]);
-    app.set_accels_for_action("win.toggle-player", &["<Primary>e"]);
-    app.set_accels_for_action("win.refresh", &["F5", "<Primary>r"]);
-    app.set_accels_for_action("win.search", &["<Primary>f"]);
+    let set_accels = |action: &str, accels: &[&str]| {
+        let accels: Vec<String> = accels.iter().map(|accel| primary_to_platform(accel)).collect();
+        app.set_accels_for_action(action, &accels.iter().map(String::as_str).collect::<Vec<_>>());
+    };
+    set_accels("win.preferences", &["<Primary>comma"]);
+    set_accels("win.shortcuts", &["<Primary>question", "<Primary>slash"]);
+    set_accels("win.quit", &["<Primary>q"]);
+    set_accels("win.toggle-player", &["<Primary>e"]);
+    set_accels("win.refresh", &["F5", "<Primary>r"]);
+    // The Mac conventions. Closing hides the window while music plays, like the close button.
+    #[cfg(target_os = "macos")]
+    {
+        set_accels("window.close", &["<Primary>w"]);
+        set_accels("window.minimize", &["<Primary>m"]);
+    }
+    set_accels("win.search", &["<Primary>f"]);
 }
 
 fn apply_color_scheme(value: &str) {
@@ -2808,32 +2956,42 @@ fn apply_color_scheme(value: &str) {
     adw::StyleManager::default().set_color_scheme(scheme);
 }
 
+/// GTK 4 reads <Primary> as Control on every platform. Mac shortcuts use
+/// Command, which GTK calls Meta there.
+fn primary_to_platform(accel: &str) -> String {
+    if cfg!(target_os = "macos") { accel.replace("<Primary>", "<Meta>") } else { accel.to_owned() }
+}
+
 /// The shortcut list, as libadwaita's own dialog.
 fn build_shortcuts_dialog() -> adw::ShortcutsDialog {
     let dialog = adw::ShortcutsDialog::new();
     for (title, entries) in [
         (
-            "General",
+            tr!("General"),
             vec![
-                ("Preferences", "<Control>comma"),
-                ("Keyboard Shortcuts", "<Control>question"),
-                ("Refresh", "F5 <Control>r"),
-                ("Go Back / Close Search", "Escape"),
-                ("Quit", "<Control>q"),
+                (tr!("Preferences"), "<Primary>comma"),
+                (tr!("Keyboard Shortcuts"), "<Primary>question"),
+                (tr!("Refresh"), "F5 <Primary>r"),
+                (tr!("Go Back / Close Search"), "Escape"),
+                (tr!("Quit"), "<Primary>q"),
+                #[cfg(target_os = "macos")]
+                (tr!("Close Window"), "<Primary>w"),
+                #[cfg(target_os = "macos")]
+                (tr!("Minimize"), "<Primary>m"),
             ],
         ),
         (
-            "Playback",
+            tr!("Playback"),
             vec![
-                ("Play / Pause", "space"),
-                ("Open / Close Player", "<Control>e"),
+                (tr!("Play / Pause"), "space"),
+                (tr!("Open / Close Player"), "<Primary>e"),
             ],
         ),
-        ("Search", vec![("Search", "<Control>f")]),
+        (tr!("Search"), vec![(tr!("Search"), "<Primary>f")]),
     ] {
-        let section = adw::ShortcutsSection::new(Some(title));
+        let section = adw::ShortcutsSection::new(Some(&title));
         for (name, accel) in entries {
-            section.add(adw::ShortcutsItem::new(name, accel));
+            section.add(adw::ShortcutsItem::new(&name, &primary_to_platform(accel)));
         }
         dialog.add(section);
     }

@@ -74,7 +74,7 @@ impl MediaCard {
         main_box.append(&wrapper);
 
         let title = gtk::Label::builder()
-            .label(&item.title)
+            .label(item.shown_title())
             .halign(gtk::Align::Start)
             .xalign(0.0)
             .hexpand(true)
@@ -85,7 +85,7 @@ impl MediaCard {
             .wrap_mode(gtk::pango::WrapMode::WordChar)
             .lines(opts.title_lines)
             .justify(gtk::Justification::Left)
-            .tooltip_text(&item.title)
+            .tooltip_text(item.shown_title())
             .build();
         main_box.append(&title);
 
@@ -94,7 +94,7 @@ impl MediaCard {
             let subtitle_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).halign(gtk::Align::Fill).hexpand(true).build();
             // A live stream: the antenna, as a symbolic icon like the rest of the interface.
             if item.is_live {
-                subtitle_box.append(&gtk::Image::builder().icon_name(item.kind_icon()).pixel_size(12).valign(gtk::Align::Center).css_classes(["live-icon"]).tooltip_text("Live").build());
+                subtitle_box.append(&gtk::Image::builder().icon_name(item.kind_icon()).pixel_size(12).valign(gtk::Align::Center).css_classes(["live-icon"]).tooltip_text(tr!("Live")).build());
             }
             if item.explicit {
                 subtitle_box.append(&gtk::Label::builder().label("E").css_classes(["explicit-badge"]).valign(gtk::Align::Center).build());
@@ -176,7 +176,8 @@ fn resolve_subtitle(item: &MediaItem, known_kind: Option<&str>) -> String {
     };
     if let Some(kind) = &kind {
         if !parts.iter().any(|p| p.eq_ignore_ascii_case(kind)) {
-            parts.push(kind.clone());
+            // "Album", "Single" and "EP" are in the catalog. Anything else YouTube sent stays as it came.
+            parts.push(crate::i18n::gettext(kind));
         }
     }
     if !parts.is_empty() {
@@ -186,13 +187,13 @@ fn resolve_subtitle(item: &MediaItem, known_kind: Option<&str>) -> String {
     // ytmusicapi files that author under `author`, which _resolve_subtitle
     // never reads, so the description is what it falls through to.
     if item.kind == ItemKind::Playlist {
-        if let Some(description) = item.description.clone().filter(|d| !d.is_empty()) {
-            return description;
+        if let Some(description) = item.description.as_deref().filter(|d| !d.is_empty()) {
+            return crate::i18n::youtube(description);
         }
     }
     let artists = item.artists_text();
     if !artists.is_empty() {
         return artists;
     }
-    item.description.clone().or_else(|| item.subscribers.clone()).unwrap_or_default()
+    item.description.as_deref().or(item.subscribers.as_deref()).map(crate::i18n::youtube).unwrap_or_default()
 }

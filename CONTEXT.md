@@ -126,3 +126,17 @@ the cache file. A hand-picked match is also marked `user_choice`, which
 survives a pipeline bump.
 
 **Cooldown**: the back-off window a provider enters after a 429 or a timeout.
+
+## Translations
+
+**Message** (`src/i18n/mod.rs`): one piece of English text the app shows,
+wrapped in `tr!` or a sibling. The English text is its id.
+
+**Catalog**: one language's messages, compiled from `po/<code>.po` into the
+binary by build.rs. At most one is active for a run.
+
+**Template** (`po/mixtapes.pot`): every message in the source, with no
+translation. `po/update.sh` rebuilds it and merges it into each catalog.
+
+**Display point**: where a text reaches a widget. A value that is also stored,
+cached or compared stays English (`tr_noop!`) and is translated only there.

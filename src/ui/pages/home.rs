@@ -38,6 +38,8 @@ const SPEED_DIAL_SPACING: i32 = 8;
 /// Room around the tiles for their shadow and focus ring, which the scroller would clip.
 const SPEED_DIAL_BLEED: i32 = 8;
 const LABEL_NATURAL_MAX_CHARS: i32 = 12;
+/// The row the app names itself. Kept in English as the key the icon rules match.
+const QUICK_PICKS: &str = tr_noop!("Quick picks");
 
 /// A grid of tiles that scrolls sideways, `rows` high.
 struct Dial {
@@ -78,14 +80,14 @@ pub struct HomePage {
 impl HomePage {
     pub fn new(ctx: Rc<UiContext>) -> Rc<Self> {
         let stack = gtk::Stack::builder().vexpand(true).build();
-        stack.add_named(&loading_box("Loading…"), Some("loading"));
+        stack.add_named(&loading_box(&tr!("Loading…")), Some("loading"));
 
         let feed_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(28).margin_top(24).margin_bottom(24).margin_start(12).margin_end(12).build();
         let clamp = adw::Clamp::builder().maximum_size(1024).tightening_threshold(600).child(&feed_box).build();
         let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vscrollbar_policy(gtk::PolicyType::Automatic).child(&clamp).build();
         crate::ui::suppress_hover_while_scrolling(&scroll);
         stack.add_named(&scroll, Some("feed"));
-        let status = adw::StatusPage::builder().icon_name("user-home-symbolic").title("Home").description("Your music feed will appear here.").build();
+        let status = adw::StatusPage::builder().icon_name("user-home-symbolic").title(tr!("Home")).description(tr!("Your music feed will appear here.")).build();
         stack.add_named(&status, Some("status"));
         stack.set_visible_child_name("loading");
 
@@ -132,12 +134,13 @@ impl HomePage {
             return;
         }
         let api = self.ctx.net.client().api();
+        let labels = self.ctx.net.client().localized_api().map(|labels| labels as std::sync::Arc<dyn crate::net::browse::Browse>);
         // Signed out, YouTube's feed is the same for everyone. Shelves from
         // this device's plays and likes go in front of it.
         let signals = if self.ctx.net.client().is_authenticated() { Default::default() } else { local_feed::Signals::read(&self.ctx.local) };
         let handle = self.ctx.net.spawn(async move {
             if signals.is_empty() {
-                let mut sections = home::get_home(api.clone(), FEED_SECTIONS).await?;
+                let mut sections = home::get_localized_home(api.clone(), labels, FEED_SECTIONS).await?;
                 // YouTube stopped sending Quick picks; without them the dial
                 // borrowed Listen again and showed two or three tiles.
                 if let Some(seeds) = local_feed::quick_pick_seeds(&sections).filter(|s| !s.is_empty()) {
@@ -147,7 +150,7 @@ impl HomePage {
                 }
                 return Ok(sections);
             }
-            let (remote, local) = tokio::join!(home::get_home(api.clone(), FEED_SECTIONS), local_feed::build(api, signals));
+            let (remote, local) = tokio::join!(home::get_localized_home(api.clone(), labels, FEED_SECTIONS), local_feed::build(api, signals));
             match remote {
                 Ok(remote) => Ok(local_feed::merge(local, remote)),
                 Err(err) if !local.is_empty() => {
@@ -186,7 +189,7 @@ impl HomePage {
                 self.populate(sections);
                 self.stack.set_visible_child_name("feed");
             }
-            Err("offline") => self.show_status("network-offline-symbolic", "You're offline", "Home requires an internet connection.\nYour downloaded songs are still available.", false),
+            Err("offline") => self.show_status("network-offline-symbolic", &tr!("You're offline"), &tr!("Home requires an internet connection.\nYour downloaded songs are still available."), false),
             Err(_) => {
                 let attempt = self.retry_count.get();
                 if attempt < 2 {
@@ -199,7 +202,7 @@ impl HomePage {
                     });
                     return;
                 }
-                self.show_status("dialog-warning-symbolic", "Couldn't load Home", "Try refreshing in a moment.", true);
+                self.show_status("dialog-warning-symbolic", &tr!("Couldn't load Home"), &tr!("Try refreshing in a moment."), true);
             }
         }
     }
@@ -210,7 +213,7 @@ impl HomePage {
         self.status.set_description(Some(description));
         self.status.set_child(None::<&gtk::Widget>);
         if show_retry {
-            let retry = gtk::Button::builder().label("Retry").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
+            let retry = gtk::Button::builder().label(tr!("Retry")).css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
             let weak = Rc::downgrade(self);
             retry.connect_clicked(move |_| {
                 if let Some(p) = weak.upgrade() {
@@ -287,7 +290,7 @@ impl HomePage {
             return false;
         };
         tracing::info!(title = %item.title, id = %item.id, pool = pool.len(), "activating the first home row");
-        activate_item_with_radio(&self.ctx, &item, &pool, "Home");
+        activate_item_with_radio(&self.ctx, &item, &pool, &tr!("Home"));
         true
     }
 
@@ -305,23 +308,23 @@ impl HomePage {
         let (dial, ordered) = home::arrange(sections);
         if !dial.is_empty() {
             self.shelves.borrow_mut().push(dial.clone());
-            self.add_speed_dial("Quick picks", None, None, &dial, SPEED_DIAL_ROWS, SPEED_DIAL_ROWS_COMPACT);
+            self.add_speed_dial(QUICK_PICKS, &crate::i18n::gettext(QUICK_PICKS), None, None, &dial, SPEED_DIAL_ROWS, SPEED_DIAL_ROWS_COMPACT);
         }
         for section in ordered {
             self.shelves.borrow_mut().push(section.items.clone());
             // Hour-long mixes, as tiles like the quick picks so the two rows match.
             if home::is_long_listens(&section.title) {
-                self.add_speed_dial(&section.title, section.strapline.as_deref(), section.strapline_thumb.as_deref(), &section.items, LONG_LISTENS_ROWS, LONG_LISTENS_ROWS);
+                self.add_speed_dial(&section.title, &section.shown_title(), section.shown_strapline().as_deref(), section.strapline_thumb.as_deref(), &section.items, LONG_LISTENS_ROWS, LONG_LISTENS_ROWS);
                 continue;
             }
             let songs = section.items.iter().filter(|i| i.kind == ItemKind::Song).count();
             let section_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).build();
-            section_box.append(&self.section_header(&section.title, section.strapline.as_deref(), section.strapline_thumb.as_deref()));
+            section_box.append(&self.section_header(&section.title, &section.shown_title(), section.shown_strapline().as_deref(), section.strapline_thumb.as_deref()));
             // A shelf that is mostly songs reads better as a list than as cards.
             if songs >= 3.max((section.items.len() as f64 * 0.66) as usize) {
-                self.add_song_list(&section_box, &section.title, &section.items);
+                self.add_song_list(&section_box, &section.shown_title(), &section.items);
             } else {
-                self.add_card_strip(&section_box, &section.title, &section.items);
+                self.add_card_strip(&section_box, &section.shown_title(), &section.items);
             }
             self.feed_box.append(&section_box);
         }
@@ -330,7 +333,8 @@ impl HomePage {
 
     /// The seed's picture on a "Based on ..." row, the matching icon on the
     /// rows that have one, and nothing in front of the rest.
-    fn section_header(&self, title: &str, strapline: Option<&str>, strapline_thumb: Option<&str>) -> gtk::Box {
+    /// `title` is the English name the icon rules read, `shown` the one on the label.
+    fn section_header(&self, title: &str, shown: &str, strapline: Option<&str>, strapline_thumb: Option<&str>) -> gtk::Box {
         let header = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(10).halign(gtk::Align::Start).css_classes(["home-section-header"]).build();
         match strapline_thumb {
             Some(url) => {
@@ -347,7 +351,7 @@ impl HomePage {
                 }
             }
         }
-        let title_label = gtk::Label::builder().label(title).css_classes(["title-2", "home-section-title"]).halign(gtk::Align::Start).valign(gtk::Align::Center).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        let title_label = gtk::Label::builder().label(shown).css_classes(["title-2", "home-section-title"]).halign(gtk::Align::Start).valign(gtk::Align::Center).ellipsize(gtk::pango::EllipsizeMode::End).build();
         match strapline {
             // The web feed's small line above the title, in capitals like there.
             Some(strapline) => {
@@ -358,14 +362,22 @@ impl HomePage {
             }
             None => header.append(&title_label),
         }
+        if title == crate::net::local_feed::LISTEN_AGAIN_TITLE {
+            let history = gtk::Button::builder().label(tr!("History")).action_name("win.open-history").css_classes(["flat", "dim-label", "caption"]).valign(gtk::Align::Center).build();
+            let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).build();
+            header.set_hexpand(true);
+            row.append(&header);
+            row.append(&history);
+            return row;
+        }
         header
     }
 
     // -- quick picks ------------------------------------------------------
 
-    fn add_speed_dial(self: &Rc<Self>, title: &str, strapline: Option<&str>, strapline_thumb: Option<&str>, items: &[MediaItem], rows: i32, rows_compact: i32) {
+    fn add_speed_dial(self: &Rc<Self>, title: &str, shown: &str, strapline: Option<&str>, strapline_thumb: Option<&str>, items: &[MediaItem], rows: i32, rows_compact: i32) {
         let section_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).css_classes(["home-speed-dial"]).build();
-        section_box.append(&self.section_header(title, strapline, strapline_thumb));
+        section_box.append(&self.section_header(title, shown, strapline, strapline_thumb));
 
         let scroll_box = HorizontalScrollBox::new();
         let wrap = adw::WrapBox::builder().orientation(gtk::Orientation::Vertical).line_homogeneous(true).line_spacing(SPEED_DIAL_SPACING).child_spacing(SPEED_DIAL_SPACING).valign(gtk::Align::Start).build();
@@ -374,7 +386,7 @@ impl HomePage {
 
         let mut tiles = Vec::with_capacity(items.len());
         for item in items {
-            let tile = self.build_speed_tile(item, &pool, title);
+            let tile = self.build_speed_tile(item, &pool, shown);
             heights.add_widget(&tile.tile);
             wrap.append(&tile.tile);
             tiles.push(tile);
@@ -401,6 +413,7 @@ impl HomePage {
         self.sync_speed_dial_height(self.ctx.compact.get());
     }
 
+    /// `shelf` is the shelf's name as shown, which the queue started from a tile takes.
     fn build_speed_tile(self: &Rc<Self>, item: &MediaItem, pool: &[MediaItem], shelf: &str) -> SpeedTile {
         let tile = gtk::Button::builder().css_classes(["home-speed-tile", "card"]).build();
         let inner = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(10).build();

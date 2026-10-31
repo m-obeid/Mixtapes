@@ -25,6 +25,11 @@ pub trait TrackRowHost {
     fn row_menu(&self, row: &Rc<TrackRow>, x: f64, y: f64);
     fn is_album_view(&self) -> bool;
     fn page_cover(&self) -> Option<String>;
+    /// Whether rows can be dragged to a new place right now.
+    fn can_reorder(&self) -> bool;
+    /// Put the row with key `from` before the row with key `to`, or after it.
+    fn move_row(&self, from: &str, to: &str, after: bool);
+    fn drag_ended(&self);
 }
 
 pub struct TrackRow {
@@ -32,6 +37,7 @@ pub struct TrackRow {
     overlay: gtk::Overlay,
     button: gtk::Button,
     inner: gtk::Box,
+    handle: gtk::Image,
     img: Rc<CoverImage>,
     title: gtk::Label,
     title_box: gtk::Box,
@@ -67,6 +73,9 @@ impl TrackRow {
             .can_target(true)
             .build();
         button.set_child(Some(&inner));
+
+        let handle = gtk::Image::builder().icon_name("list-drag-handle-symbolic").css_classes(["dim-label", "drag-handle"]).visible(false).build();
+        inner.append(&handle);
 
         let img = CoverImage::in_context(ctx, THUMB_SIZE);
         img.widget().add_css_class("song-img");
@@ -132,6 +141,7 @@ impl TrackRow {
             overlay,
             button,
             inner,
+            handle,
             img,
             title,
             title_box,
@@ -178,10 +188,59 @@ impl TrackRow {
         let long = gtk::GestureLongPress::new();
         long.connect_pressed(move |_, x, y| open_menu(x, y));
         row.button.add_controller(long);
+        row.wire_reorder();
         row
     }
 
     /// The list item's child. Holds the track UI, or the header container for the header item.
+    fn key(&self) -> Option<String> {
+        self.track.borrow().as_ref().map(|t| crate::ui::pages::track_list::row_key(t).to_owned())
+    }
+
+    /// Drag the handle, drop on the upper or lower half of another row.
+    fn wire_reorder(self: &Rc<Self>) {
+        let source = gtk::DragSource::builder().actions(gdk::DragAction::MOVE).build();
+        let weak = Rc::downgrade(self);
+        source.connect_prepare(move |_, _, _| {
+            let row = weak.upgrade()?;
+            row.host.upgrade().filter(|h| h.can_reorder())?;
+            row.key().map(|key| gdk::ContentProvider::for_value(&key.to_value()))
+        });
+        let button = self.button.clone();
+        source.connect_drag_begin(move |source, _| source.set_icon(Some(&gtk::WidgetPaintable::new(Some(&button))), 0, 0));
+        let weak = Rc::downgrade(self);
+        source.connect_drag_end(move |_, _, _| {
+            if let Some(host) = weak.upgrade().and_then(|row| row.host.upgrade()) {
+                host.drag_ended();
+            }
+        });
+        self.handle.add_controller(source);
+
+        let target = gtk::DropTarget::new(glib::Type::STRING, gdk::DragAction::MOVE);
+        let button = self.button.clone();
+        target.connect_motion(move |_, _, y| {
+            let below = y >= f64::from(button.height()) / 2.0;
+            button.remove_css_class(if below { "drop-above" } else { "drop-below" });
+            button.add_css_class(if below { "drop-below" } else { "drop-above" });
+            gdk::DragAction::MOVE
+        });
+        let button = self.button.clone();
+        target.connect_leave(move |_| {
+            button.remove_css_class("drop-above");
+            button.remove_css_class("drop-below");
+        });
+        let weak = Rc::downgrade(self);
+        target.connect_drop(move |_, value, _, y| {
+            let Some(row) = weak.upgrade() else { return false };
+            row.button.remove_css_class("drop-above");
+            row.button.remove_css_class("drop-below");
+            let (Ok(from), Some(to), Some(host)) = (value.get::<String>(), row.key(), row.host.upgrade()) else { return false };
+            host.move_row(&from, &to, y >= f64::from(row.button.height()) / 2.0);
+            true
+        });
+        self.bin.add_controller(target);
+    }
+
     pub fn bin(&self) -> &adw::Bin {
         &self.bin
     }
@@ -349,6 +408,7 @@ impl TrackRow {
         let has_id = !video_id.is_empty();
         let multi = host.multi_select();
         let selected = has_id && host.is_selected(&video_id);
+        self.handle.set_visible(multi && host.can_reorder());
 
         if multi {
             let check = self.ensure_check();
@@ -492,6 +552,7 @@ impl TrackRow {
     /// Port of the per-row part of _refresh_all_row_visuals.
     pub fn refresh_visuals(self: &Rc<Self>, multi: bool, selected: bool) {
         let has_id = self.video_id().is_some();
+        self.handle.set_visible(multi && self.host.upgrade().is_some_and(|h| h.can_reorder()));
         if multi {
             self.ensure_check().set_visible(true);
             self.apply_selection(selected);

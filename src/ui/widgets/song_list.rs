@@ -40,7 +40,8 @@ pub fn search_subtitle(item: &MediaItem) -> String {
         }
         ItemKind::Album => item.artists_text(),
         ItemKind::Playlist => match (&item.count, &item.views) {
-            (Some(count), _) if !count.is_empty() => format!("{count} songs"),
+            // Translators: {count} is the number as YouTube words it, for example "1,234".
+            (Some(count), _) if !count.is_empty() => tr!("{count} songs", count),
             (_, Some(views)) => views.clone(),
             _ => item.artists_text(),
         },

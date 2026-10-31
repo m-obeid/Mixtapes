@@ -77,14 +77,15 @@ impl DownloadQueue {
         let widget = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
         let info = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).margin_top(4).margin_bottom(4).build();
         let name = gtk::Label::builder().label(title).halign(gtk::Align::Start).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["caption"]).build();
-        let status = gtk::Label::builder().label("Queued").halign(gtk::Align::Start).css_classes(["caption", "dim-label"]).build();
+        // Translators: status of a download waiting for its turn.
+        let status = gtk::Label::builder().label(tr!("Queued")).halign(gtk::Align::Start).css_classes(["caption", "dim-label"]).build();
         let bar = gtk::ProgressBar::builder().visible(false).build();
         info.append(&name);
         info.append(&status);
         info.append(&bar);
         widget.append(&info);
 
-        let cancel = gtk::Button::builder().icon_name("window-close-symbolic").valign(gtk::Align::Center).css_classes(["flat", "circular"]).tooltip_text("Cancel").build();
+        let cancel = gtk::Button::builder().icon_name("window-close-symbolic").valign(gtk::Align::Center).css_classes(["flat", "circular"]).tooltip_text(tr!("Cancel")).build();
         let this = self.clone();
         let id = video_id.to_owned();
         cancel.connect_clicked(move |_| {
@@ -104,7 +105,8 @@ impl DownloadQueue {
                 if let Some(id) = self.clearing.borrow_mut().take() {
                     id.remove();
                 }
-                self.add_row(video_id, if title.is_empty() { "Downloading" } else { title });
+                let title = if title.is_empty() { tr!("Downloading") } else { title.to_string() };
+                self.add_row(video_id, &title);
             }
             Event::Named { video_id, title } => {
                 if let Some(row) = self.rows.borrow().get(video_id) {
@@ -115,16 +117,18 @@ impl DownloadQueue {
                 if let Some(row) = self.rows.borrow().get(video_id) {
                     row.bar.set_visible(true);
                     row.bar.set_fraction(*fraction);
-                    row.status.set_label(&format!("{}%", (fraction * 100.0) as u32));
+                    // Translators: download progress, {percent} is a number from 0 to 100.
+                    row.status.set_label(&tr!("{percent}%", percent = (fraction * 100.0) as u32));
                     row.cancel.set_visible(false);
                 }
             }
             Event::Item { video_id, ok, message } => {
                 if let Some(row) = self.rows.borrow().get(video_id) {
-                    row.status.set_label(match (ok, message.as_str()) {
-                        (true, _) => "Done",
-                        (false, "Cancelled") => "Cancelled",
-                        (false, _) => "Failed",
+                    row.status.set_label(&match (ok, message.as_str()) {
+                        // Translators: status of a finished download.
+                        (true, _) => tr!("Done"),
+                        (false, "Cancelled") => tr!("Cancelled"),
+                        (false, _) => tr!("Failed"),
                     });
                     if *ok {
                         row.bar.set_fraction(1.0);

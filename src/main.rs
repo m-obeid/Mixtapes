@@ -9,6 +9,10 @@
 // Release builds on Windows open no console window next to the app.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+// First, so every module below sees tr! and its siblings.
+#[macro_use]
+mod i18n;
+
 mod audio;
 mod bootstrap;
 mod demo;
@@ -16,10 +20,15 @@ mod discord;
 mod downloads;
 mod local_library;
 mod lyrics;
+#[cfg(target_os = "macos")]
+mod macos;
 mod model;
-// MPRIS on Linux. Elsewhere the same two calls land in smtc.rs.
-#[cfg_attr(not(target_os = "linux"), path = "smtc.rs")]
+// MPRIS on Linux, Now Playing on macOS. Elsewhere the same two calls land in smtc.rs.
+#[cfg_attr(target_os = "macos", path = "now_playing.rs")]
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), path = "smtc.rs")]
 mod mpris;
+#[cfg(target_os = "linux")]
+mod ducking;
 mod net;
 mod paths;
 mod player;
@@ -76,6 +85,7 @@ fn main() -> glib::ExitCode {
     bootstrap::cap_malloc_arenas();
     bootstrap::raise_fd_limit();
     bootstrap::prefer_bundled_programs();
+    bootstrap::use_bundled_runtime();
     bootstrap::use_bundled_fonts();
     bootstrap::enable_gpu_rendering();
     bootstrap::set_app_user_model_id();
@@ -83,7 +93,13 @@ fn main() -> glib::ExitCode {
 
     let paths = Paths::discover();
     bootstrap::init_logging(&paths);
+    #[cfg(target_os = "macos")]
+    {
+        macos::use_keychain_roots(&paths.cache_dir);
+        macos::listen_for_links();
+    }
     bootstrap::apply_gsk_renderer_pref(&paths);
+    i18n::init(&paths);
 
     // The stylesheet and icons, compiled in by build.rs.
     if let Err(err) = gio::resources_register_include!("mixtapes.gresource") {
@@ -133,6 +149,7 @@ fn main() -> glib::ExitCode {
     };
 
     net::twins::init(&paths);
+    net::loudness::init(&paths);
     let lyrics = lyrics::Lyrics::new(&paths, net.client().http().clone(), net.client().clone());
     let (downloads, download_events) = downloads::Downloads::new(paths.clone(), net.clone(), lyrics.clone());
     // A demo run plays scratch tracks. MIXTAPES_DEMO_PRESENCE=1 lets them through on purpose.
@@ -167,7 +184,14 @@ fn main() -> glib::ExitCode {
     app.connect_startup(glib::clone!(
         #[strong]
         app_ctx,
-        move |_| on_startup(&app_ctx)
+        move |_app| {
+            #[cfg(target_os = "macos")]
+            {
+                macos::install(_app);
+                macos::install_menu(_app, &app_ctx.player);
+            }
+            on_startup(&app_ctx)
+        }
     ));
     app.connect_activate(glib::clone!(
         #[strong]
@@ -230,6 +254,8 @@ fn on_startup(ctx: &Rc<App>) {
     ctx.mpris.replace(Some(Mpris::start(ctx)));
     tray::start(ctx);
     presence::wire(ctx);
+    #[cfg(target_os = "linux")]
+    ducking::start(ctx);
     tracing::info!(auth = ?ctx.net.client().auth_state(), "core started");
 }
 

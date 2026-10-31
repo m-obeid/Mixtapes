@@ -24,6 +24,8 @@ use crate::ui::widgets::lyric_rows::{Effects, InterludeRow, LyricRow, RowOptions
 
 /// Autoscroll stands down this long after the listener scrolls by hand.
 const USER_SCROLL_PAUSE: Duration = Duration::from_secs(4);
+/// How far one press of Earlier or Later moves the lyrics, in seconds.
+const TIMING_STEP: f64 = 0.25;
 /// Two position ticks further apart than this, in seconds, are a seek and not playback.
 const SEEK_JUMP: f64 = 1.5;
 /// After a tap-to-seek, position ticks from before the seek are ignored this long.
@@ -33,7 +35,7 @@ const SCROLL_ANIMATION_MS: f64 = 500.0;
 const BASE_FONT_EM: f64 = 1.82;
 const SUB_FONT_EM: f64 = 1.16;
 
-const SECOND_LINE_LABELS: [(&str, &str); 5] = [("off", "Off"), ("auto", "Auto"), ("romanization", "Romanization"), ("translation", "Translation"), ("background", "Background vocals")];
+const SECOND_LINE_LABELS: [(&str, &str); 5] = [("off", tr_noop!("Off")), ("auto", tr_noop!("Auto")), ("romanization", tr_noop!("Romanization")), ("translation", tr_noop!("Translation")), ("background", tr_noop!("Background vocals"))];
 
 thread_local! {
     /// Every live view, so a display pref change reaches both.
@@ -84,6 +86,7 @@ enum ScrollTarget {
 enum SourceAction {
     Switch(String),
     Search,
+    Write,
     Reset,
     Nothing,
 }
@@ -117,6 +120,10 @@ pub struct LyricsView {
     source_list: gtk::ListBox,
     spinner_row: gtk::ListBoxRow,
     second_line_section: gtk::Box,
+    timing_section: gtk::Box,
+    timing_value: gtk::Button,
+    /// Seconds the lyrics run ahead of the song, as the listener set them.
+    offset: Cell<f64>,
     second_line_list: gtk::ListBox,
     matches_title: gtk::Label,
     matches_list: gtk::ListBox,
@@ -184,26 +191,27 @@ fn message_row(text: &str) -> gtk::ListBoxRow {
     gtk::ListBoxRow::builder().activatable(false).child(&label).build()
 }
 
-fn timing_words(result: &LyricsResult, capitalized: bool) -> &'static str {
+fn timing_words(result: &LyricsResult, capitalized: bool) -> String {
     match (result.is_word_level(), result.synced, capitalized) {
-        (true, _, true) => "Word by word",
-        (true, _, false) => "word by word",
-        (false, true, true) => "Line by line",
-        (false, true, false) => "line by line",
-        (false, false, true) => "No timing",
-        (false, false, false) => "no timing",
+        (true, _, true) => tr!("Word by word"),
+        (true, _, false) => tr!("word by word"),
+        (false, true, true) => tr!("Line by line"),
+        (false, true, false) => tr!("line by line"),
+        (false, false, true) => tr!("No timing"),
+        (false, false, false) => tr!("no timing"),
     }
 }
 
 fn match_row(found: &LyricsMatch, source: Option<&str>) -> gtk::ListBoxRow {
     let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
     text.append(&gtk::Label::builder().label(&found.label).halign(gtk::Align::Start).ellipsize(pango::EllipsizeMode::End).build());
+    let timing = timing_words(&found.result, false);
     let mut bits: Vec<&str> = Vec::new();
     bits.extend(source);
     if !found.detail.is_empty() {
         bits.push(&found.detail);
     }
-    bits.push(timing_words(&found.result, false));
+    bits.push(&timing);
     text.append(&gtk::Label::builder().label(bits.join(" \u{b7} ")).halign(gtk::Align::Start).ellipsize(pango::EllipsizeMode::End).css_classes(["dim-label", "caption"]).build());
     gtk::ListBoxRow::builder().activatable(true).child(&text).build()
 }
@@ -212,7 +220,7 @@ fn match_row(found: &LyricsMatch, source: Option<&str>) -> gtk::ListBoxRow {
 fn sub_page(title: &gtk::Label, list: &gtk::ListBox, max_height: i32, extra: Option<&gtk::Widget>) -> (gtk::Box, gtk::Button) {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 6);
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text("Back to sources").build();
+    let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(tr!("Back to sources")).build();
     // The builder would replace the image-button class the icon brings.
     back.add_css_class("flat");
     header.append(&back);
@@ -251,7 +259,7 @@ impl LyricsView {
         stack.add_named(&loading, Some("loading"));
 
         // -- empty page ----------------------------------------------------
-        let status_page = adw::StatusPage::builder().icon_name("format-justify-fill-symbolic").title("No lyrics").description("No lyrics found for this track.").vexpand(true).build();
+        let status_page = adw::StatusPage::builder().icon_name("format-justify-fill-symbolic").title(tr!("No lyrics")).description(tr!("No lyrics found for this track.")).vexpand(true).build();
         stack.add_named(&status_page, Some("empty"));
 
         // -- lyrics page -----------------------------------------------------
@@ -276,7 +284,7 @@ impl LyricsView {
         // -- source picker -----------------------------------------------------
         let picker_btn = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
-            .tooltip_text("Choose lyrics source")
+            .tooltip_text(tr!("Choose lyrics source"))
             .halign(gtk::Align::End)
             .valign(gtk::Align::Start)
             .margin_end(20)
@@ -287,7 +295,7 @@ impl LyricsView {
         let popover = gtk::Popover::builder().position(gtk::PositionType::Bottom).width_request(200).build();
 
         let sources_page = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        let header = heading("Lyrics source");
+        let header = heading(&tr!("Lyrics source"));
         header.set_margin_start(10);
         header.set_margin_top(4);
         header.set_margin_bottom(2);
@@ -297,13 +305,14 @@ impl LyricsView {
 
         let spinner_content = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).margin_top(6).margin_bottom(6).margin_start(8).margin_end(8).halign(gtk::Align::Center).build();
         spinner_content.append(&adw::Spinner::builder().width_request(16).height_request(16).build());
-        spinner_content.append(&gtk::Label::builder().label("Searching\u{2026}").css_classes(["dim-label"]).build());
+        spinner_content.append(&gtk::Label::builder().label(tr!("Searching\u{2026}")).css_classes(["dim-label"]).build());
         let spinner_row = gtk::ListBoxRow::builder().selectable(false).activatable(false).child(&spinner_content).build();
 
         // Which second lines exist is a property of the track, so the choice sits next to the lyrics too.
         let second_line_section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).visible(false).build();
         second_line_section.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        let second_header = heading("Second line");
+        // Translators: heading over the choice of what the smaller line under each lyric shows.
+        let second_header = heading(&tr!("Second line"));
         second_header.set_margin_start(10);
         second_header.set_margin_bottom(2);
         second_line_section.append(&second_header);
@@ -311,14 +320,34 @@ impl LyricsView {
         second_line_section.append(&second_line_list);
         sources_page.append(&second_line_section);
 
+        // Lyrics that run early or late are put right here, for this song and source.
+        let timing_section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).visible(false).build();
+        timing_section.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        // Translators: heading over the buttons that move lyrics earlier or later against the song.
+        let timing_header = heading(&tr!("Timing"));
+        timing_header.set_margin_start(10);
+        timing_section.append(&timing_header);
+        let timing_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).homogeneous(true).css_classes(["linked"]).margin_start(6).margin_end(6).margin_bottom(6).build();
+        // Translators: moves the lyrics earlier against the song.
+        let earlier = gtk::Button::builder().label(tr!("Earlier")).tooltip_text(tr!("Lyrics are late")).build();
+        // Translators: moves the lyrics later against the song.
+        let later = gtk::Button::builder().label(tr!("Later")).tooltip_text(tr!("Lyrics are early")).build();
+        // The value is the reset: there is nothing to reset while it reads in time.
+        let timing_value = gtk::Button::builder().css_classes(["timing-value"]).tooltip_text(tr!("Reset timing")).build();
+        timing_row.append(&earlier);
+        timing_row.append(&timing_value);
+        timing_row.append(&later);
+        timing_section.append(&timing_row);
+        sources_page.append(&timing_section);
+
         let matches_title = heading("");
         matches_title.set_ellipsize(pango::EllipsizeMode::End);
         let matches_list = picker_list();
         let (matches_page, matches_back) = sub_page(&matches_title, &matches_list, 300, None);
 
-        let search_entry = gtk::SearchEntry::builder().placeholder_text("Song title").margin_start(4).margin_end(4).build();
+        let search_entry = gtk::SearchEntry::builder().placeholder_text(tr!("Song title")).margin_start(4).margin_end(4).build();
         let search_list = picker_list();
-        let (search_page, search_back) = sub_page(&heading("Search by name"), &search_list, 280, Some(search_entry.upcast_ref()));
+        let (search_page, search_back) = sub_page(&heading(&tr!("Search by name")), &search_list, 280, Some(search_entry.upcast_ref()));
 
         let picker_stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::SlideLeftRight).transition_duration(150).build();
         picker_stack.add_named(&sources_page, Some("sources"));
@@ -349,6 +378,9 @@ impl LyricsView {
             source_list,
             spinner_row,
             second_line_section,
+            timing_section,
+            timing_value,
+            offset: Cell::new(0.0),
             second_line_list,
             matches_title,
             matches_list,
@@ -382,7 +414,7 @@ impl LyricsView {
             ctx,
         });
         VIEWS.with(|views| views.borrow_mut().push(Rc::downgrade(&this)));
-        this.wire(&matches_back, &search_back);
+        this.wire(&matches_back, &search_back, &earlier, &later);
 
         let video_id = this.ctx.player.state().video_id();
         if !video_id.is_empty() {
@@ -396,7 +428,7 @@ impl LyricsView {
         &self.root
     }
 
-    fn wire(self: &Rc<Self>, matches_back: &gtk::Button, search_back: &gtk::Button) {
+    fn wire(self: &Rc<Self>, matches_back: &gtk::Button, search_back: &gtk::Button, earlier: &gtk::Button, later: &gtk::Button) {
         // A weak handle per closure keeps the view free to drop with its window.
         macro_rules! weak {
             (|$this:ident $(, $arg:pat_param)*| $body:expr) => {{
@@ -493,19 +525,22 @@ impl LyricsView {
         self.second_line_list.connect_row_activated(weak!(|v, _, row| v.on_second_line_row_activated(row.index())));
         self.matches_list.connect_row_activated(weak!(|v, _, row| v.on_match_row_activated(row.index(), false)));
         self.search_list.connect_row_activated(weak!(|v, _, row| v.on_match_row_activated(row.index(), true)));
+        earlier.connect_clicked(weak!(|v, _| v.nudge(Some(TIMING_STEP))));
+        later.connect_clicked(weak!(|v, _| v.nudge(Some(-TIMING_STEP))));
+        self.timing_value.connect_clicked(weak!(|v, _| v.nudge(None)));
         matches_back.connect_clicked(weak!(|v, _| v.show_picker_page("sources")));
         search_back.connect_clicked(weak!(|v, _| v.show_picker_page("sources")));
         self.search_entry.connect_activate(weak!(|v, _| v.on_manual_search()));
 
         let state = self.ctx.player.state().clone();
         state.connect_video_id_notify(weak!(|v, state| v.on_metadata_changed(&state.video_id())));
-        state.connect_position_notify(weak!(|v, state| v.on_progression(state.position())));
+        state.connect_position_notify(weak!(|v, state| v.on_progression(state.position() + v.offset.get())));
         // While a song plays, the audio thread keeps reporting the old position until the
         // seek lands. Each of those ticks would light the old line again, then the new one.
         let weak = Rc::downgrade(self);
         state.connect_seeked(move |position| {
             if let Some(view) = weak.upgrade() {
-                view.seek_pending.set(Some((position, Instant::now())));
+                view.seek_pending.set(Some((position + view.offset.get(), Instant::now())));
             }
         });
         state.connect_status_notify(weak!(|v, state| v.on_state_changed(state.status())));
@@ -544,7 +579,7 @@ impl LyricsView {
         if status == PlaybackStatus::Stopped && self.ctx.player.state().video_id().is_empty() {
             self.video_id.replace(None);
             self.lines.borrow_mut().clear();
-            self.render_status("Not playing", None);
+            self.render_status(&tr!("Not playing"), None);
         }
     }
 
@@ -627,6 +662,7 @@ impl LyricsView {
     fn refresh_for_current_track(self: &Rc<Self>) {
         // Wipe everything first so a late position tick cannot index stale lines.
         self.fetch_gen.set(self.fetch_gen.get() + 1);
+        self.use_offset(0.0);
         self.lines.borrow_mut().clear();
         self.synced.set(false);
         self.active_idx.set(None);
@@ -634,7 +670,7 @@ impl LyricsView {
         self.clear_rows();
         let Some(query) = self.track_query() else {
             self.picker_btn.set_visible(false);
-            self.render_status("Not playing", Some("Play a song to see lyrics."));
+            self.render_status(&tr!("Not playing"), Some(&tr!("Play a song to see lyrics.")));
             return;
         };
         self.picker_btn.set_visible(true);
@@ -664,8 +700,8 @@ impl LyricsView {
             self.lines.borrow_mut().clear();
             self.synced.set(false);
             match offline {
-                true => self.render_status("No lyrics", Some("No lyrics are saved for this song. They load once you are back online.")),
-                false => self.render_status("No lyrics", Some("Nothing matched automatically. Try another source, or search by name.")),
+                true => self.render_status(&tr!("No lyrics"), Some(&tr!("No lyrics are saved for this song. They load once you are back online."))),
+                false => self.render_status(&tr!("No lyrics"), Some(&tr!("Nothing matched automatically. Try another source, or search by name."))),
             }
             self.picker_btn.set_visible(true);
             return;
@@ -680,11 +716,13 @@ impl LyricsView {
         self.synced.set(result.synced);
         self.lines.replace(result.lines);
         self.source.replace(Some(source.to_owned()));
+        let video_id = self.video_id.borrow().clone().unwrap_or_default();
+        self.use_offset(self.lyrics.offsets().get(&video_id, source));
         self.active_idx.set(None);
         self.build_rows();
         self.stack.set_visible_child_name("lyrics");
         self.picker_btn.set_visible(true);
-        self.picker_btn.set_tooltip_text(Some(&format!("Lyrics source: {source}")));
+        self.picker_btn.set_tooltip_text(Some(&tr!("Lyrics source: {source}", source)));
         if switched {
             self.refresh_second_line_rows();
         }
@@ -695,6 +733,85 @@ impl LyricsView {
             let adj = self.scroller.vadjustment();
             adj.set_value(adj.lower());
         }
+    }
+
+    /// Move the lyrics against the song. Ticks carry the offset, so the last one moves with it.
+    fn use_offset(&self, seconds: f64) {
+        let moved = seconds - self.offset.replace(seconds);
+        self.last_pos.set(self.last_pos.get() + moved);
+        self.timing_value.set_label(&if seconds == 0.0 { "0.00 s".to_owned() } else { format!("{seconds:+.2} s") });
+        self.timing_value.set_sensitive(seconds != 0.0);
+    }
+
+    /// The Earlier and Later buttons, and reset with None. Remembered for this song and source.
+    fn nudge(self: &Rc<Self>, by: Option<f64>) {
+        let seconds = by.map_or(0.0, |by| ((self.offset.get() + by) * 100.0).round() / 100.0);
+        let (Some(video_id), Some(source)) = (self.video_id.borrow().clone(), self.source.borrow().clone()) else { return };
+        self.lyrics.offsets().set(&video_id, &source, seconds);
+        self.use_offset(seconds);
+        self.on_progression(self.last_pos.get());
+    }
+
+    /// Write lyrics for this song, or edit them. Timed lines take LRC stamps, anything else is plain text.
+    fn open_editor(self: &Rc<Self>) {
+        let Some(video_id) = self.video_id.borrow().clone() else { return };
+        let written = self.lyrics.own().text(&video_id);
+        let is_written = written.is_some();
+        let text = written.unwrap_or_else(|| crate::lyrics::own::to_text(&self.lines.borrow()));
+        let dialog = adw::Dialog::builder().title(if is_written { tr!("Edit Lyrics") } else { tr!("Write Lyrics") }).content_width(560).content_height(620).build();
+        let toolbar = adw::ToolbarView::new();
+        let header = adw::HeaderBar::builder().show_start_title_buttons(false).show_end_title_buttons(false).build();
+        let cancel = gtk::Button::builder().label(tr!("Cancel")).build();
+        let save = gtk::Button::builder().label(tr!("Save")).css_classes(["suggested-action"]).build();
+        header.pack_start(&cancel);
+        header.pack_end(&save);
+        toolbar.add_top_bar(&header);
+        let buffer = gtk::TextBuffer::builder().text(text).build();
+        let editor = gtk::TextView::builder().buffer(&buffer).wrap_mode(gtk::WrapMode::WordChar).top_margin(12).bottom_margin(12).left_margin(12).right_margin(12).monospace(true).build();
+        let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&editor).build();
+        let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
+        body.append(&scroller);
+        let hint = gtk::Label::builder().label(tr!("Plain text works. For timing, start a line with [01:23.45]. For word by word timing, put <01:23.45> before each word, or paste TTML.")).wrap(true).xalign(0.0).margin_start(12).margin_end(12).margin_bottom(12).css_classes(["dim-label", "caption"]).build();
+        body.append(&hint);
+        if is_written {
+            let delete = gtk::Button::builder().label(tr!("Delete My Lyrics")).css_classes(["destructive-action"]).halign(gtk::Align::Center).margin_bottom(12).build();
+            let (weak, dialog_c, id) = (Rc::downgrade(self), dialog.clone(), video_id.clone());
+            delete.connect_clicked(move |_| {
+                if let Some(view) = weak.upgrade() {
+                    view.lyrics.own().delete(&id);
+                    view.lyrics.cache().clear_user_choice(&id);
+                    view.refresh_for_current_track();
+                }
+                dialog_c.close();
+            });
+            body.append(&delete);
+        }
+        toolbar.set_content(Some(&body));
+        dialog.set_child(Some(&toolbar));
+        let dialog_c = dialog.clone();
+        cancel.connect_clicked(move |_| {
+            dialog_c.close();
+        });
+        let (weak, dialog_c) = (Rc::downgrade(self), dialog.clone());
+        save.connect_clicked(move |_| {
+            let Some(view) = weak.upgrade() else { return };
+            let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            view.save_own_lyrics(&video_id, &text);
+            dialog_c.close();
+        });
+        dialog.present(Some(&self.root));
+    }
+
+    fn save_own_lyrics(self: &Rc<Self>, video_id: &str, text: &str) {
+        if text.trim().is_empty() {
+            self.lyrics.own().delete(video_id);
+        } else if let Err(err) = self.lyrics.own().save(video_id, text) {
+            tracing::warn!(%err, "lyrics not saved");
+            return;
+        }
+        // Written lyrics win once nothing else is pinned.
+        self.lyrics.cache().set_preferred(video_id, None);
+        self.refresh_for_current_track();
     }
 
     fn render_status(&self, title: &str, description: Option<&str>) {
@@ -904,7 +1021,7 @@ impl LyricsView {
         } else if let Some(row) = interlude {
             self.enter_interlude(row, start_ms);
         }
-        self.ctx.player.seek(start);
+        self.ctx.player.seek((start - self.offset.get()).max(0.0));
     }
 
     // -- autoscroll ----------------------------------------------------------------------------
@@ -1101,6 +1218,7 @@ impl LyricsView {
         let all_cached = Lyrics::provider_names().iter().all(|name| cached.iter().any(|(s, _)| s == name));
         self.refresh_source_rows(!all_cached);
         self.refresh_second_line_rows();
+        self.timing_section.set_visible(self.synced.get());
     }
 
     fn on_picker_opened(self: &Rc<Self>) {
@@ -1131,7 +1249,7 @@ impl LyricsView {
     }
 
     fn cached_alternatives(&self) -> Vec<(String, LyricsResult)> {
-        self.video_id.borrow().as_deref().map(|id| self.lyrics.cache().get_alternatives(id)).unwrap_or_default()
+        self.video_id.borrow().as_deref().map(|id| self.lyrics.listed_sources(id)).unwrap_or_default()
     }
 
     fn refresh_source_rows(self: &Rc<Self>, include_spinner: bool) {
@@ -1168,15 +1286,22 @@ impl LyricsView {
         // Always offered, and the only way in when nothing matched at all.
         let search = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         search.append(&gtk::Image::from_icon_name("system-search-symbolic"));
-        search.append(&gtk::Label::builder().label("Search by name\u{2026}").halign(gtk::Align::Start).hexpand(true).build());
+        search.append(&gtk::Label::builder().label(tr!("Search by name\u{2026}")).halign(gtk::Align::Start).hexpand(true).build());
         self.source_list.append(&gtk::ListBoxRow::builder().activatable(true).child(&search).build());
         actions.push(SourceAction::Search);
+
+        let written = self.video_id.borrow().as_deref().is_some_and(|id| self.lyrics.own().text(id).is_some());
+        let write = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        write.append(&gtk::Image::from_icon_name("document-edit-symbolic"));
+        write.append(&gtk::Label::builder().label(if written { tr!("Edit my lyrics\u{2026}") } else { tr!("Write lyrics\u{2026}") }).halign(gtk::Align::Start).hexpand(true).build());
+        self.source_list.append(&gtk::ListBoxRow::builder().activatable(true).child(&write).build());
+        actions.push(SourceAction::Write);
 
         // Only once something is pinned, or it would be an undo for a choice nobody made.
         if let Some(preferred) = preferred {
             let reset = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            reset.append(&gtk::Label::builder().label("Use automatic choice").halign(gtk::Align::Start).build());
-            reset.append(&gtk::Label::builder().label(format!("Pinned to {preferred}")).halign(gtk::Align::Start).ellipsize(pango::EllipsizeMode::End).css_classes(["dim-label", "caption"]).build());
+            reset.append(&gtk::Label::builder().label(tr!("Use automatic choice")).halign(gtk::Align::Start).build());
+            reset.append(&gtk::Label::builder().label(tr!("Pinned to {preferred}", preferred)).halign(gtk::Align::Start).ellipsize(pango::EllipsizeMode::End).css_classes(["dim-label", "caption"]).build());
             self.source_list.append(&gtk::ListBoxRow::builder().activatable(true).child(&reset).build());
             actions.push(SourceAction::Reset);
         }
@@ -1187,16 +1312,17 @@ impl LyricsView {
     fn source_row(self: &Rc<Self>, source: &str, result: &LyricsResult, is_active: bool, is_preferred: bool) -> gtk::ListBoxRow {
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         let text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).valign(gtk::Align::Center).build();
-        text.append(&gtk::Label::builder().label(source).halign(gtk::Align::Start).ellipsize(pango::EllipsizeMode::End).build());
+        text.append(&gtk::Label::builder().label(crate::i18n::gettext(source)).halign(gtk::Align::Start).ellipsize(pango::EllipsizeMode::End).build());
         // "Pinned" is written out, not a tooltip: on a touchscreen a tooltip is
         // a second popup, and GNOME Shell then closed this one the moment it opened.
-        let detail = if is_preferred { format!("{} • Pinned", timing_words(result, true)) } else { timing_words(result, true).to_owned() };
+        // Translators: marks the lyrics source the listener chose to keep for this song.
+        let detail = if is_preferred { format!("{} • {}", timing_words(result, true), tr!("Pinned")) } else { timing_words(result, true) };
         text.append(&gtk::Label::builder().label(detail).halign(gtk::Align::Start).css_classes(["dim-label", "caption"]).build());
         content.append(&text);
         // Always present, transparent when inactive, so switching never shifts the other rows.
         content.append(&gtk::Image::builder().icon_name("object-select-symbolic").valign(gtk::Align::Center).opacity(if is_active { 1.0 } else { 0.0 }).build());
         if Lyrics::provider_supports_matches(source) {
-            let more = gtk::Button::builder().icon_name("go-next-symbolic").valign(gtk::Align::Center).tooltip_text(format!("Other matches from {source}")).build();
+            let more = gtk::Button::builder().icon_name("go-next-symbolic").valign(gtk::Align::Center).tooltip_text(tr!("Other matches from {source}", source)).build();
             more.add_css_class("flat");
             let weak = Rc::downgrade(self);
             let source = source.to_owned();
@@ -1223,6 +1349,11 @@ impl LyricsView {
                 self.lyrics.cache().clear_user_choice(&video_id);
                 self.refresh_for_current_track();
                 self.close_picker();
+            }
+            Some(SourceAction::Write) => {
+                drop(actions);
+                self.close_picker();
+                self.open_editor();
             }
             Some(SourceAction::Switch(source)) => {
                 let source = source.clone();
@@ -1286,7 +1417,7 @@ impl LyricsView {
         self.second_line_section.set_visible(!available.is_empty());
         let current = self.effective_second_line_mode();
         for key in &available {
-            let label = SECOND_LINE_LABELS.iter().find(|(k, _)| k == key).map_or(*key, |(_, label)| *label);
+            let label = SECOND_LINE_LABELS.iter().find(|(k, _)| k == key).map_or_else(|| (*key).to_owned(), |(_, label)| crate::i18n::gettext(label));
             let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
             content.append(&gtk::Label::builder().label(label).halign(gtk::Align::Start).hexpand(true).build());
             content.append(&gtk::Image::builder().icon_name("object-select-symbolic").valign(gtk::Align::Center).opacity(if *key == current { 1.0 } else { 0.0 }).build());
@@ -1316,7 +1447,7 @@ impl LyricsView {
         self.matches_source.replace(Some(source.to_owned()));
         self.match_rows.borrow_mut().clear();
         clear_list(&self.matches_list);
-        self.matches_list.append(&loading_row("Searching\u{2026}"));
+        self.matches_list.append(&loading_row(&tr!("Searching\u{2026}")));
         self.show_picker_page("matches");
 
         let request = self.fetch_gen.get();
@@ -1334,7 +1465,7 @@ impl LyricsView {
             }
             clear_list(&view.matches_list);
             if matches.is_empty() {
-                view.matches_list.append(&message_row(&format!("No other matches from {source}")));
+                view.matches_list.append(&message_row(&tr!("No other matches from {source}", source)));
             }
             for found in &matches {
                 view.matches_list.append(&match_row(found, None));
@@ -1359,7 +1490,7 @@ impl LyricsView {
         let Some(query) = self.track_query().filter(|_| !text.is_empty()) else { return };
         self.search_rows.borrow_mut().clear();
         clear_list(&self.search_list);
-        self.search_list.append(&loading_row("Searching\u{2026}"));
+        self.search_list.append(&loading_row(&tr!("Searching\u{2026}")));
         self.matches_source.replace(None);
 
         let request = self.fetch_gen.get();
@@ -1374,7 +1505,7 @@ impl LyricsView {
             let Some(view) = weak.upgrade().filter(|v| v.fetch_gen.get() == request) else { return };
             clear_list(&view.search_list);
             if matches.is_empty() {
-                view.search_list.append(&message_row("Nothing found"));
+                view.search_list.append(&message_row(&tr!("Nothing found")));
             }
             for found in &matches {
                 view.search_list.append(&match_row(found, found.source.as_deref()));

@@ -7,13 +7,14 @@
 //! drops, then stitched the two together by shelf title. One pass here keeps
 //! all three, so a shelf with a duplicate title cannot take another's art.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
 
 use super::browse::{Browse, Continuation};
 use super::items::{array_at, last_thumbnail_url, owned_at, parse_mixed_item};
-use crate::model::MediaItem;
+use crate::model::{ItemKind, MediaItem};
 use crate::net::ytmusic::NetError;
 
 /// Where the first page keeps its shelves, and the node that carries the token.
@@ -28,6 +29,75 @@ pub struct HomeSection {
     pub strapline_thumb: Option<String>,
     /// The small line above the title: "Similar to", "Discover the hits", "Stations".
     pub strapline: Option<String>,
+    /// The title and the strapline as YouTube words them in the app's language,
+    /// when the feed was read in it too. `title` stays English for the checks reading it.
+    pub local_title: Option<String>,
+    pub local_strapline: Option<String>,
+}
+
+impl HomeSection {
+    /// The title to show. The catalog comes first, then YouTube's own translation.
+    pub fn shown_title(&self) -> String {
+        crate::i18n::translated(&self.title).or_else(|| self.local_title.clone()).unwrap_or_else(|| self.title.clone())
+    }
+
+    pub fn shown_strapline(&self) -> Option<String> {
+        let strapline = self.strapline.as_deref()?;
+        // "SIMILAR TO" is in the catalog as "Similar to".
+        let mut letters = strapline.chars();
+        let sentence = letters.next().map(|first| first.to_uppercase().chain(letters.flat_map(char::to_lowercase)).collect::<String>()).unwrap_or_default();
+        crate::i18n::translated(strapline).or_else(|| crate::i18n::translated(&sentence)).or_else(|| self.local_strapline.clone()).or_else(|| Some(strapline.to_owned()))
+    }
+}
+
+/// The feed read through `api`, with what `labels` has to add: a client asking
+/// in the app's language. A failure there leaves the feed in English.
+pub async fn get_localized_home(api: Arc<dyn Browse>, labels: Option<Arc<dyn Browse>>, limit: usize) -> Result<Vec<HomeSection>, NetError> {
+    let Some(labels) = labels else { return get_home(api, limit).await };
+    let (sections, local) = tokio::join!(get_home(api, limit), get_home(labels, limit));
+    let mut sections = sections?;
+    match local {
+        Ok(local) => relabel(&mut sections, &local),
+        Err(err) => tracing::warn!(%err, "localized home failed"),
+    }
+    Ok(sections)
+}
+
+/// Take from the same feed in another language what differs by language: a
+/// playlist's name and cover (YouTube writes "My Supermix" on the picture), and
+/// the shelf titles. The two answers hold different picks in a different
+/// order, so playlists pair by id and shelves by the items they share.
+fn relabel(sections: &mut [HomeSection], local: &[HomeSection]) {
+    let playlists: HashMap<&str, &MediaItem> = local.iter().flat_map(|section| &section.items).filter(|item| item.kind == ItemKind::Playlist && !item.id.is_empty()).map(|item| (item.id.as_str(), item)).collect();
+    let ids = |section: &HomeSection| section.items.iter().map(|item| item.id.clone()).filter(|id| !id.is_empty()).collect::<HashSet<String>>();
+    let (ours, theirs): (Vec<_>, Vec<_>) = (sections.iter().map(ids).collect(), local.iter().map(ids).collect());
+    for item in sections.iter_mut().flat_map(|section| &mut section.items).filter(|item| item.kind == ItemKind::Playlist) {
+        if let Some(other) = playlists.get(item.id.as_str()) {
+            item.title = other.title.clone();
+            item.thumb = other.thumb.clone().or(item.thumb.take());
+        }
+    }
+    // Two shelves are the same one when they share at least two items and half of the smaller.
+    let mut pairs: Vec<(usize, usize, usize)> = Vec::new();
+    for (i, a) in ours.iter().enumerate() {
+        for (j, b) in theirs.iter().enumerate() {
+            let shared = a.intersection(b).count();
+            if shared >= 2 && shared * 2 >= a.len().min(b.len()) {
+                pairs.push((shared, i, j));
+            }
+        }
+    }
+    pairs.sort_by(|a, b| b.0.cmp(&a.0));
+    let (mut used_ours, mut used_theirs) = (HashSet::new(), HashSet::new());
+    for (_, i, j) in pairs {
+        if used_ours.contains(&i) || used_theirs.contains(&j) {
+            continue;
+        }
+        used_ours.insert(i);
+        used_theirs.insert(j);
+        sections[i].local_title = Some(local[j].title.clone());
+        sections[i].local_strapline = local[j].strapline.clone();
+    }
 }
 
 /// The feed, paged until `limit` sections have arrived.
@@ -70,7 +140,7 @@ fn parse_section(shelf: &Value) -> Option<HomeSection> {
     let items = array_at(renderer, "/contents").iter().filter_map(|entry| parse_mixed_item(entry, &title)).collect();
     let strapline_thumb = header.and_then(|h| last_thumbnail_url(array_at(h, "/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")));
     let strapline = header.and_then(|h| owned_at(h, "/strapline/runs/0/text")).filter(|s| !s.trim().is_empty());
-    Some(HomeSection { title, items, strapline_thumb, strapline })
+    Some(HomeSection { title, items, strapline_thumb, strapline, ..HomeSection::default() })
 }
 
 /// The "Long listens" shelf: hour-long mixes, shown as rows with their length.
@@ -157,6 +227,28 @@ pub fn arrange(sections: Vec<HomeSection>) -> (Vec<MediaItem>, Vec<HomeSection>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shelves_pair_by_what_they_hold_and_playlists_by_id() {
+        let item = |kind, id: &str, title: &str| MediaItem { kind, id: id.to_owned(), title: title.to_owned(), thumb: Some(format!("{title}.jpg")), ..MediaItem::default() };
+        let section = |title: &str, items: Vec<MediaItem>| HomeSection { title: title.to_owned(), items, ..HomeSection::default() };
+        let mut english = vec![
+            section("Mixed for you", vec![item(ItemKind::Playlist, "mix1", "My Supermix"), item(ItemKind::Playlist, "mix2", "My Mix 1")]),
+            section("Quick picks", vec![item(ItemKind::Song, "s1", "One"), item(ItemKind::Song, "s2", "Two")]),
+        ];
+        // Other picks, another order, and one shelf the English feed lacks.
+        let german = vec![
+            section("Schnellauswahl", vec![item(ItemKind::Song, "s8", "Acht"), item(ItemKind::Song, "s9", "Neun")]),
+            section("Empfohlene Mixe", vec![item(ItemKind::Playlist, "mix2", "Mein Mix 1"), item(ItemKind::Playlist, "mix1", "Mein Supermix")]),
+        ];
+        relabel(&mut english, &german);
+        assert_eq!(english[0].title, "Mixed for you");
+        assert_eq!(english[0].local_title.as_deref(), Some("Empfohlene Mixe"));
+        assert_eq!(english[0].items[0].title, "Mein Supermix");
+        assert_eq!(english[0].items[0].thumb.as_deref(), Some("Mein Supermix.jpg"));
+        assert_eq!(english[1].local_title, None);
+        assert_eq!(english[1].items[0].title, "One");
+    }
     use crate::model::ItemKind;
 
     fn card(title: &str, page_type: Option<&str>, browse_id: &str) -> Value {

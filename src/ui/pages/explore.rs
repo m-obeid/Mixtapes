@@ -77,7 +77,7 @@ impl ExplorePage {
         results_page.append(&results_scrolled);
         stack.add_named(&results_page, Some("results"));
 
-        stack.add_named(&loading_box("Searching..."), Some("loading"));
+        stack.add_named(&loading_box(&tr!("Searching...")), Some("loading"));
 
         let explore_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(SECTION_SPACING).margin_top(24).margin_bottom(24).margin_start(12).margin_end(12).build();
         let explore_clamp = adw::Clamp::builder().maximum_size(1024).tightening_threshold(600).child(&explore_box).build();
@@ -185,12 +185,13 @@ impl ExplorePage {
             return;
         }
         if self.explore_box.first_child().is_none() {
-            self.explore_box.append(&loading_box("Loading…"));
+            self.explore_box.append(&loading_box(&tr!("Loading…")));
         }
 
         let api = self.ctx.net.client().api();
         let country = self.charts_country.borrow().clone();
-        let handle = self.ctx.net.spawn(explore::load_explore(api, country));
+        let labels = self.ctx.net.client().localized_api().map(|labels| labels as std::sync::Arc<dyn crate::net::browse::Browse>);
+        let handle = self.ctx.net.spawn(explore::load_explore(api, labels, country));
         self.explore_inflight.replace(Some(handle.abort_handle()));
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -216,7 +217,7 @@ impl ExplorePage {
         let Some(data) = data else {
             if !self.ctx.online.is_online() {
                 self.clear_explore();
-                self.explore_box.append(&status_box("network-offline-symbolic", "You're offline", Some("Explore requires an internet connection.\nYour downloaded songs are still available.")));
+                self.explore_box.append(&status_box("network-offline-symbolic", &tr!("You're offline"), Some(&tr!("Explore requires an internet connection.\nYour downloaded songs are still available."))));
                 return;
             }
             let attempt = self.explore_retry.get();
@@ -244,8 +245,8 @@ impl ExplorePage {
 
     fn show_explore_retry_placeholder(self: &Rc<Self>) {
         self.clear_explore();
-        let status = status_box("dialog-warning-symbolic", "Couldn't load Explore", None);
-        let retry = gtk::Button::builder().label("Retry").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
+        let status = status_box("dialog-warning-symbolic", &tr!("Couldn't load Explore"), None);
+        let retry = gtk::Button::builder().label(tr!("Retry")).css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
         let weak = Rc::downgrade(self);
         retry.connect_clicked(move |_| {
             if let Some(p) = weak.upgrade() {
@@ -271,52 +272,55 @@ impl ExplorePage {
         // and leads, the way the Moods & Genres page orders them.
         // Podcasts lead the genre pills, since YouTube keeps them behind a Home chip rather than a genre.
         let with_podcasts = |pills: &[Category]| {
-            let podcasts = Category { title: "Podcasts".to_owned(), params: crate::net::explore::PODCASTS_KEY.to_owned() };
+            let podcasts = Category { title: tr!("Podcasts"), params: crate::net::explore::PODCASTS_KEY.to_owned() };
             std::iter::once(podcasts).chain(pills.iter().cloned()).collect::<Vec<_>>()
         };
         if !data.for_you.is_empty() || !data.moods.is_empty() || !data.genres.is_empty() {
-            self.add_pill_section("For You", &data.for_you);
-            self.add_pill_section("Moods & Moments", &data.moods);
-            self.add_pill_section("Genres", &with_podcasts(&data.genres));
+            // YouTube picks For You from the same lists, and a pill reads once.
+            let unpicked = |pills: Vec<Category>| pills.into_iter().filter(|c| !data.for_you.iter().any(|f| f.title == c.title)).collect::<Vec<_>>();
+            self.add_pill_section(&tr!("Moods & Moments"), &[], &unpicked(data.moods.clone()));
+            self.add_pill_section(&if data.for_you.is_empty() { tr!("Genres") } else { tr!("For You & Genres") }, &data.for_you, &unpicked(with_podcasts(&data.genres)));
         } else {
-            self.add_pill_section("Moods & Genres", &with_podcasts(&data.feed.moods_and_genres));
+            self.add_pill_section(&tr!("Moods & Genres"), &[], &with_podcasts(&data.feed.moods_and_genres));
         }
 
-        self.add_row_section("New Albums & Singles", capped(&data.feed.new_releases, NEW_RELEASE_LIMIT));
-        self.add_row_section("New Music Videos", capped(&data.feed.new_videos, VIDEO_LIMIT));
-        self.add_row_section("Trending", capped(&data.feed.trending, TRENDING_LIMIT));
+        self.add_row_section(&tr!("New Albums & Singles"), capped(&data.feed.new_releases, NEW_RELEASE_LIMIT));
+        self.add_row_section(&tr!("New Music Videos"), capped(&data.feed.new_videos, VIDEO_LIMIT));
+        self.add_row_section(&tr!("Trending"), capped(&data.feed.trending, TRENDING_LIMIT));
         if let Some(charts) = &data.charts {
             self.add_charts(charts);
         }
         self.set_compact(self.ctx.compact.get());
     }
 
-    /// A scrolling row of pills. Past twenty its heading offers View All,
+    /// A scrolling row of pills. Past the limit its heading offers View All,
     /// which opens the full list on its own page.
-    fn add_pill_section(self: &Rc<Self>, title: &str, categories: &[Category]) {
+    /// `lead` comes first in full, parted from the rest by a line.
+    fn add_pill_section(self: &Rc<Self>, title: &str, lead: &[Category], categories: &[Category]) {
         if categories.is_empty() {
             return;
         }
         let section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
         let on_view_all = (categories.len() > PILL_LIMIT).then(|| {
             let ctx = self.ctx.clone();
-            let (title, items) = (title.to_owned(), categories.to_vec());
+            let (title, items) = (title.to_owned(), lead.iter().chain(categories).cloned().collect::<Vec<_>>());
             Box::new(move || ctx.nav.go(NavRequest::AllMoods { title: title.clone(), items: items.clone() })) as Box<dyn Fn()>
         });
         section.append(&section_header(title, on_view_all));
         let scroll_box = HorizontalScrollBox::new();
-        // Outside the scrolled window: a margin within it is empty space for
-        // the overlay scrollbar to draw a line in.
-        scroll_box.widget().set_margin_bottom(12);
-        let strip = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).build();
-        for category in categories.iter().take(PILL_LIMIT) {
-            let button = gtk::Button::builder().label(&category.title).css_classes(["pill"]).build();
+        scroll_box.set_edge_fade(true);
+        let chips = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
+        for (index, category) in lead.iter().chain(categories.iter().take(PILL_LIMIT)).enumerate() {
+            if index == lead.len() && index > 0 {
+                chips.append(&gtk::Separator::builder().orientation(gtk::Orientation::Vertical).margin_top(6).margin_bottom(6).margin_start(4).margin_end(4).build());
+            }
+            let button = gtk::Button::builder().label(&category.title).css_classes(["category-chip"]).build();
             let ctx = self.ctx.clone();
             let category = category.clone();
             button.connect_clicked(move |_| ctx.nav.go(NavRequest::Category { title: category.title.clone(), params: category.params.clone() }));
-            strip.append(&button);
+            chips.append(&button);
         }
-        scroll_box.set_content(&strip);
+        scroll_box.set_content(&chips);
         section.append(scroll_box.widget());
         self.explore_box.append(&section);
         self.scrollers.borrow_mut().push(scroll_box);
@@ -355,7 +359,7 @@ impl ExplorePage {
         if items.is_empty() {
             return false;
         }
-        self.ctx.nav.go(NavRequest::AllMoods { title: "Genres".into(), items });
+        self.ctx.nav.go(NavRequest::AllMoods { title: tr!("Genres"), items });
         true
     }
 
@@ -365,7 +369,7 @@ impl ExplorePage {
     /// chart playlists as cards, then the ranked artists.
     fn add_charts(self: &Rc<Self>, charts: &Charts) {
         let header = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
-        header.append(&gtk::Label::builder().label("Charts").css_classes(["title-3"]).halign(gtk::Align::Start).hexpand(true).build());
+        header.append(&gtk::Label::builder().label(tr!("Charts")).css_classes(["title-3"]).halign(gtk::Align::Start).hexpand(true).build());
         if let Some(dropdown) = self.country_dropdown(&charts.countries) {
             header.append(&dropdown);
         }
@@ -373,11 +377,11 @@ impl ExplorePage {
 
         // A premium account gets daily and weekly rows where everyone else
         // gets one trending row.
-        self.add_chart_playlists("Trending", &charts.videos);
-        self.add_chart_playlists("Daily", &charts.daily);
-        self.add_chart_playlists("Weekly", &charts.weekly);
-        self.add_chart_playlists("Genre Charts", &charts.genres);
-        self.add_chart_artists("Top Artists", &charts.artists);
+        self.add_chart_playlists(&tr!("Trending"), &charts.videos);
+        self.add_chart_playlists(&tr!("Daily"), &charts.daily);
+        self.add_chart_playlists(&tr!("Weekly"), &charts.weekly);
+        self.add_chart_playlists(&tr!("Genre Charts"), &charts.genres);
+        self.add_chart_artists(&tr!("Top Artists"), &charts.artists);
     }
 
     /// The country menu, built only once YouTube has told us the choices.
@@ -426,8 +430,8 @@ impl ExplorePage {
         let strip = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(CHART_STRIP_SPACING).build();
         for item in items {
             let card = MediaCard::new(&self.ctx, item.clone(), CardOptions { title_lines: 2, ..CardOptions::default() });
-            let ctx = self.ctx.clone();
-            card.connect_clicked(move |item| activate_item(&ctx, item, &[], "Charts"));
+            let (ctx, shelf) = (self.ctx.clone(), title.to_owned());
+            card.connect_clicked(move |item| activate_item(&ctx, item, &[], &shelf));
             attach_item_menu(&self.ctx, card.widget(), item.clone());
             strip.append(card.widget());
             self.cards.borrow_mut().push(card);
@@ -531,7 +535,7 @@ impl ExplorePage {
                 Ok(Ok(results)) => page.render_results(&query, results),
                 Ok(Err(err)) => {
                     tracing::warn!(%err, %query, "search failed");
-                    toast(&page.stack, &format!("Search failed: {err}"));
+                    toast(&page.stack, &tr!("Search failed: {err}", err));
                     page.render_results(&query, SearchResults::default());
                 }
                 Err(_) => {}
@@ -556,7 +560,7 @@ impl ExplorePage {
         all.extend(results.items);
         self.last_results.replace(all.clone());
         if all.is_empty() {
-            self.results_stack.add_named(&adw::StatusPage::builder().icon_name("system-search-symbolic").title("No results").description(format!("Nothing found for \"{query}\"")).build(), Some("empty"));
+            self.results_stack.add_named(&adw::StatusPage::builder().icon_name("system-search-symbolic").title(tr!("No results")).description(tr!("Nothing found for \"{query}\"", query)).build(), Some("empty"));
             self.results_stack.set_visible_child_name("empty");
             return;
         }
@@ -581,41 +585,41 @@ impl ExplorePage {
         let albums: Vec<MediaItem> = all.iter().filter(|r| r.kind == ItemKind::Album).cloned().collect();
         let videos: Vec<MediaItem> = all.iter().filter(|r| r.kind == ItemKind::Video).cloned().collect();
 
-        let main = make_tab("Main", "main", "Main");
+        let main = make_tab(&tr!("Main"), "main", &tr!("Main"));
         // Only a card YouTube sent as the top result earns the heading.
         let rest = if has_top {
-            self.add_result_section(&main, "Top Result", query, &all[..1]);
+            self.add_result_section(&main, &tr!("Top Result"), query, &all[..1]);
             &all[1..]
         } else {
             &all[..]
         };
         if !rest.is_empty() {
-            self.add_result_section(&main, "Relevant Results", query, rest);
+            self.add_result_section(&main, &tr!("Relevant Results"), query, rest);
         }
         if !songs.is_empty() {
-            let tab = make_tab("Songs", "songs", "Songs");
-            self.add_paged_section(&tab, "Songs", query, &songs, SearchFilter::Songs, more_songs);
+            let tab = make_tab(&tr!("Songs"), "songs", &tr!("Songs"));
+            self.add_paged_section(&tab, &tr!("Songs"), query, &songs, SearchFilter::Songs, more_songs);
         }
         if !artists.is_empty() {
-            let tab = make_tab("Artists", "artists", "Artists");
-            self.add_paged_section(&tab, "Artists", query, &artists, SearchFilter::Artists, more_artists);
+            let tab = make_tab(&tr!("Artists"), "artists", &tr!("Artists"));
+            self.add_paged_section(&tab, &tr!("Artists"), query, &artists, SearchFilter::Artists, more_artists);
         }
         if !playlists.is_empty() {
-            let tab = make_tab("Community Playlists", "playlists", "Playlists");
-            self.add_paged_section(&tab, "Playlists", query, &playlists, SearchFilter::CommunityPlaylists, more_playlists);
+            let tab = make_tab(&tr!("Community Playlists"), "playlists", &tr!("Playlists"));
+            self.add_paged_section(&tab, &tr!("Playlists"), query, &playlists, SearchFilter::CommunityPlaylists, more_playlists);
         }
         if !albums.is_empty() || !videos.is_empty() {
-            let tab = make_tab("Other results", "others", "Other");
+            let tab = make_tab(&tr!("Other results"), "others", &tr!("Other"));
             if !albums.is_empty() {
-                self.add_paged_section(&tab, "Albums", query, &albums, SearchFilter::Albums, more_albums);
+                self.add_paged_section(&tab, &tr!("Albums"), query, &albums, SearchFilter::Albums, more_albums);
             }
             // Episodes sit apart from music videos, under the heading Python gave them.
             let (episodes, videos): (Vec<MediaItem>, Vec<MediaItem>) = videos.into_iter().partition(|v| v.item_type.as_deref() == Some("Episode"));
             if !videos.is_empty() {
-                self.add_result_section(&tab, "Videos", query, &videos);
+                self.add_result_section(&tab, &tr!("Videos"), query, &videos);
             }
             if !episodes.is_empty() {
-                self.add_result_section(&tab, "More results", query, &episodes);
+                self.add_result_section(&tab, &tr!("More results"), query, &episodes);
             }
         }
 
@@ -698,13 +702,13 @@ impl ExplorePage {
         }
         section.append(&list);
 
-        let button = gtk::Button::builder().label("Show More").css_classes(["pill"]).halign(gtk::Align::Center).margin_top(12).visible(more.is_some()).build();
+        let button = gtk::Button::builder().label(tr!("Show More")).css_classes(["pill"]).halign(gtk::Align::Center).margin_top(12).visible(more.is_some()).build();
         let token = Rc::new(RefCell::new(more));
         let (weak, query) = (Rc::downgrade(self), query.to_owned());
         button.connect_clicked(move |button| {
             let (Some(page), Some(next)) = (weak.upgrade(), token.borrow_mut().take()) else { return };
             button.set_sensitive(false);
-            button.set_label("Loading…");
+            button.set_label(&tr!("Loading…"));
             let api = page.ctx.net.client().api();
             let wanted = query.clone();
             let retry = next.clone();
@@ -717,7 +721,7 @@ impl ExplorePage {
                     // The same page can be asked for again.
                     Ok(Err(err)) => {
                         tracing::warn!(%err, "more search results failed");
-                        toast(&button, "Could not load more results");
+                        toast(&button, &tr!("Could not load more results"));
                         Some(retry)
                     }
                     Err(_) => Some(retry),
@@ -725,7 +729,7 @@ impl ExplorePage {
                 token.replace(more);
                 button.set_visible(token.borrow().is_some());
                 button.set_sensitive(true);
-                button.set_label("Show More");
+                button.set_label(&tr!("Show More"));
             });
         });
         section.append(&button);
@@ -769,7 +773,8 @@ impl ExplorePage {
 
 /// What the queue header says for songs started from the results of a search.
 fn search_queue_title(query: &str) -> String {
-    format!("Search: {}", query.trim())
+    // Translators: the name of a queue started from the search results, {query} is what was searched for.
+    tr!("Search: {query}", query = query.trim())
 }
 
 fn heading(title: &str) -> gtk::Label {

@@ -92,7 +92,7 @@ fn summarize_error(message: &str) -> String {
     let message = message.split_once("ERROR:").map_or(message, |(_, rest)| rest).trim();
     let sentence = [". ", "; "].iter().find_map(|sep| message.split_once(sep)).map_or(message, |(first, _)| first);
     let trimmed = sentence.trim_matches([' ', '.']);
-    if trimmed.is_empty() { "Could not load this track".to_owned() } else { trimmed.chars().take(140).collect() }
+    if trimmed.is_empty() { tr!("Could not load this track") } else { trimmed.chars().take(140).collect() }
 }
 
 /// A play as the scrobbler sees it: a fresh one, or the same one under better metadata.
@@ -100,9 +100,14 @@ fn summarize_error(message: &str) -> String {
 pub enum PlayEvent {
     Started(Track),
     Refined(Track),
+    /// The listener liked, disliked or cleared a song.
+    Rated(Track, LikeStatus),
 }
 
 type PlayListener = Box<dyn Fn(&PlayEvent)>;
+
+/// What the music is multiplied by while another player plays.
+const DUCKED_GAIN: f64 = 0.3;
 
 pub struct Player {
     me: Weak<Player>,
@@ -155,6 +160,8 @@ pub struct Player {
     swap_checked: RefCell<std::collections::HashSet<String>>,
     /// Told when a play starts or its metadata is corrected. See `on_play`.
     play_listeners: RefCell<Vec<PlayListener>>,
+    /// Turned down while another player plays.
+    ducked: Cell<bool>,
     /// Set while the audio-version swap writes its metadata, so the source id survives it.
     swapping: Cell<bool>,
     /// Where the queue is kept between runs.
@@ -197,6 +204,7 @@ impl Player {
             listened: RefCell::new(Listened::default()),
             swap_checked: RefCell::new(std::collections::HashSet::new()),
             play_listeners: RefCell::new(Vec::new()),
+            ducked: Cell::new(false),
             swapping: Cell::new(false),
             session_file: crate::session::file(paths),
             keep_session: Cell::new(session_allowed() && paths.read_prefs().get("restore_queue").and_then(|v| v.as_bool()).unwrap_or(true)),
@@ -451,6 +459,9 @@ impl Player {
     /// the queue is known by nothing else here.
     pub fn rate(&self, video_id: VideoId, status: LikeStatus, known: Option<Track>) {
         let known = self.queue.borrow().tracks().iter().find(|t| t.video_id == video_id).cloned().or(known);
+        if let Some(track) = &known {
+            self.emit_play(PlayEvent::Rated(track.clone(), status));
+        }
         if status == LikeStatus::Like && self.download_liked.get() {
             self.download_liked_track(&video_id, known.clone());
         }
@@ -484,7 +495,7 @@ impl Player {
             tracing::warn!(%err, %video_id, "rating failed");
             if let Some(player) = weak.upgrade() {
                 player.apply_like_locally(&video_id, previous);
-                player.state.emit_notice("Couldn't update rating");
+                player.state.emit_notice(&tr!("Couldn't update rating"));
             }
         });
     }
@@ -667,9 +678,13 @@ impl Player {
     }
 
     pub fn add_to_queue(&self, tracks: Vec<Track>, play_next: bool) {
+        let was_empty = self.state.queue_length() == 0;
         let step = self.queue.borrow_mut().insert(tracks, play_next);
         self.sync_queue_model();
         self.apply(step);
+        if was_empty && self.state.queue_length() > 0 {
+            self.state.emit_queue_started();
+        }
     }
 
     pub fn remove_from_queue(&self, index: usize) {
@@ -902,7 +917,11 @@ impl Player {
             match arm_only {
                 true if self.armed_next.borrow().as_ref().is_some_and(|a| a.generation == generation) => self.audio.send(AudioCommand::ArmNext { uri: uri.to_string(), generation, auth: None }),
                 true => {}
-                false => self.audio.send(AudioCommand::Load { uri: uri.to_string(), generation, auth: None }),
+                false => {
+                    self.apply_gain(&track.video_id);
+                    self.audio.send(AudioCommand::Load { uri: uri.to_string(), generation, auth: None });
+                    self.measure_download(track.video_id.clone(), generation);
+                }
             }
             return;
         }
@@ -1010,6 +1029,7 @@ impl Player {
                             info.thumbnail.as_deref(),
                         );
                     }
+                    player.apply_gain(&track.video_id);
                     player.audio.send(AudioCommand::Load {
                         uri: info.uri,
                         generation,
@@ -1027,6 +1047,41 @@ impl Player {
                 }
             }
         });
+    }
+
+    /// A file downloaded before normalization came along has never been measured. The stream's details say how loud it is.
+    fn measure_download(&self, video_id: VideoId, generation: u64) {
+        if crate::net::loudness::known(video_id.as_str()) || crate::net::offline::sealed() || video_id.as_str().contains(':') {
+            return;
+        }
+        let resolver = self.net.resolver().clone();
+        let id = video_id.clone();
+        let handle = self.net.spawn(async move { resolver.resolve(id, None).await.is_ok() });
+        let weak = self.weak_self();
+        glib::spawn_future_local(async move {
+            let (Some(player), Ok(true)) = (weak.upgrade(), handle.await) else { return };
+            if player.current.get() == generation {
+                player.apply_gain(&video_id);
+            }
+        });
+    }
+
+    fn apply_gain(&self, video_id: &VideoId) {
+        let duck = if self.ducked.get() { DUCKED_GAIN } else { 1.0 };
+        self.audio.send(AudioCommand::SetGain(crate::net::loudness::gain(video_id.as_str()) * duck));
+    }
+
+    /// Another player started or stopped. The song in the speakers follows at once.
+    pub fn set_ducked(&self, ducked: bool) {
+        tracing::debug!(ducked, "another player");
+        self.ducked.set(ducked);
+        self.apply_gain(&VideoId(self.state.video_id()));
+    }
+
+    /// The Normalize Volume setting. The song playing changes straight away.
+    pub fn set_normalize_volume(&self, on: bool) {
+        crate::net::loudness::set_enabled(on);
+        self.apply_gain(&VideoId(self.state.video_id()));
     }
 
     /// What is playing and how, for the Stream Info panel in the expanded
@@ -1080,7 +1135,7 @@ impl Player {
                 self.apply(step);
             }
             None => {
-                self.state.emit_notice("Offline mode is on, and this song is not downloaded");
+                self.state.emit_notice(&tr!("Offline mode is on, and this song is not downloaded"));
                 self.stop();
             }
         }
@@ -1146,6 +1201,9 @@ impl Player {
                         self.current.set(generation);
                         self.retries.set(0);
                         let track = self.queue.borrow_mut().adopt(index).cloned();
+                        if let Some(track) = &track {
+                            self.apply_gain(&track.video_id);
+                        }
                         self.mark_current(Some(index));
                         self.clear_visualizer_queue();
                         self.state.set_position(0.0);
@@ -1731,7 +1789,7 @@ fn session_allowed() -> bool {
 
 /// What the queue header calls a radio grown from `seed_name`.
 fn radio_title(seed_name: &str) -> String {
-    if seed_name.is_empty() { "Radio".to_owned() } else { format!("Radio of {seed_name}") }
+    if seed_name.is_empty() { tr!("Radio") } else { tr!("Radio of {seed_name}", seed_name) }
 }
 
 // -- infinite radio -------------------------------------------------------

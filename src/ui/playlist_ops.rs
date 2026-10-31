@@ -23,23 +23,58 @@ pub fn add_tracks(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: String
     if is_local(&playlist_id) {
         let added = ctx.local.add_tracks(&playlist_id, &tracks);
         toast(anchor, &match (added, count) {
-            (0, _) => "Already in that playlist".to_owned(),
-            (1, 1) => "Added to playlist".to_owned(),
-            (added, _) => format!("Added {added} tracks to playlist"),
+            (0, _) => tr!("Already in that playlist"),
+            (1, 1) => tr!("Added to playlist"),
+            (added, _) => trn!("Added {n} track to playlist", "Added {n} tracks to playlist", added),
         });
         ctx.nav.refresh_library();
         return;
     }
     let api = ctx.net.client().api();
     let ids: Vec<String> = tracks.iter().map(|t| t.video_id.0.clone()).collect();
-    let handle = ctx.net.spawn(async move { crate::net::playlists::add_playlist_items(&api, &playlist_id, ids, None).await });
+    let (asked, list) = (ids.clone(), playlist_id.clone());
+    let handle = ctx.net.spawn(async move { crate::net::playlists::tracks_already_in(&api, &list, &asked).await });
+    let (ctx, anchor) = (ctx.clone(), anchor.clone());
+    glib::spawn_future_local(async move {
+        // A list that will not load is no reason to refuse the song. YouTube still refuses a duplicate.
+        let held = handle.await.ok().and_then(Result::ok).unwrap_or_default();
+        if held.is_empty() {
+            send_tracks(&ctx, &anchor, playlist_id, ids, false);
+            return;
+        }
+        let fresh: Vec<String> = ids.iter().filter(|id| !held.contains(id)).cloned().collect();
+        let dialog = adw::AlertDialog::builder()
+            .heading(tr!("Already in Playlist"))
+            .body(trn!("{n} song is already in this playlist.", "{n} songs are already in this playlist.", held.len()))
+            .build();
+        dialog.add_response("cancel", &tr!("Cancel"));
+        if !fresh.is_empty() {
+            dialog.add_response("skip", &tr!("Skip Duplicates"));
+        }
+        dialog.add_response("add", &tr!("Add Anyway"));
+        dialog.set_default_response(Some(if fresh.is_empty() { "cancel" } else { "skip" }));
+        dialog.set_close_response("cancel");
+        let toast_anchor = anchor.clone();
+        dialog.connect_response(None, move |_, response| match response {
+            "skip" => send_tracks(&ctx, &toast_anchor, playlist_id.clone(), fresh.clone(), false),
+            "add" => send_tracks(&ctx, &toast_anchor, playlist_id.clone(), ids.clone(), true),
+            _ => {}
+        });
+        dialog.present(Some(&anchor));
+    });
+}
+
+fn send_tracks(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: String, ids: Vec<String>, allow_duplicates: bool) {
+    let count = ids.len();
+    let api = ctx.net.client().api();
+    let handle = ctx.net.spawn(async move { crate::net::playlists::add_playlist_items(&api, &playlist_id, ids, None, allow_duplicates).await });
     let anchor = anchor.clone();
     glib::spawn_future_local(async move {
         match handle.await {
-            Ok(Ok(())) => toast(&anchor, &if count > 1 { format!("Added {count} tracks to playlist") } else { "Added to playlist".to_owned() }),
+            Ok(Ok(())) => toast(&anchor, &if count > 1 { trn!("Added {n} track to playlist", "Added {n} tracks to playlist", count) } else { tr!("Added to playlist") }),
             Ok(Err(err)) => {
                 tracing::warn!(%err, "add to playlist failed");
-                toast(&anchor, "Failed to add to playlist");
+                toast(&anchor, &tr!("Failed to add to playlist"));
             }
             Err(_) => {}
         }
@@ -51,20 +86,20 @@ pub fn add_tracks(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: String
 /// YouTube playlist is reported once the browse endpoint serves it.
 pub fn ask_new_playlist(ctx: &Rc<UiContext>, parent: &impl IsA<gtk::Widget>, on_created: impl Fn(String, String) + 'static) {
     let signed_in = ctx.net.client().is_authenticated();
-    let dialog = adw::Dialog::builder().title("New Playlist").content_width(500).build();
+    let dialog = adw::Dialog::builder().title(tr!("New Playlist")).content_width(500).build();
     let main_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
     let header = adw::HeaderBar::builder().css_classes(["flat"]).build();
-    let create_btn = gtk::Button::builder().label("Create").css_classes(["suggested-action"]).build();
+    let create_btn = gtk::Button::builder().label(tr!("Create")).css_classes(["suggested-action"]).build();
     header.pack_start(&create_btn);
     main_box.append(&header);
 
     let prefs_page = adw::PreferencesPage::new();
-    let group = adw::PreferencesGroup::builder().title("Playlist Details").margin_start(12).margin_end(12).margin_top(12).margin_bottom(12).build();
-    let title_row = adw::EntryRow::builder().title("Title").activates_default(true).build();
-    let desc_row = adw::EntryRow::builder().title("Description").build();
-    let privacy_row = adw::ComboRow::builder().title("Visibility").model(&gtk::StringList::new(&["Public", "Private", "Unlisted"])).selected(1).build();
+    let group = adw::PreferencesGroup::builder().title(tr!("Playlist Details")).margin_start(12).margin_end(12).margin_top(12).margin_bottom(12).build();
+    let title_row = adw::EntryRow::builder().title(tr!("Title")).activates_default(true).build();
+    let desc_row = adw::EntryRow::builder().title(tr!("Description")).build();
+    let privacy_row = adw::ComboRow::builder().title(tr!("Visibility")).model(&gtk::StringList::new(&[&tr!("Public"), &tr!("Private"), &tr!("Unlisted")])).selected(1).build();
     // Signed out, the only place is this device. Signed in, the account is the default.
-    let where_row = adw::ComboRow::builder().title("Save To").model(&gtk::StringList::new(&["YouTube Music", "This device"])).selected(if signed_in { 0 } else { 1 }).visible(signed_in).build();
+    let where_row = adw::ComboRow::builder().title(tr!("Save To")).model(&gtk::StringList::new(&["YouTube Music", &tr!("This device")])).selected(if signed_in { 0 } else { 1 }).visible(signed_in).build();
     {
         let privacy_row = privacy_row.clone();
         where_row.connect_selected_notify(move |row| privacy_row.set_visible(row.selected() == 0));
@@ -115,7 +150,7 @@ pub fn ask_new_playlist(ctx: &Rc<UiContext>, parent: &impl IsA<gtk::Widget>, on_
                 }
                 Ok(Err(err)) => {
                     tracing::warn!(%err, "playlist creation failed");
-                    toast(&anchor, "Could not create the playlist");
+                    toast(&anchor, &tr!("Could not create the playlist"));
                 }
                 Err(_) => {}
             }

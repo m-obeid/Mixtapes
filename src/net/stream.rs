@@ -289,14 +289,16 @@ pub fn helper_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
 /// PATH lookup plus the install spots the Python app checked.
 pub fn find_executable(name: &str) -> Option<PathBuf> {
     let name = &format!("{name}{}", std::env::consts::EXE_SUFFIX);
-    // A Windows install carries its helpers beside the app.
-    let beside_app = std::env::current_exe().ok().filter(|_| cfg!(windows)).and_then(|exe| exe.parent().map(|dir| dir.join(name)));
+    // A Windows install and the macOS app bundle carry their helpers beside the app.
+    let beside_app = std::env::current_exe().ok().filter(|_| cfg!(any(windows, target_os = "macos"))).and_then(|exe| exe.parent().map(|dir| dir.join(name)));
     let mut candidates: Vec<PathBuf> = beside_app.into_iter().collect();
     candidates.extend(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).map(|d| d.join(name)).collect::<Vec<_>>()).unwrap_or_default());
     if let Some(home) = std::env::var_os("HOME") {
         candidates.push(PathBuf::from(home).join(".cargo/bin").join(name));
     }
     candidates.push(PathBuf::from("/usr/lib/mixtapes/bin").join(name));
+    // Homebrew on Apple silicon. A Finder launch has no shell PATH to find it on.
+    candidates.push(PathBuf::from("/opt/homebrew/bin").join(name));
     candidates.push(PathBuf::from("/usr/local/bin").join(name));
     candidates.push(PathBuf::from("/usr/bin").join(name));
     candidates.into_iter().find(|p| p.is_file())

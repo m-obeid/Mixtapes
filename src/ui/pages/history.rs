@@ -17,8 +17,8 @@ use crate::ui::widgets::song_row::SongRow;
 
 /// How far the page scrolls before the header takes over the title.
 const TITLE_HANDOVER: f64 = 50.0;
-const EMPTY_TEXT: &str = "Your listening history will appear here after you play something.";
-const LOCAL_EMPTY_TEXT: &str = "Songs you play without signing in appear here. They stay on this device.";
+const EMPTY_TEXT: &str = tr_noop!("Your listening history will appear here after you play something.");
+const LOCAL_EMPTY_TEXT: &str = tr_noop!("Songs you play without signing in appear here. They stay on this device.");
 /// How many local plays the page lists.
 const LOCAL_LIMIT: usize = 500;
 /// The queue a history row plays is the history itself, not a playlist.
@@ -35,6 +35,8 @@ pub struct HistoryPage {
     ctx: Rc<UiContext>,
     /// Every play in one flat list, which is what a row queues.
     entries: RefCell<Vec<HistoryEntry>>,
+    /// What the search bar narrows the page to, lowercase.
+    query: RefCell<String>,
     rows: RefCell<Vec<Rc<SongRow>>>,
     loading: Cell<bool>,
     /// Counts renders, so rows still being built for an earlier one stop.
@@ -68,12 +70,12 @@ impl HistoryPage {
         crate::ui::suppress_hover_while_scrolling(&scrolled);
 
         let content_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).margin_top(24).margin_bottom(24).margin_start(24).margin_end(24).build();
-        content_box.append(&gtk::Label::builder().label("Listening History").css_classes(["title-1"]).halign(gtk::Align::Start).build());
+        content_box.append(&gtk::Label::builder().label(tr!("Listening History")).css_classes(["title-1"]).halign(gtk::Align::Start).build());
 
         let sections_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).build();
         content_box.append(&sections_box);
 
-        let empty_label = gtk::Label::builder().label(EMPTY_TEXT).css_classes(["dim-label"]).wrap(true).halign(gtk::Align::Center).margin_top(48).visible(false).build();
+        let empty_label = gtk::Label::builder().label(crate::i18n::gettext(EMPTY_TEXT)).css_classes(["dim-label"]).wrap(true).halign(gtk::Align::Center).margin_top(48).visible(false).build();
         content_box.append(&empty_label);
 
         let clamp = adw::Clamp::builder().maximum_size(1024).tightening_threshold(600).child(&content_box).build();
@@ -85,7 +87,7 @@ impl HistoryPage {
         let spinner = adw::Spinner::new();
         spinner.set_size_request(48, 48);
         loading_wrap.append(&spinner);
-        loading_wrap.append(&gtk::Label::builder().label("Loading history...").css_classes(["caption"]).build());
+        loading_wrap.append(&gtk::Label::builder().label(tr!("Loading history...")).css_classes(["caption"]).build());
         let overlay = gtk::Overlay::builder().vexpand(true).child(&scrolled).build();
         overlay.add_overlay(&loading_wrap);
         root.append(&overlay);
@@ -98,6 +100,7 @@ impl HistoryPage {
             loading_wrap,
             ctx,
             entries: RefCell::new(Vec::new()),
+            query: RefCell::new(String::new()),
             rows: RefCell::new(Vec::new()),
             loading: Cell::new(false),
             render_generation: Cell::new(0),
@@ -107,7 +110,7 @@ impl HistoryPage {
         let weak = Rc::downgrade(&page);
         scrolled.vadjustment().connect_value_changed(move |adj| {
             if let Some(p) = weak.upgrade() {
-                p.emit_title(if adj.value() > TITLE_HANDOVER { "Listening History" } else { "" });
+                if adj.value() > TITLE_HANDOVER { p.emit_title(&tr!("Listening History")) } else { p.emit_title("") }
             }
         });
         let weak = Rc::downgrade(&page);
@@ -179,7 +182,7 @@ impl HistoryPage {
         }
         if !self.ctx.online.is_online() {
             if self.entries.borrow().is_empty() {
-                self.show_empty("History requires an internet connection.");
+                self.show_empty(&tr!("History requires an internet connection."));
             }
             return;
         }
@@ -206,7 +209,7 @@ impl HistoryPage {
                 Ok(Err(err)) => {
                     tracing::warn!(%err, "history fetch failed");
                     if page.entries.borrow().is_empty() {
-                        page.show_empty(EMPTY_TEXT);
+                        page.show_empty(&crate::i18n::gettext(EMPTY_TEXT));
                     }
                 }
                 Err(_) => {}
@@ -219,7 +222,7 @@ impl HistoryPage {
         let now = glib::DateTime::now_local().ok();
         let mut entries: Vec<HistoryEntry> = Vec::new();
         for (track, played_at) in self.ctx.local.play_history(LOCAL_LIMIT) {
-            let played = now.as_ref().and_then(|now| local_heading(played_at, now)).unwrap_or_else(|| "Earlier".to_owned());
+            let played = now.as_ref().and_then(|now| local_heading(played_at, now)).unwrap_or_else(|| tr_noop!("Earlier").to_owned());
             if entries.iter().any(|e| e.played == played && e.track.video_id == track.video_id) {
                 continue;
             }
@@ -227,35 +230,51 @@ impl HistoryPage {
         }
         if entries.is_empty() {
             self.entries.borrow_mut().clear();
-            self.show_empty(LOCAL_EMPTY_TEXT);
+            self.show_empty(&crate::i18n::gettext(LOCAL_EMPTY_TEXT));
             return;
         }
         self.render(entries);
     }
 
+    /// Keep the plays whose title, artist or album contains the query.
+    pub fn filter_content(self: &Rc<Self>, text: &str) {
+        let query = text.trim().to_lowercase();
+        if self.query.replace(query) != *self.query.borrow() && !self.entries.borrow().is_empty() {
+            self.show_entries();
+        }
+    }
+
     fn render(self: &Rc<Self>, entries: Vec<HistoryEntry>) {
         self.loading_wrap.set_visible(false);
+        self.entries.replace(entries);
+        self.show_entries();
+    }
+
+    fn show_entries(self: &Rc<Self>) {
         // Rows an earlier render is still adding would land in the emptied page.
         let generation = self.render_generation.get().wrapping_add(1);
         self.render_generation.set(generation);
         clear_children(&self.sections_box);
         self.rows.borrow_mut().clear();
-        if entries.is_empty() {
-            self.entries.borrow_mut().clear();
-            self.show_empty(EMPTY_TEXT);
+        if self.entries.borrow().is_empty() {
+            self.show_empty(&crate::i18n::gettext(EMPTY_TEXT));
             return;
         }
-        self.empty_label.set_visible(false);
 
         // One section per heading, in the order YouTube sent them.
+        let query = self.query.borrow().clone();
         let mut sections: Vec<(String, Vec<usize>)> = Vec::new();
-        for (index, entry) in entries.iter().enumerate() {
+        for (index, entry) in self.entries.borrow().iter().enumerate().filter(|(_, e)| matches_query(&e.track, &query)) {
             match sections.last_mut() {
                 Some((title, rows)) if *title == entry.played => rows.push(index),
                 _ => sections.push((entry.played.clone(), vec![index])),
             }
         }
-        self.entries.replace(entries);
+        if sections.is_empty() {
+            self.show_empty(&tr!("No songs match your search"));
+            return;
+        }
+        self.empty_label.set_visible(false);
 
         // A few hundred rows built in one go froze the page for half a second. The
         // first screenful goes up now, the rest a few milliseconds at a time.
@@ -296,7 +315,7 @@ impl HistoryPage {
     /// A heading with an empty list under it, which `add_row` fills.
     fn add_section(self: &Rc<Self>, title: &str, indexes: &[usize]) -> gtk::ListBox {
         let section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
-        section.append(&gtk::Label::builder().label(title).css_classes(["title-3"]).halign(gtk::Align::Start).build());
+        section.append(&gtk::Label::builder().label(crate::i18n::gettext(title)).css_classes(["title-3"]).halign(gtk::Align::Start).build());
         let list = gtk::ListBox::builder().css_classes(["boxed-list", "songs-list"]).selection_mode(gtk::SelectionMode::None).build();
         let weak = Rc::downgrade(self);
         let indexes = indexes.to_vec();
@@ -336,7 +355,7 @@ impl HistoryPage {
         if index >= tracks.len() {
             return;
         }
-        self.ctx.player.play_tracks(tracks, index, false, Some(QueueSource::new(QUEUE_SOURCE, "History")), false);
+        self.ctx.player.play_tracks(tracks, index, false, Some(QueueSource::new(QUEUE_SOURCE, tr!("History"))), false);
     }
 
     /// The two entries history.py adds to a row's song menu.
@@ -345,14 +364,14 @@ impl HistoryPage {
         let video_id = self.entries.borrow().get(index).map(|entry| entry.track.video_id.0.clone()).unwrap_or_default();
 
         let weak = Rc::downgrade(self);
-        let mut extras = vec![MenuAction { first: true, ..MenuAction::new("Play", Section::Queue, move || {
+        let mut extras = vec![MenuAction { first: true, ..MenuAction::new(&tr!("Play"), Section::Queue, move || {
             if let Some(page) = weak.upgrade() {
                 page.play_from(index);
             }
         })}];
         if !self.ctx.player.state().authenticated() {
             let weak = Rc::downgrade(self);
-            extras.push(MenuAction::new("Remove from History", Section::Remove, move || {
+            extras.push(MenuAction::new(&tr!("Remove from History"), Section::Remove, move || {
                 if let Some(page) = weak.upgrade() {
                     page.ctx.local.forget_plays(&video_id);
                     page.load_local();
@@ -363,7 +382,7 @@ impl HistoryPage {
         // No token means a brand account, where YouTube offers no removal.
         if let Some(token) = token {
             let weak = Rc::downgrade(self);
-            extras.push(MenuAction::new("Remove from History", Section::Remove, move || {
+            extras.push(MenuAction::new(&tr!("Remove from History"), Section::Remove, move || {
                 if let Some(page) = weak.upgrade() {
                     page.remove_play(&video_id, &token);
                 }
@@ -418,15 +437,22 @@ fn local_heading(played_at: i64, now: &glib::DateTime) -> Option<String> {
 
 fn heading_for(days_ago: i64, month: &str) -> String {
     match days_ago {
-        ..=0 => "Today".to_owned(),
-        1 => "Yesterday".to_owned(),
-        2..=6 => "This week".to_owned(),
-        7..=13 => "Last week".to_owned(),
-        _ => month.to_owned(),
+        ..=0 => tr_noop!("Today"),
+        1 => tr_noop!("Yesterday"),
+        2..=6 => tr_noop!("This week"),
+        7..=13 => tr_noop!("Last week"),
+        _ => month,
     }
+    .to_owned()
 }
 
 /// The row's subtitle: the artists, then the album behind a dot, as the home lists write theirs.
+/// Whether a play belongs under a search. `query` is lowercase.
+fn matches_query(track: &Track, query: &str) -> bool {
+    let album = track.album.as_ref().map(|a| a.name.as_str()).unwrap_or_default();
+    query.is_empty() || [track.title.as_str(), track.artist.as_str(), album].iter().any(|text| text.to_lowercase().contains(query))
+}
+
 fn subtitle(track: &Track) -> String {
     let album = track.album.as_ref().map(|a| a.name.as_str()).unwrap_or_default();
     match (track.artist.is_empty(), album.is_empty()) {
@@ -461,6 +487,15 @@ fn clear_children(container: &gtk::Box) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_search_looks_at_title_artist_and_album() {
+        let track = Track { title: "Blinding Lights".to_owned(), artist: "The Weeknd".to_owned(), album: Some(crate::model::Named { name: "After Hours".to_owned(), id: None }), ..Track::default() };
+        for query in ["", "blinding", "weeknd", "after h"] {
+            assert!(matches_query(&track, query), "{query}");
+        }
+        assert!(!matches_query(&track, "queen"));
+    }
 
     #[test]
     fn local_plays_file_under_youtubes_headings() {

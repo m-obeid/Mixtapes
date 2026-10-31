@@ -1,12 +1,16 @@
-//! The six lyrics providers and the seam the chain calls them through.
+//! The lyrics providers and the seam the chain calls them through.
 //!
 //! `Source` is that seam: one fetch per provider, plus the match list for the three providers whose catalogs can be browsed. `Live` runs it against the network, and the chain's tests run it against a script.
 
 pub mod apple;
 pub mod betterlyrics;
 pub mod binilyrics;
+pub mod captions;
 pub mod lrclib;
 pub mod netease;
+pub mod qqmusic;
+mod qrc;
+pub mod unison;
 pub mod ytm;
 
 use std::collections::HashMap;
@@ -25,18 +29,21 @@ use crate::net::ytmusic::YtMusic;
 pub enum Provider {
     AppleMusic,
     BetterLyrics,
+    Unison,
     BiniLyrics,
     NetEase,
+    QqMusic,
     Lrclib,
+    YouTubeCaptions,
     YouTubeMusic,
 }
 
 impl Provider {
     /// Catalog order, the same as prefs::DEFAULT_PROVIDER_ORDER.
-    pub const ALL: [Provider; 6] = [Provider::AppleMusic, Provider::BetterLyrics, Provider::BiniLyrics, Provider::NetEase, Provider::Lrclib, Provider::YouTubeMusic];
+    pub const ALL: [Provider; 9] = [Provider::AppleMusic, Provider::Unison, Provider::BetterLyrics, Provider::BiniLyrics, Provider::QqMusic, Provider::NetEase, Provider::Lrclib, Provider::YouTubeCaptions, Provider::YouTubeMusic];
 
     /// The providers whose other matches can be listed, in the order the manual search walks them.
-    pub const MATCH_BROWSERS: [Provider; 3] = [Provider::AppleMusic, Provider::NetEase, Provider::Lrclib];
+    pub const MATCH_BROWSERS: [Provider; 4] = [Provider::AppleMusic, Provider::NetEase, Provider::QqMusic, Provider::Lrclib];
 
     /// Providers that carry a romanization of their own, richest first.
     pub const ROMANIZATION_SOURCES: [Provider; 2] = [Provider::NetEase, Provider::AppleMusic];
@@ -45,9 +52,12 @@ impl Provider {
         match self {
             Provider::AppleMusic => "Apple Music",
             Provider::BetterLyrics => "BetterLyrics",
+            Provider::Unison => "Unison",
             Provider::BiniLyrics => "BiniLyrics",
             Provider::NetEase => "NetEase",
+            Provider::QqMusic => "QQ Music",
             Provider::Lrclib => "LRCLIB",
+            Provider::YouTubeCaptions => "YouTube Captions",
             Provider::YouTubeMusic => "YouTube Music",
         }
     }
@@ -59,15 +69,15 @@ impl Provider {
     /// The richest shape this provider can return, which lets the chain skip one that cannot beat what it already holds.
     pub fn native_rank(self) -> u8 {
         match self {
-            Provider::AppleMusic | Provider::BetterLyrics | Provider::BiniLyrics => RANK_WORD,
-            Provider::NetEase | Provider::Lrclib => RANK_LINE,
+            Provider::AppleMusic | Provider::BetterLyrics | Provider::Unison | Provider::BiniLyrics | Provider::QqMusic => RANK_WORD,
+            Provider::NetEase | Provider::Lrclib | Provider::YouTubeCaptions => RANK_LINE,
             Provider::YouTubeMusic => RANK_PLAIN,
         }
     }
 
     /// True for the provider that looks a track up by video id instead of by title and artist.
     pub fn takes_video_id_only(self) -> bool {
-        self == Provider::YouTubeMusic
+        matches!(self, Provider::YouTubeMusic | Provider::YouTubeCaptions)
     }
 
     pub fn supports_matches(self) -> bool {
@@ -202,7 +212,8 @@ pub fn variants_or_title(title: &str) -> Vec<String> {
 
 /// A match browser label. Catalogs do send nameless rows.
 pub fn label_or_unknown(name: &str) -> String {
-    if name.is_empty() { "Unknown".to_owned() } else { name.to_owned() }
+    // Translators: a lyrics search result whose catalog entry has no title.
+    if name.is_empty() { tr!("Unknown") } else { name.to_owned() }
 }
 
 /// The providers, live.
@@ -227,7 +238,10 @@ impl Source for Live {
                 Provider::BetterLyrics => betterlyrics::fetch(&self.http, request).await,
                 Provider::BiniLyrics => binilyrics::fetch(&self.http, request).await,
                 Provider::NetEase => netease::fetch(&self.http, request).await,
+                Provider::QqMusic => qqmusic::fetch(&self.http, request).await,
                 Provider::Lrclib => lrclib::fetch(&self.http, &self.cooldowns, request).await,
+                Provider::Unison => unison::fetch(&self.http, &self.cooldowns, request).await,
+                Provider::YouTubeCaptions => captions::fetch(&self.http, request).await,
                 Provider::YouTubeMusic => {
                     let web = self.ytm.api();
                     let mobile = ytm::MobileClient::new(self.http.clone());
@@ -242,6 +256,7 @@ impl Source for Live {
             match provider {
                 Provider::AppleMusic => self.apple.matches(request, limit).await,
                 Provider::NetEase => netease::matches(&self.http, request, limit).await,
+                Provider::QqMusic => qqmusic::matches(&self.http, request, limit).await,
                 Provider::Lrclib => lrclib::matches(&self.http, request, limit).await,
                 _ => Vec::new(),
             }

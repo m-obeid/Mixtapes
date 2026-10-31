@@ -18,9 +18,11 @@ use crate::ui::marquee::MarqueeLabel;
 use crate::ui::cover::CoverImage;
 use crate::ui::context_menu::{MenuAction, Section, SongMenuOptions, show_song_menu};
 use crate::ui::widgets::add_to_playlist::AddToPlaylistPopover;
+use crate::ui::widgets::drag_scroll::DragScroll;
 
 /// Side of a row's cover, a little under the 40px of a playlist row: the sidebar is narrow.
 const COVER_SIZE: i32 = 36;
+
 
 pub struct QueuePanel {
     root: gtk::Box,
@@ -32,6 +34,7 @@ pub struct QueuePanel {
     player: Rc<Player>,
     ctx: Rc<UiContext>,
     scrolled: gtk::ScrolledWindow,
+    drag_scroll: Rc<DragScroll>,
     /// The round arrow button, up while the playing row is scrolled out of sight.
     jump_revealer: gtk::Revealer,
     jump_icon: gtk::Image,
@@ -102,6 +105,11 @@ impl QueuePanel {
         // keep the title centered, which leaves a gap as wide as them on the other side.
         let controls_start = gtk::WindowControls::builder().side(gtk::PackType::Start).visible(false).build();
         let controls_end = gtk::WindowControls::builder().side(gtk::PackType::End).visible(false).build();
+        // The traffic lights, as libadwaita's own header bars show on macOS.
+        #[cfg(target_os = "macos")]
+        for controls in [&controls_start, &controls_end] {
+            controls.set_use_native_controls(true);
+        }
         let title_row = gtk::Box::builder().spacing(6).build();
         title_row.append(&controls_start);
         title_row.append(&title_box);
@@ -110,7 +118,7 @@ impl QueuePanel {
 
         let shuffle_btn = gtk::ToggleButton::builder()
             .icon_name("media-playlist-shuffle-symbolic")
-            .tooltip_text("Shuffle Queue")
+            .tooltip_text(tr!("Shuffle Queue"))
             .build();
         state
             .bind_property("shuffle", &shuffle_btn, "active")
@@ -133,7 +141,7 @@ impl QueuePanel {
 
         let repeat_btn = gtk::Button::builder()
             .icon_name("media-playlist-consecutive-symbolic")
-            .tooltip_text("Repeat Mode")
+            .tooltip_text(tr!("Repeat Mode"))
             .build();
         state
             .bind_property("repeat", &repeat_btn, "icon-name")
@@ -161,11 +169,11 @@ impl QueuePanel {
 
         let add_btn = gtk::Button::builder()
             .icon_name("list-add-symbolic")
-            .tooltip_text("Add all to Playlist")
+            .tooltip_text(tr!("Add all to Playlist"))
             .build();
         let clear_btn = gtk::Button::builder()
             .icon_name("edit-clear-all-symbolic")
-            .tooltip_text("Clear Queue")
+            .tooltip_text(tr!("Clear Queue"))
             .build();
 
         // -- bottom bar --------------------------------------------------
@@ -204,6 +212,7 @@ impl QueuePanel {
             .css_classes(["queue-scroller"])
             .child(&list)
             .build();
+        let drag_scroll = DragScroll::attach(&list, &scrolled);
         crate::ui::suppress_hover_while_scrolling(&scrolled);
 
         // -- the way back to the playing row ------------------------------
@@ -211,7 +220,7 @@ impl QueuePanel {
         let jump_btn = gtk::Button::builder()
             // The size of the lyrics view's round button, 34px, on the dark overlay surface.
             .css_classes(["circular", "osd", "lyrics-osd-btn"])
-            .tooltip_text("Go to the Playing Song")
+            .tooltip_text(tr!("Go to the Playing Song"))
             .child(&jump_icon)
             .build();
         let jump_revealer = gtk::Revealer::builder()
@@ -240,6 +249,7 @@ impl QueuePanel {
             player: player.clone(),
             ctx,
             scrolled,
+            drag_scroll,
             jump_revealer,
             jump_icon,
             following: Cell::new(true),
@@ -403,6 +413,18 @@ impl QueuePanel {
         });
     }
 
+    /// Keep the list where it was for the next frames. The row a menu hung off is gone
+    /// with the menu, and the list must not move while focus finds a new home.
+    fn hold_scroll(self: &Rc<Self>, value: f64) {
+        let adj = self.scrolled.vadjustment();
+        let frames = Cell::new(0);
+        self.list.add_tick_callback(move |_, _| {
+            adj.set_value(value);
+            frames.set(frames.get() + 1);
+            if frames.get() < 3 { glib::ControlFlow::Continue } else { glib::ControlFlow::Break }
+        });
+    }
+
     /// Where the playing row sits in the list, as (top, height) in the adjustment's
     /// pixels. Every row is the same height, so the list's length divides evenly.
     fn current_row(&self) -> Option<(f64, f64)> {
@@ -549,7 +571,8 @@ impl QueuePanel {
             .chain_property::<QueueEntry>("artist")
             .chain_closure::<String>(glib::closure!(|_: Option<glib::Object>, artist: String| {
                 if artist.is_empty() {
-                    "Unknown".to_owned()
+                    // Translators: shown in place of the artist of a queued song that has none.
+                    tr!("Unknown")
                 } else {
                     artist
                 }
@@ -635,13 +658,19 @@ impl QueuePanel {
                 let player = self.player.clone();
                 let ctx = self.ctx.clone();
                 let row = row.clone();
+                let panel = Rc::downgrade(self);
                 Rc::new(move |x: f64, y: f64| {
                     let Some(entry) = entry_of() else { return };
                     let index = entry.index() as usize;
                     let remove = {
                         let player = player.clone();
-                        MenuAction::new("Remove from Queue", Section::Remove, move || {
-                            player.remove_from_queue(index)
+                        let panel = panel.clone();
+                        let scrolled_to = panel.upgrade().map(|p| p.scrolled.vadjustment().value());
+                        MenuAction::new(&tr!("Remove from Queue"), Section::Remove, move || {
+                            player.remove_from_queue(index);
+                            if let (Some(panel), Some(value)) = (panel.upgrade(), scrolled_to) {
+                                panel.hold_scroll(value);
+                            }
                         })
                     };
                     let opts = SongMenuOptions {
@@ -667,7 +696,7 @@ impl QueuePanel {
             row.add_controller(long);
         }
 
-        // Drag the handle, drop on another row to reorder.
+        // Drag the handle, drop on the upper or lower half of another row to reorder.
         {
             let source = gtk::DragSource::builder()
                 .actions(gdk::DragAction::MOVE)
@@ -682,12 +711,33 @@ impl QueuePanel {
                 let paintable = gtk::WidgetPaintable::new(Some(&row_for_icon));
                 source.set_icon(Some(&paintable), 0, 0);
             });
+            let panel = Rc::downgrade(self);
+            source.connect_drag_end(move |_, _, _| {
+                if let Some(panel) = panel.upgrade() {
+                    panel.drag_scroll.stop();
+                }
+            });
             handle.add_controller(source);
 
             let target = gtk::DropTarget::new(glib::Type::STRING, gdk::DragAction::MOVE);
             let entry_for_drop = entry_of.clone();
             let player = self.player.clone();
-            target.connect_drop(move |_, value, _, _| {
+            let row_for_mark = row.clone();
+            target.connect_motion(move |_, _, y| {
+                let below = y >= f64::from(row_for_mark.height()) / 2.0;
+                row_for_mark.remove_css_class(if below { "drop-above" } else { "drop-below" });
+                row_for_mark.add_css_class(if below { "drop-below" } else { "drop-above" });
+                gdk::DragAction::MOVE
+            });
+            let row_for_mark = row.clone();
+            target.connect_leave(move |_| {
+                row_for_mark.remove_css_class("drop-above");
+                row_for_mark.remove_css_class("drop-below");
+            });
+            let row_for_drop = row.clone();
+            target.connect_drop(move |_, value, _, y| {
+                row_for_drop.remove_css_class("drop-above");
+                row_for_drop.remove_css_class("drop-below");
                 let Ok(text) = value.get::<String>() else {
                     return false;
                 };
@@ -697,10 +747,9 @@ impl QueuePanel {
                 let Some(entry) = entry_for_drop() else {
                     return false;
                 };
-                let to = entry.index() as usize;
-                if from != to {
-                    player.move_queue_item(from, to);
-                }
+                // The lower half of a row means after it.
+                let below = y >= f64::from(row_for_drop.height()) / 2.0;
+                player.move_queue_item(from, entry.index() as usize + usize::from(below));
                 true
             });
             row.add_controller(target);
@@ -719,12 +768,13 @@ impl QueuePanel {
 
 /// The header caption: "42 tracks · 2 h 31 min". Tracks of unknown length add nothing to the time.
 fn queue_summary(tracks: u32, seconds: u32) -> String {
-    let count = if tracks == 1 { "1 track".to_owned() } else { format!("{tracks} tracks") };
     let minutes = seconds / 60;
     match (minutes / 60, minutes % 60) {
-        (0, 0) => count,
-        (0, m) => format!("{count} · {m} min"),
-        (h, m) => format!("{count} · {h} h {m} min"),
+        (0, 0) => trn!("{n} track", "{n} tracks", tracks),
+        // Translators: the queue's track count and its length, {m} is minutes.
+        (0, m) => trn!("{n} track · {m} min", "{n} tracks · {m} min", tracks, m),
+        // Translators: the queue's track count and its length, {h} is hours and {m} is minutes.
+        (h, m) => trn!("{n} track · {h} h {m} min", "{n} tracks · {h} h {m} min", tracks, h, m),
     }
 }
 

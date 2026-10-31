@@ -11,8 +11,8 @@ use crate::lyrics::ttml::ttml_to_lines;
 
 const SOURCE: &str = "BetterLyrics";
 const URL: &str = "https://lyrics-api.boidu.dev/getLyrics";
-/// The endpoint answers 403 to generic user agents. The BetterLyrics browser extension identifies itself this way and the API mirrors that as a soft gate.
-const USER_AGENT: &str = "BetterLyrics/1.0";
+/// The app's own name. The extension's access is not for other projects, and cached lyrics are public to anyone.
+const USER_AGENT: &str = "Mixtapes (https://github.com/m-obeid/Mixtapes)";
 const TIMEOUT: Duration = Duration::from_secs(6);
 
 /// A response body as a result.

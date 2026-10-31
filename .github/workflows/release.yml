@@ -1,0 +1,128 @@
+name: Release
+
+# When the newest <release> in the metainfo has no GitHub release yet, this
+# builds the app on Arch, publishes it, and updates mixtapes-bin on the AUR.
+# Arch, because the binary links the system libraries an Arch install has.
+# A release therefore goes out by merging a metainfo bump to main.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - com.pocoguy.Muse.metainfo.xml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      fresh: ${{ steps.version.outputs.fresh }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(grep -oP '(?<=<release version=")[^"]+' com.pocoguy.Muse.metainfo.xml | head -1)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+            echo "$TAG is already released"
+          else
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.fresh == 'true'
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install the build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed git rust gtk4 libadwaita webkitgtk-6.0 openssl gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad sqlite clang cmake nasm
+
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Test
+        run: cargo test --release --locked
+
+      - name: Pack
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          root=pack/usr
+          install -Dm755 target/release/mixtapes "$root/bin/mixtapes"
+          ln -sf mixtapes "$root/bin/muse"
+          install -Dm644 com.pocoguy.Muse.desktop "$root/share/applications/com.pocoguy.Muse.desktop"
+          install -Dm644 com.pocoguy.Muse.metainfo.xml "$root/share/metainfo/com.pocoguy.Muse.metainfo.xml"
+          install -Dm644 assets/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg "$root/share/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg"
+          install -Dm644 assets/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg "$root/share/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg"
+          tar --zstd --owner=0 --group=0 -cf "mixtapes-$TAG-x86_64.tar.zst" -C pack usr
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mixtapes-linux
+          path: mixtapes-*.tar.zst
+
+  publish:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mixtapes-linux
+
+      # release-notes/<version>.md is the full changelog. The app shows the short notes in the metainfo.
+      - name: Write the release notes
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          if [ -f "release-notes/$TAG.md" ]; then
+            cp "release-notes/$TAG.md" notes.md
+            exit 0
+          fi
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          release = ET.parse("com.pocoguy.Muse.metainfo.xml").getroot().find("releases/release")
+          description = release.find("description")
+          out = [p.text for p in description.findall("p")]
+          for title, items in zip(["Changes", "Fixes"], description.findall("ul")):
+              out += [f"### {title}"] + [f"- {li.text}" for li in items.findall("li")]
+          open("notes.md", "w").write("\n\n".join(out))
+          PY
+
+      - name: Publish on GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+        run: gh release create "$TAG" "mixtapes-$TAG-x86_64.tar.zst" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md --prerelease
+
+      - name: Fill in the PKGBUILD
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          SHA=$(sha256sum "mixtapes-$TAG-x86_64.tar.zst" | cut -d' ' -f1)
+          sed -e "s/@PKGVER@/$(echo "$TAG" | tr '-' '.')/" -e "s/@TAG@/$TAG/" -e "s/@SHA256@/$SHA/" aur-package-bin/PKGBUILD.in > aur-package-bin/PKGBUILD
+
+      - name: Publish on the AUR
+        uses: KSXGitHub/github-actions-deploy-aur@master
+        with:
+          pkgname: mixtapes-bin
+          pkgbuild: aur-package-bin/PKGBUILD
+          assets: aur-package-bin/mixtapes-bin.install
+          commit_username: ${{ github.repository_owner }}
+          commit_email: ${{ github.repository_owner }}@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ needs.check.outputs.tag }}"

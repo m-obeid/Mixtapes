@@ -284,14 +284,23 @@ pub async fn get_artist(api: Arc<dyn Browse>, channel_id: &str) -> Result<Artist
     if let (Some(items), Some(section)) = (singles, artist.singles.as_mut()) {
         section.results = items;
     }
+    for section in [artist.albums.as_mut(), artist.singles.as_mut()].into_iter().flatten() {
+        newest_first(&mut section.results);
+    }
     Ok(artist)
+}
+
+/// Sort by release year, newest on top. YouTube keeps to that order for the first rows only.
+/// A row without a year goes last, and rows of one year keep YouTube's order.
+pub fn newest_first(items: &mut [MediaItem]) {
+    items.sort_by_key(|item| std::cmp::Reverse(item.year.as_deref().and_then(|y| y.parse::<u32>().ok()).unwrap_or(0)));
 }
 
 /// Port of _resolve_artist_from_player's lookup: the channel behind a video, from the player response.
 pub async fn channel_of_video(api: &dyn Browse, video_id: &str) -> Result<Option<(String, String)>, NetError> {
     let response = api.post("player", json!({ "videoId": video_id })).await?;
     let channel = owned_at(&response, "/videoDetails/channelId");
-    let author = owned_at(&response, "/videoDetails/author").unwrap_or_else(|| "Artist".to_owned());
+    let author = owned_at(&response, "/videoDetails/author").unwrap_or_else(|| tr!("Artist"));
     Ok(channel.map(|c| (c, author)))
 }
 
@@ -322,6 +331,14 @@ pub async fn unsubscribe(api: &dyn Browse, channel_id: &str) -> Result<(), NetEr
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn newest_releases_lead_and_rows_without_a_year_trail() {
+        let item = |id: &str, year: Option<&str>| crate::model::MediaItem { id: id.to_owned(), year: year.map(str::to_owned), ..Default::default() };
+        let mut items = [item("none", None), item("old", Some("2001")), item("new", Some("2020")), item("also-old", Some("2001"))];
+        super::newest_first(&mut items);
+        assert_eq!(items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["new", "old", "also-old", "none"]);
+    }
+
     use super::*;
 
     /// An artist with a long singles list. The page asks for ten and must not wait for the rest.

@@ -18,6 +18,10 @@ use crate::ui::widgets::lyrics_view::LyricsView;
 use crate::ui::widgets::transport::Transport;
 use crate::ui::widgets::visualizer::Visualizer;
 
+/// When the cover moves beside the controls. Short alone is not enough: with the queue
+/// open there can be height for a big cover and no width left for the controls.
+const SHORT_LAYOUT: &str = "max-height: 480px and min-aspect-ratio: 16/9 and min-width: 620px";
+
 pub struct DesktopCoverView {
     root: adw::Bin,
     toggle_nav: adw::ToggleGroup,
@@ -63,14 +67,14 @@ impl DesktopCoverView {
         toggle_nav.add(
             adw::Toggle::builder()
                 .name("player")
-                .label("Player")
+                .label(tr!("Player"))
                 .icon_name("folder-music-symbolic")
                 .build(),
         );
         toggle_nav.add(
             adw::Toggle::builder()
                 .name("lyrics")
-                .label("Lyrics")
+                .label(tr!("Lyrics"))
                 .icon_name("format-justify-fill-symbolic")
                 .build(),
         );
@@ -107,7 +111,7 @@ impl DesktopCoverView {
             .valign(gtk::Align::Center)
             .build();
         let title = MarqueeLabel::new();
-        title.set_label("Not Playing");
+        title.set_label(&tr!("Not Playing"));
         title.add_css_class("title-3");
         let artists_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -183,9 +187,11 @@ impl DesktopCoverView {
             .hexpand(true)
             .valign(gtk::Align::Center)
             .build();
+        let details = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).hexpand(true).valign(gtk::Align::Center).build();
+        details.append(&meta_row);
+        details.append(&controls_overlay);
         player_controls.append(&cover_frame);
-        player_controls.append(&meta_row);
-        player_controls.append(&controls_overlay);
+        player_controls.append(&details);
         let cover_column = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .hexpand(true)
@@ -237,14 +243,14 @@ impl DesktopCoverView {
             .icon_name("go-down-symbolic")
             .css_classes(["flat"])
             .valign(gtk::Align::Center)
-            .tooltip_text("Collapse player")
+            .tooltip_text(tr!("Collapse player"))
             .build();
         // A toggle, so it lights up while the queue is open, as the player bar's does.
         let queue_btn = gtk::ToggleButton::builder()
             .icon_name("music-queue-symbolic")
             .css_classes(["flat"])
             .valign(gtk::Align::Center)
-            .tooltip_text("Queue")
+            .tooltip_text(tr!("Queue"))
             .build();
         let end_buttons = gtk::Box::builder().spacing(6).build();
         end_buttons.append(&queue_btn);
@@ -273,6 +279,19 @@ impl DesktopCoverView {
         ));
         collapse_bp.add_setter(&split, "collapsed", Some(&true.to_value()));
         bp_bin.add_breakpoint(collapse_bp);
+        // A phone on its side: the cover beside the controls, and lyrics take the whole view.
+        let short_bp = adw::Breakpoint::new(adw::BreakpointCondition::parse(SHORT_LAYOUT).expect("static condition"));
+        short_bp.add_setter(&split, "collapsed", Some(&true.to_value()));
+        short_bp.add_setter(&player_controls, "orientation", Some(&gtk::Orientation::Horizontal.to_value()));
+        short_bp.add_setter(&player_controls, "spacing", Some(&24i32.to_value()));
+        short_bp.add_setter(&player_controls, "margin-top", Some(&0i32.to_value()));
+        short_bp.add_setter(&cover_frame, "hexpand", Some(&false.to_value()));
+        short_bp.add_setter(&cover_frame, "margin-bottom", Some(&0i32.to_value()));
+        short_bp.add_setter(&cover_clamp, "maximum-size", Some(&900i32.to_value()));
+        short_bp.add_setter(&cover_outer, "margin-start", Some(&24i32.to_value()));
+        short_bp.add_setter(&cover_outer, "margin-end", Some(&24i32.to_value()));
+        short_bp.add_setter(&cover_outer, "margin-bottom", Some(&0i32.to_value()));
+        bp_bin.add_breakpoint(short_bp);
         toolbar.set_content(Some(&bp_bin));
 
         let this = Rc::new(Self {
@@ -505,10 +524,10 @@ impl DesktopCoverView {
     fn refresh_metadata(&self) {
         let state = self.ctx.player.state();
         let title = state.title();
-        self.title.set_label(if title.is_empty() {
-            "Not Playing"
+        self.title.set_label(&if title.is_empty() {
+            tr!("Not Playing")
         } else {
-            &title
+            title.clone()
         });
         self.cover.load_track(&state.video_id(), &state.thumbnail_url());
         while let Some(child) = self.artists_box.first_child() {
@@ -583,7 +602,7 @@ impl DesktopCoverView {
             return;
         };
         let this = self.clone();
-        let extras = vec![crate::ui::context_menu::MenuAction::new("Stream Info (Debug)", crate::ui::context_menu::Section::Debug, move || this.show_stream_info())];
+        let extras = vec![crate::ui::context_menu::MenuAction::new(&tr!("Stream Info (Debug)"), crate::ui::context_menu::Section::Debug, move || this.show_stream_info())];
         let opts = crate::ui::context_menu::SongMenuOptions {
             prefix: "cv",
             hide: ["play_next", "add_to_queue", "goto_artist", "goto_album"].as_slice(),

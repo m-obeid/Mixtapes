@@ -9,19 +9,34 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
 use crate::model::Track;
+use crate::net::browse::Browse;
 use crate::paths::Paths;
 
 /// The pref that turns the swap off, for a listener who wants the videos as YouTube lists them.
 pub const PREF: &str = "prefer_song_versions";
 
 static PATH: OnceLock<PathBuf> = OnceLock::new();
+static SEARCH_CLIENT: OnceLock<Arc<dyn Browse>> = OnceLock::new();
 static ENABLED: AtomicBool = AtomicBool::new(true);
+/// The other way round: a song version to the videos that lead to it.
+static VIDEOS: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static KNOWN: LazyLock<Mutex<HashMap<String, Option<Track>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Read what earlier runs found. Without this call nothing touches the disk, which is how the tests run.
+/// Hand over a client without a session. The song search that finds a twin goes
+/// through it: sent with the session, YouTube files it in the account's search history.
+pub fn set_search_client(client: Arc<dyn Browse>) {
+    let _ = SEARCH_CLIENT.set(client);
+}
+
+/// The client for that search, once the app has one.
+pub fn search_client() -> Option<Arc<dyn Browse>> {
+    SEARCH_CLIENT.get().cloned()
+}
+
 pub fn init(paths: &Paths) {
     set_enabled(paths.read_prefs().get(PREF).and_then(|v| v.as_bool()).unwrap_or(true));
     let path = paths.cache_dir.join("audio_twins.json");
@@ -30,6 +45,7 @@ pub fn init(paths: &Paths) {
         for (video_id, twin) in saved {
             // A twin is its own audio version, so it is never asked about.
             known.insert(twin.video_id.0.clone(), None);
+            link(&video_id, &twin);
             known.insert(video_id, Some(twin));
         }
     }
@@ -63,8 +79,26 @@ pub fn remember(video_id: &str, twin: Option<Track>) {
     let mut known = KNOWN.lock().unwrap();
     if let Some(twin) = &twin {
         known.insert(twin.video_id.0.clone(), None);
+        link(video_id, twin);
     }
     known.insert(video_id.to_owned(), twin);
+}
+
+fn link(video_id: &str, twin: &Track) {
+    let mut videos = VIDEOS.lock().unwrap();
+    let list = videos.entry(twin.video_id.0.clone()).or_default();
+    if !list.iter().any(|v| v == video_id) {
+        list.push(video_id.to_owned());
+    }
+}
+
+/// The ids the same song goes by besides this one: its song version, or the videos it is the song version of.
+pub fn other_ids(video_id: &str) -> Vec<String> {
+    let mut ids = VIDEOS.lock().unwrap().get(video_id).cloned().unwrap_or_default();
+    if let Some(Some(twin)) = known(video_id) {
+        ids.push(twin.video_id.0);
+    }
+    ids
 }
 
 /// Write the found twins to disk.
@@ -78,5 +112,19 @@ pub fn save() {
             }
         }
         Err(err) => tracing::warn!(%err, "audio twins would not serialize"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::VideoId;
+
+    #[test]
+    fn a_video_and_its_song_version_know_each_other() {
+        remember("other-ids-video", Some(Track { video_id: VideoId("other-ids-song".to_owned()), ..Track::default() }));
+        assert_eq!(other_ids("other-ids-video"), ["other-ids-song"]);
+        assert_eq!(other_ids("other-ids-song"), ["other-ids-video"]);
+        assert!(other_ids("other-ids-unrelated").is_empty());
     }
 }

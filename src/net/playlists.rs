@@ -116,8 +116,9 @@ pub async fn get_playlist(api: &dyn Browse, playlist_id: &str, limit: Option<usi
     apply_known_audio_versions(&mut details.tracks);
     details.sum_duration();
     if playlist_id == "LM" {
-        details.title = "Your Likes".to_owned();
-        details.description = "Your liked songs from YouTube Music.".to_owned();
+        // English here, since the page caches these. The page passes them to i18n::gettext where they are shown.
+        details.title = LIKED_TITLE.to_owned();
+        details.description = LIKED_DESCRIPTION.to_owned();
     }
     Ok(details)
 }
@@ -426,7 +427,8 @@ async fn search_audio_version(api: &dyn Browse, title: &str, artists: &[String],
         Some(a) => format!("{title} {a}"),
         None => title.to_owned(),
     };
-    let results = search(api, &query, Some(SearchFilter::Songs)).await?;
+    let search_client = twins::search_client();
+    let results = search(search_client.as_deref().unwrap_or(api), &query, Some(SearchFilter::Songs)).await?;
     let by_artist = |item: &&MediaItem| {
         let names: Vec<String> = item.artists.iter().map(|a| a.name.to_lowercase()).collect();
         item.kind == ItemKind::Song && (artists.is_empty() || artists.iter().any(|a| names.contains(a)))
@@ -440,7 +442,18 @@ async fn search_audio_version(api: &dyn Browse, title: &str, artists: &[String],
     if !artists.is_empty() && let Some(item) = results.items.iter().filter(by_artist).filter(same_length).find(|i| normalize_title(without_featuring(&i.title)) == wanted) {
         return Ok(item.to_track());
     }
+    // Japanese songs are often listed as "Original - Romanized (feat. X)", where a video has only one half.
+    // Spelled out that fully it is the same song even when the video runs longer than the audio.
+    if !artists.is_empty() && let Some(item) = results.items.iter().filter(by_artist).find(|i| names_a_half(&i.title, &wanted)) {
+        return Ok(item.to_track());
+    }
     Ok(None)
+}
+
+/// Whether either half of an "Original - Romanized" title is `wanted`, normalized.
+fn names_a_half(title: &str, wanted: &str) -> bool {
+    let Some((first, second)) = without_featuring(title).split_once(" - ") else { return false };
+    !wanted.is_empty() && (normalize_title(first) == wanted || normalize_title(second) == wanted)
 }
 
 /// How far apart, in seconds, a video and a song may run and still be one recording when only the featured name differs.
@@ -602,9 +615,40 @@ pub async fn remove_playlist_items(api: &dyn Browse, playlist_id: &str, items: &
     Ok(())
 }
 
+/// Move rows, in this order, in front of `next`, or to the end without one. Rows go by setVideoId.
+pub async fn move_playlist_items(api: &dyn Browse, playlist_id: &str, moved: &[String], next: Option<&str>) -> Result<(), NetError> {
+    let actions: Vec<Value> = moved
+        .iter()
+        .map(|set_id| {
+            let mut action = json!({ "action": "ACTION_MOVE_VIDEO_BEFORE", "setVideoId": set_id });
+            if let Some(next) = next {
+                action["movedSetVideoIdSuccessor"] = json!(next);
+            }
+            action
+        })
+        .collect();
+    let response = api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
+    edit_status(&response)
+}
+
+/// Which of these tracks the playlist already holds, by their own id or their song version's.
+pub async fn tracks_already_in(api: &dyn Browse, playlist_id: &str, video_ids: &[String]) -> Result<Vec<String>, NetError> {
+    let held = get_playlist(api, playlist_id, None).await?.tracks;
+    Ok(already_held(held.iter().map(|t| t.video_id.as_str()), video_ids))
+}
+
+fn already_held<'a>(held: impl Iterator<Item = &'a str>, wanted: &[String]) -> Vec<String> {
+    let held: std::collections::HashSet<&str> = held.collect();
+    wanted.iter().filter(|id| held.contains(id.as_str()) || held.contains(twins::preferred_id(id).as_str())).cloned().collect()
+}
+
+/// What Liked Music is called in the app, in English: pages pass these to `i18n::gettext`.
+pub const LIKED_TITLE: &str = tr_noop!("Your Likes");
+pub const LIKED_DESCRIPTION: &str = tr_noop!("Your liked songs from YouTube Music.");
+
 /// Port of MusicClient.add_playlist_items. Single adds swap a music video
 /// for its song version first, bulk adds do not.
-pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: Vec<String>, swap_to_audio: Option<bool>) -> Result<(), NetError> {
+pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: Vec<String>, swap_to_audio: Option<bool>, allow_duplicates: bool) -> Result<(), NetError> {
     let swap = swap_to_audio.unwrap_or(video_ids.len() == 1);
     let mut ids = Vec::with_capacity(video_ids.len());
     for vid in video_ids {
@@ -624,11 +668,30 @@ pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: 
     if ids.is_empty() {
         return Ok(());
     }
-    // Port of the crate's add_playlist_items body. DEDUPE_OPTION_SKIP is what
-    // "allow_duplicates: false" means to YouTube.
-    let actions: Vec<Value> = ids.iter().map(|vid| json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": vid, "dedupeOption": "DEDUPE_OPTION_SKIP" })).collect();
-    api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
-    Ok(())
+    let response = api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": add_actions(&ids, allow_duplicates) })).await?;
+    edit_status(&response)
+}
+
+/// A refused edit still answers 200, so the verdict is in the body: a song already there comes back as STATUS_FAILED.
+fn edit_status(response: &Value) -> Result<(), NetError> {
+    match response.get("status").and_then(Value::as_str) {
+        Some(status) if !status.contains("SUCCEEDED") => Err(message(status)),
+        _ => Ok(()),
+    }
+}
+
+/// DEDUPE_OPTION_SKIP skips YouTube's duplicate check, so the song goes in a second
+/// time. Without it YouTube refuses a song the list holds. ytmusicapi for Python has this right, the Rust crate has it backwards.
+fn add_actions(ids: &[String], allow_duplicates: bool) -> Vec<Value> {
+    ids.iter()
+        .map(|vid| {
+            let mut action = json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": vid });
+            if allow_duplicates {
+                action["dedupeOption"] = json!("DEDUPE_OPTION_SKIP");
+            }
+            action
+        })
+        .collect()
 }
 
 /// Port of create_playlist: a new playlist, returning its id.
@@ -1092,6 +1155,29 @@ mod tests {
         assert_eq!(rows[0].title, "Song");
         assert_eq!(twins::preferred_id("twin-video"), "twin-song");
         assert_eq!(find_audio_version(&Silent, "twin-video").await.unwrap().unwrap().video_id.as_str(), "twin-song");
+    }
+
+    #[test]
+    fn only_an_add_anyway_skips_the_duplicate_check() {
+        let ids = ["a".to_owned()];
+        assert_eq!(add_actions(&ids, true)[0]["dedupeOption"], "DEDUPE_OPTION_SKIP");
+        assert!(add_actions(&ids, false)[0].get("dedupeOption").is_none());
+    }
+
+    #[test]
+    fn either_half_of_a_two_part_title_names_the_song() {
+        let wanted = normalize_title("M@GICAL CURE! LOVE SHOT!");
+        assert!(names_a_half("M@GICAL☆CURE! LOVE SHOT! - M@GICAL CURE! LOVE SHOT! (feat. Hatsune Miku)", &wanted));
+        assert!(names_a_half("怪物 - Monster", &normalize_title("Monster")));
+        assert!(!names_a_half("M@GICAL CURE! LOVE SHOT!", &wanted), "one part is not two");
+        assert!(!names_a_half("Love Shot - Remix", &wanted));
+    }
+
+    #[test]
+    fn a_song_counts_as_held_under_its_own_id() {
+        let wanted = ["a".to_owned(), "b".to_owned()];
+        assert_eq!(already_held(["b", "c"].into_iter(), &wanted), ["b"]);
+        assert!(already_held(std::iter::empty(), &wanted).is_empty());
     }
 
     #[test]
