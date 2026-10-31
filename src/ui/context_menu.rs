@@ -233,7 +233,7 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
 
 /// Port of _add_to_playlist: pick a playlist in the popover, then add it where it belongs.
 /// Ask, then delete the files of these songs. One song goes without asking, a selection is easy to misjudge.
-fn confirm_remove_downloads(ctx: &Rc<UiContext>, anchor: &gtk::Widget, ids: Vec<String>) {
+pub fn confirm_remove_downloads(ctx: &Rc<UiContext>, anchor: &gtk::Widget, ids: Vec<String>) {
     let count = ids.len();
     let dialog = adw::AlertDialog::builder().heading(trn!("Remove {n} Download?", "Remove {n} Downloads?", count)).body(tr!("The files are deleted from this device. The songs stay in your library and playlists.")).build();
     dialog.add_response("cancel", &tr!("Cancel"));

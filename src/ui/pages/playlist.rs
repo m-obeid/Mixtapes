@@ -695,6 +695,7 @@ impl PlaylistPage {
         add("save_to_library", Box::new(|p| p.rate_library(LikeStatus::Like)));
         add("remove_from_library", Box::new(|p| p.rate_library(LikeStatus::Indifferent)));
         add("download_all", Box::new(|p| p.on_download_all()));
+        add("remove_downloads", Box::new(|p| p.on_remove_downloads()));
         add("start_radio", Box::new(|p| p.on_start_radio()));
         add("play_all_next", Box::new(|p| p.on_play_all_next()));
         add("add_all_to_queue", Box::new(|p| p.on_add_all_to_queue()));
@@ -1830,6 +1831,7 @@ impl PlaylistPage {
             self.more_menu.append(Some(&tr!("Copy Link")), Some("page.copy_link"));
         }
         self.more_menu.append(Some(&tr!("Download All")), Some("page.download_all"));
+        self.more_menu.append(Some(&tr!("Remove All Downloads")), Some("page.remove_downloads"));
         if is_owned {
             self.more_menu.append(Some(&tr!("Edit Playlist")), Some("page.edit"));
             self.more_menu.append(Some(&tr!("Delete Playlist")), Some("page.delete"));
@@ -1879,6 +1881,16 @@ impl PlaylistPage {
         }
         let title = self.title_text.borrow().clone();
         self.ctx.download(tracks, &title, &self.playlist_id().unwrap_or_default());
+    }
+
+    /// Every download of this list goes. The same file stays gone from any other list that holds the song.
+    fn on_remove_downloads(&self) {
+        let downloaded: Vec<String> = self.all_tracks().into_iter().map(|t| t.video_id.0).filter(|id| self.ctx.downloads.is_downloaded(id)).collect();
+        if downloaded.is_empty() {
+            toast(&self.stack, &tr!("Nothing here is downloaded"));
+            return;
+        }
+        crate::ui::context_menu::confirm_remove_downloads(&self.ctx, self.stack.upcast_ref(), downloaded);
     }
 
     fn on_show_add_all_to_playlist(self: &Rc<Self>) {
