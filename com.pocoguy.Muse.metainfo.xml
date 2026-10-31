@@ -91,14 +91,7 @@
 
     <release version="2026-10-31.0" date="2026-10-31">
       <description>
-        <ul>
-          <li>Mixtapes runs on macOS</li>
-          <li>Translations, starting with German</li>
-          <li>Volume normalization, like on YouTube</li>
-          <li>Word by word lyrics from QQ Music and Unison, and you can fix their timing or write your own</li>
-          <li>Reorder your playlists, choose your download folder and search your listening history</li>
-          <li>Liking a song no longer crashes the app</li>
-        </ul>
+        <p>Mixtapes comes to macOS and speaks German now, with more languages to come, lyrics now have new sources with more word-timed results, and the like button in the player no longer crashes the app.</p>
       </description>
     </release>
 
