@@ -54,8 +54,10 @@ async fn lookup(http: &reqwest::Client, cooldowns: &Cooldowns, query: &[(&str, &
 }
 
 pub async fn fetch(http: &reqwest::Client, cooldowns: &Cooldowns, request: Request<'_>) -> Option<LyricsResult> {
-    if !request.video_id.is_empty() {
-        if let Some(found) = lookup(http, cooldowns, &[("v", request.video_id)]).await.as_ref().and_then(parse) {
+    // Entries hang off one upload, so a song and its music video can each find the other's.
+    let ids = (!request.video_id.is_empty()).then(|| request.video_id.to_owned()).into_iter().chain(crate::net::twins::other_ids(request.video_id));
+    for id in ids {
+        if let Some(found) = lookup(http, cooldowns, &[("v", &id)]).await.as_ref().and_then(parse) {
             return Some(found);
         }
     }
