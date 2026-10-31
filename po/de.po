@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 20:16+0100\n"
+"POT-Creation-Date: 2026-10-31 20:42+0100\n"
 "PO-Revision-Date: 2026-10-07 13:09+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -633,30 +633,30 @@ msgstr "Radio"
 msgid "Radio of {seed_name}"
 msgstr "Radio von {seed_name}"
 
-#: src/scrobbler.rs:622
+#: src/scrobbler.rs:640
 msgid "This build has no Last.fm API credentials"
 msgstr "Dieser Build enthält keine Last.fm-API-Zugangsdaten"
 
-#: src/scrobbler.rs:627
+#: src/scrobbler.rs:645
 msgid "Last.fm returned no token"
 msgstr "Last.fm hat kein Token geliefert"
 
 #. Translators: follows the service name and a colon, as in "ListenBrainz: user token rejected".
-#: src/scrobbler.rs:668
+#: src/scrobbler.rs:686
 msgid "user token rejected"
 msgstr "Nutzertoken abgelehnt"
 
-#: src/scrobbler.rs:724
+#: src/scrobbler.rs:742
 msgid "Enter your ListenBrainz user token"
 msgstr "Gib dein ListenBrainz-Nutzertoken ein"
 
 #. Translators: follows the service name and a colon, as in "ListenBrainz: that token is not valid".
-#: src/scrobbler.rs:737 src/scrobbler.rs:744
+#: src/scrobbler.rs:755 src/scrobbler.rs:762
 msgid "that token is not valid"
 msgstr "dieses Token ist ungültig"
 
 #. Translators: follows the service name and a colon, as in "Last.fm: unknown error".
-#: src/scrobbler.rs:837
+#: src/scrobbler.rs:855
 msgid "unknown error"
 msgstr "unbekannter Fehler"
 
@@ -1461,7 +1461,7 @@ msgstr "Früher"
 msgid "No songs match your search"
 msgstr "Keine Songs passen zu deiner Suche"
 
-#: src/ui/pages/history.rs:358
+#: src/ui/pages/history.rs:358 src/ui/pages/home.rs:366
 msgid "History"
 msgstr "Verlauf"
 

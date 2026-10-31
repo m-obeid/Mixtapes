@@ -362,6 +362,14 @@ impl HomePage {
             }
             None => header.append(&title_label),
         }
+        if title == crate::net::local_feed::LISTEN_AGAIN_TITLE {
+            let history = gtk::Button::builder().label(tr!("History")).action_name("win.open-history").css_classes(["flat", "dim-label", "caption"]).valign(gtk::Align::Center).build();
+            let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).build();
+            header.set_hexpand(true);
+            row.append(&header);
+            row.append(&history);
+            return row;
+        }
         header
     }
 
