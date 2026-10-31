@@ -3,7 +3,7 @@
 //! appearances and related artists, each with its View All or Load More.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -660,10 +660,10 @@ impl ArtistPage {
             btn_box.append(&spinner);
             let weak = Rc::downgrade(self);
             let title_c = title.to_owned();
-            let section_c = section.clone();
+            let (list_c, btn_box_c) = (list.clone(), btn_box.clone());
             load_more.connect_clicked(move |btn| {
                 if let Some(p) = weak.upgrade() {
-                    p.on_load_more_songs(&title_c, &section_c, &spinner, btn);
+                    p.on_load_more_songs(&title_c, &list_c, &btn_box_c, &spinner, btn);
                 }
             });
             section_box.append(&btn_box);
@@ -868,20 +868,29 @@ impl ArtistPage {
     }
 
     /// Port of the Top Songs branch of on_load_more_clicked: more rows inline,
-    /// then the full playlist behind the shelf.
+    /// fetching the full list once the loaded ones run out. Rows join the list
+    /// in place: rebuilding the section dropped the focused button, and the
+    /// page scrolled back to the top with it.
     fn on_load_more_songs(
         self: &Rc<Self>,
         title: &str,
-        section: &SongSection,
+        list: &gtk::ListBox,
+        btn_box: &gtk::Box,
         spinner: &adw::Spinner,
         btn: &gtk::Button,
     ) {
-        let limit = self.limit_for(title, 10);
+        let limit = self.limit_for(title, 5);
+        let section = self.data.borrow().as_ref().and_then(|d| d.songs.clone());
+        let Some(section) = section else { return };
         if section.results.len() > limit {
+            let shown = limit + 20;
             self.section_limits
                 .borrow_mut()
-                .insert(title.to_owned(), limit + 20);
-            self.update_ui();
+                .insert(title.to_owned(), shown);
+            for track in section.results.iter().take(shown).skip(limit) {
+                list.append(&self.build_song_row(track));
+            }
+            btn_box.set_visible(section.results.len() > shown || section.browse_id.is_some());
             return;
         }
         let Some(browse_id) = section.browse_id.clone() else {
@@ -896,7 +905,7 @@ impl ArtistPage {
             .net
             .spawn(async move { playlists::get_playlist(&api, &browse, None).await });
         let weak = Rc::downgrade(self);
-        let (spinner, btn, title) = (spinner.clone(), btn.clone(), title.to_owned());
+        let (list, btn_box, spinner, btn, title) = (list.clone(), btn_box.clone(), spinner.clone(), btn.clone(), title.to_owned());
         glib::spawn_future_local(async move {
             let Some(page) = weak.upgrade() else { return };
             let tracks = match handle.await {
@@ -907,20 +916,29 @@ impl ArtistPage {
                 }
                 Err(_) => Vec::new(),
             };
+            spinner.set_visible(false);
+            btn.set_sensitive(true);
             if tracks.is_empty() {
-                spinner.set_visible(false);
-                btn.set_sensitive(true);
                 return;
             }
-            let count = tracks.len();
+            // The rows on screen stay where they are, the full list continues after them.
+            let shown = page.limit_for(&title, 5);
+            let mut results: Vec<Track> = section.results.iter().take(shown).cloned().collect();
+            let seen: HashSet<String> = results.iter().map(|t| t.video_id.0.clone()).collect();
+            let fresh: Vec<Track> = tracks.into_iter().filter(|t| !seen.contains(&t.video_id.0)).collect();
+            for track in &fresh {
+                list.append(&page.build_song_row(track));
+            }
+            results.extend(fresh);
+            let count = results.len();
             if let Some(data) = page.data.borrow_mut().as_mut() {
                 if let Some(songs) = data.songs.as_mut() {
-                    songs.results = tracks;
+                    songs.results = results;
                     songs.browse_id = None;
                 }
             }
             page.section_limits.borrow_mut().insert(title, count);
-            page.update_ui();
+            btn_box.set_visible(false);
         });
     }
 
