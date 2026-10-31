@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 19:21+0100\n"
+"POT-Creation-Date: 2026-10-31 19:23+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -237,7 +237,7 @@ msgstr ""
 msgid "On this device"
 msgstr ""
 
-#: src/local_library.rs:521 src/ui/pages/library.rs:788
+#: src/local_library.rs:521 src/ui/pages/library.rs:846
 #: src/ui/pages/playlist.rs:3010
 #, rust-format
 msgid "{n} song"
@@ -300,7 +300,7 @@ msgstr ""
 #. Translators: {count} is the number as YouTube words it, for example "1,234".
 #. Translators: {count} is a number YouTube sends as text, like 1,204
 #. Translators: {count} is the number as YouTube words it, for example "1,234".
-#: src/model.rs:350 src/ui/pages/library.rs:790 src/ui/widgets/song_list.rs:44
+#: src/model.rs:350 src/ui/pages/library.rs:848 src/ui/widgets/song_list.rs:44
 #, rust-format
 msgid "{count} songs"
 msgstr ""
@@ -827,8 +827,8 @@ msgid ""
 msgstr ""
 
 #: src/ui/context_menu.rs:239 src/ui/crop_dialog.rs:146
-#: src/ui/download_queue.rs:88 src/ui/pages/library.rs:1005
-#: src/ui/pages/library.rs:1043 src/ui/pages/playlist.rs:2410
+#: src/ui/download_queue.rs:88 src/ui/pages/library.rs:1063
+#: src/ui/pages/library.rs:1101 src/ui/pages/playlist.rs:2410
 #: src/ui/pages/playlist.rs:2586 src/ui/playlist_ops.rs:50
 #: src/ui/preferences.rs:566 src/ui/preferences.rs:928
 #: src/ui/preferences.rs:986 src/ui/widgets/lyrics_view.rs:764
@@ -1207,7 +1207,7 @@ msgid "Unknown Artist"
 msgstr ""
 
 #. Translators: {count} is a short number YouTube sends, like 1.2M
-#: src/ui/pages/artist.rs:493 src/ui/pages/library.rs:805
+#: src/ui/pages/artist.rs:493 src/ui/pages/library.rs:863
 #, rust-format
 msgid "{count} subscribers"
 msgstr ""
@@ -1217,7 +1217,7 @@ msgid "Top Songs"
 msgstr ""
 
 #: src/ui/pages/artist.rs:550 src/ui/pages/explore.rs:614
-#: src/ui/pages/library.rs:100 src/ui/pages/library.rs:108
+#: src/ui/pages/library.rs:108 src/ui/pages/library.rs:116
 msgid "Albums"
 msgstr ""
 
@@ -1230,7 +1230,7 @@ msgid "Videos"
 msgstr ""
 
 #: src/ui/pages/artist.rs:559 src/ui/pages/explore.rs:608
-#: src/ui/pages/explore.rs:609 src/ui/pages/library.rs:99
+#: src/ui/pages/explore.rs:609 src/ui/pages/library.rs:107
 msgid "Playlists"
 msgstr ""
 
@@ -1251,7 +1251,7 @@ msgstr ""
 msgid "Copy JSON (Debug)"
 msgstr ""
 
-#: src/ui/pages/artist.rs:1170 src/ui/pages/library.rs:937
+#: src/ui/pages/artist.rs:1170 src/ui/pages/library.rs:995
 msgid "Unsubscribe"
 msgstr ""
 
@@ -1377,7 +1377,7 @@ msgid "Songs"
 msgstr ""
 
 #: src/ui/pages/explore.rs:604 src/ui/pages/explore.rs:605
-#: src/ui/pages/library.rs:101 src/ui/pages/library.rs:109
+#: src/ui/pages/library.rs:109 src/ui/pages/library.rs:117
 msgid "Artists"
 msgstr ""
 
@@ -1484,121 +1484,137 @@ msgstr ""
 msgid "Try refreshing in a moment."
 msgstr ""
 
-#: src/ui/pages/library.rs:74 src/ui/pages/library.rs:105 src/ui/window.rs:173
+#: src/ui/pages/library.rs:76 src/ui/pages/library.rs:113 src/ui/window.rs:173
 msgid "Library"
 msgstr ""
 
-#: src/ui/pages/library.rs:75 src/ui/pages/library.rs:114
+#: src/ui/pages/library.rs:77 src/ui/pages/library.rs:122
 msgid "Uploads"
 msgstr ""
 
-#: src/ui/pages/library.rs:84
+#: src/ui/pages/library.rs:91
 msgid "All Uploaded Songs"
 msgstr ""
 
-#: src/ui/pages/library.rs:86 src/ui/upload_queue.rs:74 src/ui/window.rs:2471
+#: src/ui/pages/library.rs:93 src/ui/upload_queue.rs:74 src/ui/window.rs:2471
 msgid "Upload Songs"
 msgstr ""
 
-#: src/ui/pages/library.rs:95 src/ui/playlist_ops.rs:89
+#: src/ui/pages/library.rs:102 src/ui/playlist_ops.rs:89
 msgid "New Playlist"
 msgstr ""
 
-#: src/ui/pages/library.rs:112
+#: src/ui/pages/library.rs:120
 msgid "No uploaded music"
 msgstr ""
 
-#: src/ui/pages/library.rs:119
+#: src/ui/pages/library.rs:127
 msgid "Refreshing Library..."
 msgstr ""
 
-#: src/ui/pages/library.rs:120
+#: src/ui/pages/library.rs:128
 msgid "Loading uploads..."
 msgstr ""
 
-#: src/ui/pages/library.rs:470
+#: src/ui/pages/library.rs:493
 msgid "Switch to list view"
 msgstr ""
 
-#: src/ui/pages/library.rs:473
+#: src/ui/pages/library.rs:496
 msgid "Switch to grid view"
 msgstr ""
 
-#: src/ui/pages/library.rs:724 src/ui/preferences.rs:1085
+#: src/ui/pages/library.rs:721
+msgid "Recent"
+msgstr ""
+
+#: src/ui/pages/library.rs:721
+msgid "Oldest"
+msgstr ""
+
+#: src/ui/pages/library.rs:721
+msgid "Name (A-Z)"
+msgstr ""
+
+#: src/ui/pages/library.rs:721
+msgid "Name (Z-A)"
+msgstr ""
+
+#: src/ui/pages/library.rs:782 src/ui/preferences.rs:1085
 msgid "Downloads"
 msgstr ""
 
-#: src/ui/pages/library.rs:724
+#: src/ui/pages/library.rs:782
 msgid "Downloaded songs"
 msgstr ""
 
-#: src/ui/pages/library.rs:838
+#: src/ui/pages/library.rs:896
 msgid "Automatic Playlist"
 msgstr ""
 
-#: src/ui/pages/library.rs:924 src/ui/pages/library.rs:950
+#: src/ui/pages/library.rs:982 src/ui/pages/library.rs:1008
 #: src/ui/pages/playlist.rs:1837
 msgid "Delete Playlist"
 msgstr ""
 
-#: src/ui/pages/library.rs:929 src/ui/pages/library.rs:953
+#: src/ui/pages/library.rs:987 src/ui/pages/library.rs:1011
 #: src/ui/pages/playlist.rs:1810
 msgid "Remove from Library"
 msgstr ""
 
-#: src/ui/pages/library.rs:931 src/ui/pages/library.rs:962
+#: src/ui/pages/library.rs:989 src/ui/pages/library.rs:1020
 #: src/ui/pages/playlist.rs:1984 src/ui/pages/playlist.rs:2005
 msgid "Removed from library"
 msgstr ""
 
-#: src/ui/pages/library.rs:946
+#: src/ui/pages/library.rs:1004
 msgid "Delete Album"
 msgstr ""
 
-#: src/ui/pages/library.rs:967 src/ui/pages/playlist.rs:2015
+#: src/ui/pages/library.rs:1025 src/ui/pages/playlist.rs:2015
 msgid "Failed to remove"
 msgstr ""
 
-#: src/ui/pages/library.rs:1002 src/ui/pages/playlist.rs:2409
+#: src/ui/pages/library.rs:1060 src/ui/pages/playlist.rs:2409
 msgid "Delete Upload?"
 msgstr ""
 
-#: src/ui/pages/library.rs:1003 src/ui/pages/playlist.rs:2409
+#: src/ui/pages/library.rs:1061 src/ui/pages/playlist.rs:2409
 #, rust-format
 msgid ""
 "Are you sure you want to delete \"{title}\"?\n"
 "This cannot be undone."
 msgstr ""
 
-#: src/ui/pages/library.rs:1006 src/ui/pages/library.rs:1044
+#: src/ui/pages/library.rs:1064 src/ui/pages/library.rs:1102
 #: src/ui/pages/playlist.rs:2411 src/ui/pages/playlist.rs:2587
 msgid "Delete"
 msgstr ""
 
-#: src/ui/pages/library.rs:1023
+#: src/ui/pages/library.rs:1081
 msgid "Upload deleted"
 msgstr ""
 
-#: src/ui/pages/library.rs:1028
+#: src/ui/pages/library.rs:1086
 msgid "Failed to delete the upload"
 msgstr ""
 
-#: src/ui/pages/library.rs:1040 src/ui/pages/playlist.rs:2585
+#: src/ui/pages/library.rs:1098 src/ui/pages/playlist.rs:2585
 msgid "Delete Playlist?"
 msgstr ""
 
-#: src/ui/pages/library.rs:1041 src/ui/pages/playlist.rs:2585
+#: src/ui/pages/library.rs:1099 src/ui/pages/playlist.rs:2585
 #, rust-format
 msgid ""
 "Are you sure you want to delete \"{title}\"?\n"
 "This action cannot be undone."
 msgstr ""
 
-#: src/ui/pages/library.rs:1056 src/ui/pages/library.rs:1067
+#: src/ui/pages/library.rs:1114 src/ui/pages/library.rs:1125
 msgid "Playlist deleted"
 msgstr ""
 
-#: src/ui/pages/library.rs:1072
+#: src/ui/pages/library.rs:1130
 msgid "Failed to delete the playlist"
 msgstr ""
 

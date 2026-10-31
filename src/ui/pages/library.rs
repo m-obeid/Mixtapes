@@ -33,9 +33,10 @@ struct Section {
     list: gtk::ListBox,
     grid: CardGrid,
     store: gio::ListStore,
-    /// What the list and the grid show: the store with the search applied.
-    filtered: gtk::FilterListModel,
+    /// What the list and the grid show: the store searched and sorted.
+    shown: gtk::SortListModel,
     filter: gtk::CustomFilter,
+    sorter: gtk::CustomSorter,
     cards: Rc<RefCell<Vec<Rc<MediaCard>>>>,
 }
 
@@ -61,6 +62,7 @@ pub struct LibraryPage {
     compact: Rc<Cell<bool>>,
     /// What the search bar last typed, lowercased. Shared with every filter.
     query: Rc<RefCell<String>>,
+    sort: Rc<Cell<u32>>,
     on_refresh_done: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
@@ -78,6 +80,11 @@ impl LibraryPage {
         tab_row.append(&gtk::Box::builder().hexpand(true).build());
         let lib_actions = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).build();
         let view_toggle = gtk::Button::builder().css_classes(["flat", "circular"]).valign(gtk::Align::Center).build();
+        let sort_labels = SORT_LABELS.map(crate::i18n::gettext);
+        let sort_dropdown = gtk::DropDown::from_strings(&sort_labels.each_ref().map(String::as_str));
+        sort_dropdown.set_valign(gtk::Align::Center);
+        sort_dropdown.add_css_class("sort-dropdown");
+        lib_actions.append(&sort_dropdown);
         lib_actions.append(&view_toggle);
         tab_row.append(&lib_actions);
         let uploads_actions = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).visible(false).build();
@@ -96,17 +103,18 @@ impl LibraryPage {
         // One query behind every section, library and uploads alike: the
         // search bar filters whichever sub-tab is showing, like Python's.
         let query: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
-        let playlists = Section::new(&tr!("Playlists"), Some(&new_playlist), &query);
-        let albums = Section::new(&tr!("Albums"), None, &query);
-        let artists = Section::new(&tr!("Artists"), None, &query);
+        let sort = Rc::new(Cell::new(ctx.paths.read_prefs().get(SORT_PREF).and_then(|v| v.as_u64()).map_or(SORT_RECENT, |v| v as u32)));
+        let playlists = Section::new(&tr!("Playlists"), Some(&new_playlist), &query, &sort);
+        let albums = Section::new(&tr!("Albums"), None, &query, &sort);
+        let artists = Section::new(&tr!("Artists"), None, &query, &sort);
         for s in [&playlists, &albums, &artists] {
             lib_content.append(&s.root);
         }
         lib_stack.add_titled(&lib_content, Some("library"), &tr!("Library"));
 
         let uploads_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).vexpand(true).build();
-        let up_albums = Section::new(&tr!("Albums"), None, &query);
-        let up_artists = Section::new(&tr!("Artists"), None, &query);
+        let up_albums = Section::new(&tr!("Albums"), None, &query, &sort);
+        let up_artists = Section::new(&tr!("Artists"), None, &query, &sort);
         uploads_box.append(&up_albums.root);
         uploads_box.append(&up_artists.root);
         let empty_uploads = gtk::Label::builder().label(tr!("No uploaded music")).css_classes(["dim-label"]).visible(false).build();
@@ -142,6 +150,7 @@ impl LibraryPage {
             loaded_at: Cell::new(None),
             compact: Rc::new(Cell::new(false)),
             query,
+            sort,
             on_refresh_done: RefCell::new(None),
         });
         for section in page.sections.iter().chain(page.upload_sections.iter()) {
@@ -171,6 +180,20 @@ impl LibraryPage {
             });
         }
         {
+            let saved = page.sort.get();
+            sort_dropdown.set_selected(saved.min(SORT_LABELS.len() as u32 - 1));
+            let weak = Rc::downgrade(&page);
+            sort_dropdown.connect_selected_notify(move |dropdown| {
+                let Some(p) = weak.upgrade() else { return };
+                let sort = dropdown.selected();
+                p.sort.set(sort);
+                p.ctx.paths.update_prefs(|prefs| {
+                    prefs.insert(SORT_PREF.into(), serde_json::json!(sort));
+                });
+                for section in p.sections.iter().chain(p.upload_sections.iter()) {
+                    section.sorter.changed(gtk::SorterChange::Different);
+                }
+            });
             let weak = Rc::downgrade(&page);
             page.view_toggle.connect_clicked(move |_| {
                 if let Some(p) = weak.upgrade() {
@@ -333,7 +356,7 @@ impl LibraryPage {
                 let available = |id: &str| id == DOWNLOADS_ID || crate::local_library::is_local(id) || (*cacheable && cached.contains(id));
                 // The list shows the filtered model, so its rows follow that order.
                 for (i, row) in list_rows(&section.list).into_iter().enumerate() {
-                    let id = section.filtered.item(i as u32).and_downcast::<MediaObject>().map(|o| o.id()).unwrap_or_default();
+                    let id = section.shown.item(i as u32).and_downcast::<MediaObject>().map(|o| o.id()).unwrap_or_default();
                     set_available(row.upcast_ref(), available(&id));
                 }
                 for card in section.cards.borrow().iter() {
@@ -491,7 +514,7 @@ impl LibraryPage {
         for section in self.sections.iter().chain(self.upload_sections.iter()) {
             section.list.set_visible(!show_grid);
             section.grid.set_visible(show_grid);
-            section.root.set_visible(section.filtered.n_items() > 0);
+            section.root.set_visible(section.shown.n_items() > 0);
         }
         self.sync_view_toggle();
     }
@@ -582,7 +605,7 @@ impl LibraryPage {
 
     fn bind_section(self: &Rc<Self>, section: &Rc<Section>) {
         let ctx = self.ctx.clone();
-        section.list.bind_model(Some(&section.filtered), move |object| {
+        section.list.bind_model(Some(&section.shown), move |object| {
             let item = object.downcast_ref::<MediaObject>().map(MediaObject::item).unwrap_or_default();
             let row = list_row(&ctx, &item);
             if item.id != DOWNLOADS_ID {
@@ -595,13 +618,13 @@ impl LibraryPage {
         section.list.connect_row_activated(move |list, row| {
             let (Some(page), Some(section)) = (weak_page.upgrade(), weak_section.upgrade()) else { return };
             let _ = list;
-            if let Some(item) = section.filtered.item(row.index().max(0) as u32).and_downcast::<MediaObject>() {
+            if let Some(item) = section.shown.item(row.index().max(0) as u32).and_downcast::<MediaObject>() {
                 page.activate(&item.item());
             }
         });
         let weak_page = Rc::downgrade(self);
         let weak_section = Rc::downgrade(section);
-        section.filtered.connect_items_changed(move |_, _, _, _| {
+        section.shown.connect_items_changed(move |_, _, _, _| {
             if let (Some(page), Some(section)) = (weak_page.upgrade(), weak_section.upgrade()) {
                 page.rebuild_grid(&section);
             }
@@ -611,8 +634,8 @@ impl LibraryPage {
     fn rebuild_grid(self: &Rc<Self>, section: &Rc<Section>) {
         section.grid.remove_all();
         section.cards.borrow_mut().clear();
-        for i in 0..section.filtered.n_items() {
-            let Some(item) = section.filtered.item(i).and_downcast::<MediaObject>().map(|o| o.item()) else { continue };
+        for i in 0..section.shown.n_items() {
+            let Some(item) = section.shown.item(i).and_downcast::<MediaObject>().map(|o| o.item()) else { continue };
             let (subtitle, fallback_icon, custom_icon) = card_style(&item);
             let card = MediaCard::new(&self.ctx, item.clone(), CardOptions { title_lines: 2, subtitle: Some(subtitle), fallback_icon, custom_icon });
             let weak = Rc::downgrade(self);
@@ -654,7 +677,7 @@ impl LibraryPage {
 }
 
 impl Section {
-    fn new(title: &str, action: Option<&gtk::Button>, query: &Rc<RefCell<String>>) -> Rc<Self> {
+    fn new(title: &str, action: Option<&gtk::Button>, query: &Rc<RefCell<String>>, sort: &Rc<Cell<u32>>) -> Rc<Self> {
         let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).visible(false).build();
         let header = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).height_request(34).build();
         header.append(&gtk::Label::builder().label(title).css_classes(["heading"]).halign(gtk::Align::Start).valign(gtk::Align::Center).hexpand(true).build());
@@ -675,8 +698,43 @@ impl Section {
             query.is_empty() || object.downcast_ref::<MediaObject>().is_some_and(|object| matches_query(&object.item(), &query))
         });
         let filtered = gtk::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
-        Rc::new(Self { root, list, grid, store, filtered, filter, cards: Rc::new(RefCell::new(Vec::new())) })
+        let (sort, positions) = (sort.clone(), store.clone());
+        let sorter = gtk::CustomSorter::new(move |a, b| {
+            let row = |object: &glib::Object| {
+                let item = object.downcast_ref::<MediaObject>().map(MediaObject::item).unwrap_or_default();
+                SortRow { pinned: PINNED.contains(&item.id.as_str()), title: item.title.to_lowercase(), position: positions.find(object).unwrap_or(0) }
+            };
+            compare_rows(sort.get(), &row(a), &row(b)).into()
+        });
+        let shown = gtk::SortListModel::new(Some(filtered), Some(sorter.clone()));
+        Rc::new(Self { root, list, grid, store, shown, filter, sorter, cards: Rc::new(RefCell::new(Vec::new())) })
     }
+}
+
+/// The lists every library starts with. They stay on top whatever the order.
+const PINNED: [&str; 3] = ["LM", DOWNLOADS_ID, crate::local_library::LIKED_ID];
+const SORT_PREF: &str = "library_sort";
+const SORT_RECENT: u32 = 0;
+const SORT_OLDEST: u32 = 1;
+const SORT_NAME: u32 = 2;
+const SORT_NAME_REVERSED: u32 = 3;
+const SORT_LABELS: [&str; 4] = [tr_noop!("Recent"), tr_noop!("Oldest"), tr_noop!("Name (A-Z)"), tr_noop!("Name (Z-A)")];
+
+struct SortRow {
+    pinned: bool,
+    title: String,
+    /// Where the row sits in the order YouTube sent, most recent first.
+    position: u32,
+}
+
+fn compare_rows(sort: u32, a: &SortRow, b: &SortRow) -> std::cmp::Ordering {
+    let order = match sort {
+        SORT_OLDEST => b.position.cmp(&a.position),
+        SORT_NAME => a.title.cmp(&b.title),
+        SORT_NAME_REVERSED => b.title.cmp(&a.title),
+        SORT_RECENT | _ => a.position.cmp(&b.position),
+    };
+    b.pinned.cmp(&a.pinned).then(if a.pinned && b.pinned { a.position.cmp(&b.position) } else { order })
 }
 
 /// Port of _apply_library_filter's match: the title, and for an album the
@@ -1081,6 +1139,21 @@ fn confirm_delete(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: &str, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sorted(sort: u32) -> Vec<&'static str> {
+        let row = |title: &str, position: u32, pinned: bool| SortRow { pinned, title: title.to_lowercase(), position };
+        let mut rows = [row("Liked", 0, true), row("banana", 1, false), row("Apple", 2, false), row("cherry", 3, false)];
+        rows.sort_by(|a, b| compare_rows(sort, a, b));
+        rows.iter().map(|r| match r.title.as_str() { "liked" => "Liked", "banana" => "banana", "apple" => "Apple", _ => "cherry" }).collect()
+    }
+
+    #[test]
+    fn every_order_keeps_the_pinned_lists_on_top() {
+        assert_eq!(sorted(SORT_RECENT), ["Liked", "banana", "Apple", "cherry"]);
+        assert_eq!(sorted(SORT_OLDEST), ["Liked", "cherry", "Apple", "banana"]);
+        assert_eq!(sorted(SORT_NAME), ["Liked", "Apple", "banana", "cherry"]);
+        assert_eq!(sorted(SORT_NAME_REVERSED), ["Liked", "cherry", "banana", "Apple"]);
+    }
     use crate::model::Person;
 
     #[test]
