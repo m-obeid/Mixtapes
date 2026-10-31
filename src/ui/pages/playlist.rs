@@ -844,7 +844,7 @@ impl PlaylistPage {
     /// Port of _apply_disk_cache_header: the full header from the cached copy.
     fn apply_disk_cache_header(self: &Rc<Self>, cached: &CachedPlaylist, initial: Option<&InitialData>) {
         let pid = self.playlist_id().unwrap_or_default();
-        let title = if !cached.title.is_empty() { cached.title.clone() } else { initial.map(|i| i.title.clone()).unwrap_or_default() };
+        let title = if !cached.title.is_empty() { shown_list_text(&pid, &cached.title) } else { initial.map(|i| i.title.clone()).unwrap_or_default() };
         let author_markup = if !cached.meta.author_raw.is_empty() {
             artist_markup(&cached.meta.author_raw)
         } else {
@@ -879,7 +879,8 @@ impl PlaylistPage {
 
         self.stack.set_visible_child_name("content");
         self.title_text.replace(title.clone());
-        self.description_text.replace(cached.meta.description.clone());
+        let description = shown_list_text(&pid, &cached.meta.description);
+        self.description_text.replace(description.clone());
         self.name_label.set_label(&title);
         self.meta_label.set_markup(&meta1_parts.join(" • "));
         self.stats_label.set_label(&meta2);
@@ -897,7 +898,7 @@ impl PlaylistPage {
         // The star too: the page from disk is on screen seconds before the live one.
         self.is_saved_to_library.set(self.saved_in_library(&pid, owned));
         self.refresh_more_menu(owned);
-        self.set_description(&cached.meta.description);
+        self.set_description(&description);
         if let Some(url) = thumbnails.last() {
             if self.cover.url().as_deref() != Some(url.as_str()) {
                 self.is_previewing_cover.set(false);
@@ -998,7 +999,7 @@ impl PlaylistPage {
             }
             match cached.filter(|c| !c.tracks.is_empty()) {
                 Some(cached) => {
-                    let title = if !cached.title.is_empty() { cached.title.clone() } else { initial.as_ref().map(|i| i.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| tr!("Playlist")) };
+                    let title = if !cached.title.is_empty() { shown_list_text(&id, &cached.title) } else { initial.as_ref().map(|i| i.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| tr!("Playlist")) };
                     let tracks = cached.tracks;
                     page.title_text.replace(title.clone());
                     page.tracks.borrow_mut().set(tracks.clone());
@@ -1120,6 +1121,7 @@ impl PlaylistPage {
         let song_count = count_text(track_len, is_podcast);
 
         // YouTube's own lists (LM, SS, SE) come named in English. The net layer and the cache keep them so.
+        let english = (details.title.clone(), details.description.clone());
         if playlist_id.len() == 2 {
             details.title = crate::i18n::gettext(&details.title);
         }
@@ -1226,6 +1228,9 @@ impl PlaylistPage {
         if !incremental && !is_local {
             let mut for_cache = details.clone();
             for_cache.title = title.clone();
+            if playlist_id.len() == 2 {
+                (for_cache.title, for_cache.description) = english;
+            }
             self.schedule_disk_cache_write(self.cache_entry_from(&for_cache, &tracks));
         }
         self.update_ui(HeaderText { title, description: details.description, meta1: meta1_parts.join(" • "), meta2: meta2_parts.join(" • ") }, thumbnails, tracks, incremental, track_count, is_owned);
@@ -2802,6 +2807,11 @@ impl PlaylistPage {
             self.actions_box.set_halign(gtk::Align::Start);
         }
     }
+}
+
+/// Text of a cached list as shown. YouTube's own lists (LM, SS, SE) are kept in English.
+fn shown_list_text(playlist_id: &str, text: &str) -> String {
+    if playlist_id.len() == 2 { crate::i18n::gettext(text) } else { text.to_owned() }
 }
 
 impl TrackRowHost for PlaylistPage {
