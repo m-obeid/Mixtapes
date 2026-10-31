@@ -276,11 +276,10 @@ impl ExplorePage {
             std::iter::once(podcasts).chain(pills.iter().cloned()).collect::<Vec<_>>()
         };
         if !data.for_you.is_empty() || !data.moods.is_empty() || !data.genres.is_empty() {
-            self.add_pill_section(&tr!("Moods & Moments"), &[], &data.moods);
             // YouTube picks For You from the same lists, and a pill reads once.
-            let for_you: Vec<Category> = data.for_you.iter().filter(|c| !data.moods.iter().any(|m| m.title == c.title)).cloned().collect();
-            let genres: Vec<Category> = with_podcasts(&data.genres).into_iter().filter(|c| !for_you.iter().any(|f| f.title == c.title)).collect();
-            self.add_pill_section(&if for_you.is_empty() { tr!("Genres") } else { tr!("For You & Genres") }, &for_you, &genres);
+            let unpicked = |pills: Vec<Category>| pills.into_iter().filter(|c| !data.for_you.iter().any(|f| f.title == c.title)).collect::<Vec<_>>();
+            self.add_pill_section(&tr!("Moods & Moments"), &[], &unpicked(data.moods.clone()));
+            self.add_pill_section(&if data.for_you.is_empty() { tr!("Genres") } else { tr!("For You & Genres") }, &data.for_you, &unpicked(with_podcasts(&data.genres)));
         } else {
             self.add_pill_section(&tr!("Moods & Genres"), &[], &with_podcasts(&data.feed.moods_and_genres));
         }
