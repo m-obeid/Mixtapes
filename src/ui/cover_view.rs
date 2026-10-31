@@ -18,8 +18,9 @@ use crate::ui::widgets::lyrics_view::LyricsView;
 use crate::ui::widgets::transport::Transport;
 use crate::ui::widgets::visualizer::Visualizer;
 
-/// The window height under which the cover moves beside the controls.
-const SHORT_HEIGHT: f64 = 480.0;
+/// When the cover moves beside the controls. Short alone is not enough: with the queue
+/// open there can be height for a big cover and no width left for the controls.
+const SHORT_LAYOUT: &str = "max-height: 480px and min-aspect-ratio: 16/9 and min-width: 620px";
 
 pub struct DesktopCoverView {
     root: adw::Bin,
@@ -279,11 +280,7 @@ impl DesktopCoverView {
         collapse_bp.add_setter(&split, "collapsed", Some(&true.to_value()));
         bp_bin.add_breakpoint(collapse_bp);
         // A phone on its side: the cover beside the controls, and lyrics take the whole view.
-        let short_bp = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
-            adw::BreakpointConditionLengthType::MaxHeight,
-            SHORT_HEIGHT,
-            adw::LengthUnit::Px,
-        ));
+        let short_bp = adw::Breakpoint::new(adw::BreakpointCondition::parse(SHORT_LAYOUT).expect("static condition"));
         short_bp.add_setter(&split, "collapsed", Some(&true.to_value()));
         short_bp.add_setter(&player_controls, "orientation", Some(&gtk::Orientation::Horizontal.to_value()));
         short_bp.add_setter(&player_controls, "spacing", Some(&24i32.to_value()));

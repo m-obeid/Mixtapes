@@ -289,7 +289,7 @@ mod tests {
     fn saved_order_drops_unknown_names_and_appends_new_providers() {
         let (_dir, prefs) = prefs();
         put(&prefs, json!({"lyrics_provider_order": ["LRCLIB", "Gone", "LRCLIB", 7, "NetEase"]}));
-        assert_eq!(prefs.full_provider_order(), ["LRCLIB", "NetEase", "Apple Music", "BetterLyrics", "Unison", "BiniLyrics", "QQ Music", "YouTube Captions", "YouTube Music"]);
+        assert_eq!(prefs.full_provider_order(), ["LRCLIB", "NetEase", "Apple Music", "Unison", "BetterLyrics", "BiniLyrics", "QQ Music", "YouTube Captions", "YouTube Music"]);
     }
 
     #[test]
@@ -304,10 +304,10 @@ mod tests {
         let (_dir, prefs) = prefs();
         prefs.set_provider_order(&["NetEase", "LRCLIB", "Apple Music", "BetterLyrics", "BiniLyrics", "YouTube Music"]);
         prefs.set_provider_enabled("LRCLIB", false);
-        assert_eq!(prefs.provider_order()[..2], ["NetEase", "Apple Music"]);
-        assert_eq!(prefs.full_provider_order()[1], "LRCLIB");
+        assert_eq!(prefs.provider_order()[..2], ["NetEase", "QQ Music"]);
+        assert_eq!(prefs.full_provider_order()[2], "LRCLIB");
         prefs.set_provider_enabled("LRCLIB", true);
-        assert_eq!(prefs.provider_order()[1], "LRCLIB");
+        assert_eq!(prefs.provider_order()[2], "LRCLIB");
 
         for name in DEFAULT_PROVIDER_ORDER {
             prefs.set_provider_enabled(name, false);
