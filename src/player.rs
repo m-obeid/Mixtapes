@@ -906,7 +906,10 @@ impl Player {
             match arm_only {
                 true if self.armed_next.borrow().as_ref().is_some_and(|a| a.generation == generation) => self.audio.send(AudioCommand::ArmNext { uri: uri.to_string(), generation, auth: None }),
                 true => {}
-                false => self.audio.send(AudioCommand::Load { uri: uri.to_string(), generation, auth: None }),
+                false => {
+                    self.apply_gain(&track.video_id);
+                    self.audio.send(AudioCommand::Load { uri: uri.to_string(), generation, auth: None });
+                }
             }
             return;
         }
@@ -1014,6 +1017,7 @@ impl Player {
                             info.thumbnail.as_deref(),
                         );
                     }
+                    player.apply_gain(&track.video_id);
                     player.audio.send(AudioCommand::Load {
                         uri: info.uri,
                         generation,
@@ -1031,6 +1035,16 @@ impl Player {
                 }
             }
         });
+    }
+
+    fn apply_gain(&self, video_id: &VideoId) {
+        self.audio.send(AudioCommand::SetGain(crate::net::loudness::gain(video_id.as_str())));
+    }
+
+    /// The Normalize Volume setting. The song playing changes straight away.
+    pub fn set_normalize_volume(&self, on: bool) {
+        crate::net::loudness::set_enabled(on);
+        self.apply_gain(&VideoId(self.state.video_id()));
     }
 
     /// What is playing and how, for the Stream Info panel in the expanded
@@ -1150,6 +1164,9 @@ impl Player {
                         self.current.set(generation);
                         self.retries.set(0);
                         let track = self.queue.borrow_mut().adopt(index).cloned();
+                        if let Some(track) = &track {
+                            self.apply_gain(&track.video_id);
+                        }
                         self.mark_current(Some(index));
                         self.clear_visualizer_queue();
                         self.state.set_position(0.0);

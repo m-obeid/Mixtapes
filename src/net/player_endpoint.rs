@@ -42,6 +42,7 @@ struct Format {
     mime: String,
     bitrate: u64,
     content_length: u64,
+    loudness_db: Option<f64>,
 }
 
 impl Format {
@@ -69,6 +70,7 @@ fn audio_formats(response: &Value) -> Vec<Format> {
                 mime: mime.to_owned(),
                 bitrate: f.get("bitrate").and_then(Value::as_u64).unwrap_or(0),
                 content_length: f.get("contentLength").and_then(Value::as_str).and_then(|s| s.parse().ok()).unwrap_or(0),
+                loudness_db: f.get("loudnessDb").and_then(Value::as_f64),
             })
         })
         .collect()
@@ -216,6 +218,10 @@ impl PlayerEndpointResolver {
         let formats = audio_formats(&response);
         let format = pick_format(&formats).ok_or("no direct audio url")?;
         self.probe(format).await?;
+        let loudness = format.loudness_db.or_else(|| response.pointer("/playerConfig/audioConfig/loudnessDb").and_then(Value::as_f64));
+        if let Some(loudness) = loudness {
+            crate::net::loudness::remember(video_id.as_str(), loudness);
+        }
         Ok(StreamInfo {
             uri: format.url.clone(),
             format_id: Some(format.itag.to_string()),
@@ -380,7 +386,7 @@ mod tests {
         for id in ["J7p4bzqLvCw", "CuklIb9d3fI"] {
             let started = Instant::now();
             let info = resolver.resolve(VideoId(id.to_owned()), None).await.unwrap();
-            println!("{id}: itag {:?} {:?} in {:?}", info.format_id, info.title, started.elapsed());
+            println!("{id}: itag {:?} {:?} gain {} in {:?}", info.format_id, info.title, crate::net::loudness::gain(id), started.elapsed());
             assert!(started.elapsed() < Duration::from_secs(3));
         }
     }

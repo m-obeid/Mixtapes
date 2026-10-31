@@ -397,6 +397,16 @@ fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup 
     let current = pref_str(ctx, "history_mode", "immediate");
     let labels: Vec<String> = HISTORY_MODES.iter().map(|(_, label)| crate::i18n::gettext(label)).collect();
     let selected = HISTORY_MODES.iter().position(|(key, _)| *key == current).unwrap_or(0);
+    let normalize_row = switch_row(&tr!("Normalize Volume"), &tr!("Turn loud songs down to match the rest, using YouTube's loudness measurements"), pref_bool(ctx, crate::net::loudness::PREF, true));
+    {
+        let ctx = ctx.clone();
+        normalize_row.connect_active_notify(move |row| {
+            save(&ctx, crate::net::loudness::PREF, row.is_active());
+            ctx.player.set_normalize_volume(row.is_active());
+        });
+    }
+    group.add(&normalize_row);
+
     let history_row = combo_row(&tr!("Record Plays to History"), &tr!("When a song counts as played, for YouTube Music or, signed out, for Home on this device"), &labels, selected);
     {
         let ctx = ctx.clone();

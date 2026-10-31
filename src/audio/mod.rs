@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use anyhow::Context;
 use async_channel::{Receiver, Sender};
 use gst::prelude::*;
 use gst_audio::prelude::*;
@@ -47,6 +48,8 @@ pub enum AudioCommand {
     Describe { reply: async_channel::Sender<String> },
     SetVolume(f64),
     SetMute(bool),
+    /// What the song in the speakers is multiplied by, from its measured loudness.
+    SetGain(f64),
     Shutdown,
 }
 
@@ -137,6 +140,8 @@ pub fn is_live_uri(uri: &str) -> bool {
 
 struct Engine {
     playbin: gst::Element,
+    /// Turns a loud song down. Separate from the listener's volume, which playbin holds.
+    normalizer: Option<gst::Element>,
     /// The sink playbin plays into, held so its remembered device can be cleared.
     audio_sink: Option<gst::Element>,
     shared: Arc<Shared>,
@@ -265,6 +270,22 @@ fn set_download_buffering(playbin: &gst::Element, uri: &str) {
     }
 }
 
+/// Chain the elements that exist. Playbin takes one filter, so two go in a bin.
+fn audio_filter(spectrum: Option<&gst::Element>, normalizer: Option<&gst::Element>) -> anyhow::Result<Option<gst::Element>> {
+    let (first, second) = match (spectrum, normalizer) {
+        (Some(first), Some(second)) => (first, second),
+        (one, other) => return Ok(one.or(other).cloned()),
+    };
+    let bin = gst::Bin::new();
+    bin.add_many([first, second])?;
+    first.link(second)?;
+    let sink = gst::GhostPad::builder_with_target(&first.static_pad("sink").context("no sink pad")?)?.name("sink").build();
+    let src = gst::GhostPad::builder_with_target(&second.static_pad("src").context("no src pad")?)?.name("src").build();
+    bin.add_pad(&sink)?;
+    bin.add_pad(&src)?;
+    Ok(Some(bin.upcast()))
+}
+
 impl Engine {
     fn build(control: Sender<AudioEvent>, telemetry: Sender<AudioTelemetry>, main_loop: glib::MainLoop) -> anyhow::Result<Self> {
         let playbin = gst::ElementFactory::make("playbin").name("player").build()?;
@@ -277,8 +298,9 @@ impl Engine {
             }
         }
 
-        // Passthrough spectrum analyzer feeding the visualizer.
-        match gst::ElementFactory::make("spectrum")
+        // Passthrough spectrum analyzer feeding the visualizer. It sits in front of
+        // the normalizer so the bars do not shrink on a song that is turned down.
+        let spectrum = match gst::ElementFactory::make("spectrum")
             .name("visualizer-spectrum")
             .property("post-messages", true)
             .property("message-magnitude", true)
@@ -289,8 +311,17 @@ impl Engine {
             .property("multi-channel", false)
             .build()
         {
-            Ok(spectrum) => playbin.set_property("audio-filter", &spectrum),
-            Err(err) => tracing::warn!(%err, "spectrum element unavailable; visualizer stays inert"),
+            Ok(spectrum) => Some(spectrum),
+            Err(err) => {
+                tracing::warn!(%err, "spectrum element unavailable; visualizer stays inert");
+                None
+            }
+        };
+        let normalizer = gst::ElementFactory::make("volume").name("normalizer").build().inspect_err(|err| tracing::warn!(%err, "volume element unavailable; songs play as they are")).ok();
+        match audio_filter(spectrum.as_ref(), normalizer.as_ref()) {
+            Ok(Some(filter)) => playbin.set_property("audio-filter", &filter),
+            Ok(None) => {}
+            Err(err) => tracing::warn!(%err, "audio filter not built"),
         }
 
         // Our own sink, so `clear_remembered_device` has something to reach.
@@ -371,6 +402,7 @@ impl Engine {
 
         Ok(Self {
             playbin,
+            normalizer,
             audio_sink,
             shared,
             control,
@@ -533,6 +565,12 @@ impl Engine {
             }
             AudioCommand::Describe { reply } => {
                 let _ = reply.send_blocking(self.describe());
+            }
+            AudioCommand::SetGain(gain) => {
+                tracing::debug!(gain, "audio: normalizer");
+                if let Some(normalizer) = &self.normalizer {
+                    normalizer.set_property("volume", gain);
+                }
             }
             AudioCommand::SetVolume(v) => {
                 let v = v.clamp(0.0, 1.0);

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 16:02+0100\n"
+"POT-Creation-Date: 2026-10-31 16:11+0100\n"
 "PO-Revision-Date: 2026-10-07 13:09+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -45,7 +45,7 @@ msgstr "Deaktiviert"
 msgid "Disconnected"
 msgstr "Getrennt"
 
-#: src/discord.rs:367 src/ui/preferences.rs:846
+#: src/discord.rs:367 src/ui/preferences.rs:856
 msgid "Connected"
 msgstr "Verbunden"
 
@@ -616,15 +616,15 @@ msgstr "Dieser Titel konnte nicht geladen werden"
 msgid "Couldn't update rating"
 msgstr "Bewertung konnte nicht geändert werden"
 
-#: src/player.rs:1087
+#: src/player.rs:1101
 msgid "Offline mode is on, and this song is not downloaded"
 msgstr "Der Offline-Modus ist aktiv und dieser Song ist nicht heruntergeladen"
 
-#: src/player.rs:1738
+#: src/player.rs:1755
 msgid "Radio"
 msgstr "Radio"
 
-#: src/player.rs:1738
+#: src/player.rs:1755
 #, rust-format
 msgid "Radio of {seed_name}"
 msgstr "Radio von {seed_name}"
@@ -827,8 +827,8 @@ msgstr ""
 #: src/ui/context_menu.rs:239 src/ui/crop_dialog.rs:146
 #: src/ui/download_queue.rs:88 src/ui/pages/library.rs:1005
 #: src/ui/pages/library.rs:1043 src/ui/pages/playlist.rs:2354
-#: src/ui/pages/playlist.rs:2526 src/ui/preferences.rs:556
-#: src/ui/preferences.rs:918 src/ui/preferences.rs:976
+#: src/ui/pages/playlist.rs:2526 src/ui/preferences.rs:566
+#: src/ui/preferences.rs:928 src/ui/preferences.rs:986
 msgid "Cancel"
 msgstr "Abbrechen"
 
@@ -906,7 +906,7 @@ msgid "Queue"
 msgstr "Wiedergabeliste"
 
 #: src/ui/cover_view.rs:586 src/ui/expanded_player.rs:552
-#: src/ui/preferences.rs:517
+#: src/ui/preferences.rs:527
 msgid "Stream Info (Debug)"
 msgstr "Stream-Info (Debug)"
 
@@ -1106,7 +1106,7 @@ msgstr "Ein paar Einstellungen"
 msgid "Each of these lives under Preferences too."
 msgstr "Alles davon findest du auch in den Einstellungen."
 
-#: src/ui/onboarding.rs:265 src/ui/preferences.rs:747
+#: src/ui/onboarding.rs:265 src/ui/preferences.rs:757
 msgid "Discord Rich Presence"
 msgstr "Discord Rich Presence"
 
@@ -1114,7 +1114,7 @@ msgstr "Discord Rich Presence"
 msgid "Show what you're listening to on your Discord profile"
 msgstr "In deinem Discord-Profil anzeigen, was du gerade hörst"
 
-#: src/ui/onboarding.rs:279 src/ui/preferences.rs:1004
+#: src/ui/onboarding.rs:279 src/ui/preferences.rs:1014
 msgid "Scrobbling"
 msgstr "Scrobbling"
 
@@ -1126,7 +1126,7 @@ msgstr ""
 "Übermittle deine Wiedergaben an Last.fm oder ListenBrainz. Ein Konto "
 "verbindest du in den Einstellungen."
 
-#: src/ui/onboarding.rs:289 src/ui/preferences.rs:624
+#: src/ui/onboarding.rs:289 src/ui/preferences.rs:634
 msgid "Dynamic Cover Color"
 msgstr "Dynamische Cover-Farbe"
 
@@ -1134,7 +1134,7 @@ msgstr "Dynamische Cover-Farbe"
 msgid "Match the accent color to the cover of the playing song"
 msgstr "Akzentfarbe an das Cover des laufenden Songs anpassen"
 
-#: src/ui/onboarding.rs:302 src/ui/preferences.rs:609
+#: src/ui/onboarding.rs:302 src/ui/preferences.rs:619
 msgid "Blurred Cover Background"
 msgstr "Unscharfer Cover-Hintergrund"
 
@@ -1142,11 +1142,11 @@ msgstr "Unscharfer Cover-Hintergrund"
 msgid "Use the cover as a blurred window background"
 msgstr "Das Cover als unscharfen Fensterhintergrund verwenden"
 
-#: src/ui/onboarding.rs:315 src/ui/preferences.rs:434
+#: src/ui/onboarding.rs:315 src/ui/preferences.rs:444
 msgid "Release Notes After Updates"
 msgstr "Versionshinweise nach Updates"
 
-#: src/ui/onboarding.rs:315 src/ui/preferences.rs:434
+#: src/ui/onboarding.rs:315 src/ui/preferences.rs:444
 msgid "Open what's new once for each new version"
 msgstr "Die Neuerungen bei jeder neuen Version einmal öffnen"
 
@@ -1526,7 +1526,7 @@ msgstr "Zur Listenansicht wechseln"
 msgid "Switch to grid view"
 msgstr "Zur Rasteransicht wechseln"
 
-#: src/ui/pages/library.rs:724 src/ui/preferences.rs:1075
+#: src/ui/pages/library.rs:724 src/ui/preferences.rs:1085
 msgid "Downloads"
 msgstr "Downloads"
 
@@ -2230,10 +2230,19 @@ msgstr ""
 "über Titel und Künstler einer gefunden wird"
 
 #: src/ui/preferences.rs:400
+msgid "Normalize Volume"
+msgstr ""
+
+#: src/ui/preferences.rs:400
+msgid ""
+"Turn loud songs down to match the rest, using YouTube's loudness measurements"
+msgstr ""
+
+#: src/ui/preferences.rs:410
 msgid "Record Plays to History"
 msgstr "Wiedergaben im Verlauf speichern"
 
-#: src/ui/preferences.rs:400
+#: src/ui/preferences.rs:410
 msgid ""
 "When a song counts as played, for YouTube Music or, signed out, for Home on "
 "this device"
@@ -2241,89 +2250,89 @@ msgstr ""
 "Ab wann ein Song als gespielt zählt: für YouTube Music oder, ohne Anmeldung, "
 "für die Startseite auf diesem Gerät"
 
-#: src/ui/preferences.rs:413
+#: src/ui/preferences.rs:423
 msgid "Force Offline Mode"
 msgstr "Offline-Modus erzwingen"
 
-#: src/ui/preferences.rs:413
+#: src/ui/preferences.rs:423
 msgid "Disable all network requests and use only downloaded content"
 msgstr ""
 "Alle Netzwerkanfragen abschalten und nur heruntergeladene Inhalte verwenden"
 
-#: src/ui/preferences.rs:432
+#: src/ui/preferences.rs:442
 msgid "Updates"
 msgstr "Updates"
 
-#: src/ui/preferences.rs:441
+#: src/ui/preferences.rs:451
 msgid "Donation Prompts"
 msgstr "Spendenhinweise"
 
-#: src/ui/preferences.rs:441
+#: src/ui/preferences.rs:451
 msgid "Show the Ko-fi and GitHub Sponsors banner under the release notes"
 msgstr ""
 "Das Banner für Ko-fi und GitHub Sponsors unter den Versionshinweisen anzeigen"
 
-#: src/ui/preferences.rs:459
+#: src/ui/preferences.rs:469
 msgid "System Default"
 msgstr "Systemstandard"
 
-#: src/ui/preferences.rs:463
+#: src/ui/preferences.rs:473
 msgid "Language"
 msgstr "Sprache"
 
-#: src/ui/preferences.rs:463
+#: src/ui/preferences.rs:473
 msgid "Applies on next launch."
 msgstr "Gilt ab dem nächsten Start."
 
-#: src/ui/preferences.rs:471
+#: src/ui/preferences.rs:481
 msgid "Restart Mixtapes?"
 msgstr "Mixtapes neu starten?"
 
-#: src/ui/preferences.rs:471
+#: src/ui/preferences.rs:481
 msgid "The language changes after a restart. Playback stops."
 msgstr "Die Sprache ändert sich nach einem Neustart. Die Wiedergabe stoppt."
 
-#: src/ui/preferences.rs:472
+#: src/ui/preferences.rs:482
 msgid "Later"
 msgstr "Später"
 
-#: src/ui/preferences.rs:472
+#: src/ui/preferences.rs:482
 msgid "Restart Now"
 msgstr "Jetzt neu starten"
 
-#: src/ui/preferences.rs:479
+#: src/ui/preferences.rs:489
 msgid "Could not restart. Start Mixtapes again to apply the language."
 msgstr ""
 "Neustart fehlgeschlagen. Starte Mixtapes erneut, um die Sprache zu "
 "übernehmen."
 
-#: src/ui/preferences.rs:493
+#: src/ui/preferences.rs:503
 msgid "Troubleshooting"
 msgstr "Fehlerbehebung"
 
-#: src/ui/preferences.rs:499
+#: src/ui/preferences.rs:509
 msgid "Renderer"
 msgstr "Renderer"
 
-#: src/ui/preferences.rs:499
+#: src/ui/preferences.rs:509
 msgid "Switch if you hit GPU-related crashes. Applies on next launch."
 msgstr ""
 "Wechsle bei Abstürzen, die mit der GPU zusammenhängen. Gilt ab dem nächsten "
 "Start."
 
-#: src/ui/preferences.rs:510
+#: src/ui/preferences.rs:520
 msgid "Enable Debug Logs"
 msgstr "Debug-Protokolle aktivieren"
 
-#: src/ui/preferences.rs:510
+#: src/ui/preferences.rs:520
 msgid "Print diagnostic information to the terminal"
 msgstr "Diagnoseinformationen im Terminal ausgeben"
 
-#: src/ui/preferences.rs:517
+#: src/ui/preferences.rs:527
 msgid "Show format, protocol and seek range of the current stream"
 msgstr "Format, Protokoll und Suchbereich des aktuellen Streams anzeigen"
 
-#: src/ui/preferences.rs:533
+#: src/ui/preferences.rs:543
 msgid ""
 "Sign out, clear settings and caches, and run the setup again. Downloads and "
 "playlists kept on this device stay."
@@ -2332,15 +2341,15 @@ msgstr ""
 "starten. Downloads und auf diesem Gerät gespeicherte Playlists bleiben "
 "erhalten."
 
-#: src/ui/preferences.rs:535
+#: src/ui/preferences.rs:545
 msgid "Reset Mixtapes"
 msgstr "Mixtapes zurücksetzen"
 
-#: src/ui/preferences.rs:553
+#: src/ui/preferences.rs:563
 msgid "Reset Mixtapes?"
 msgstr "Mixtapes zurücksetzen?"
 
-#: src/ui/preferences.rs:554
+#: src/ui/preferences.rs:564
 msgid ""
 "This signs you out, clears your settings and every cache, and restarts into "
 "the setup. Downloaded songs and the playlists and likes kept on this device "
@@ -2350,143 +2359,143 @@ msgstr ""
 "die App startet neu in die Einrichtung. Heruntergeladene Songs sowie die auf "
 "diesem Gerät gespeicherten Playlists und Likes bleiben erhalten."
 
-#: src/ui/preferences.rs:557
+#: src/ui/preferences.rs:567
 msgid "Reset and Restart"
 msgstr "Zurücksetzen und neu starten"
 
-#: src/ui/preferences.rs:583
+#: src/ui/preferences.rs:593
 msgid "Reset done. Start Mixtapes again to run the setup."
 msgstr ""
 "Zurücksetzen abgeschlossen. Starte Mixtapes erneut, um die Einrichtung zu "
 "durchlaufen."
 
-#: src/ui/preferences.rs:607
+#: src/ui/preferences.rs:617
 msgid "Theme"
 msgstr "Design"
 
-#: src/ui/preferences.rs:609
+#: src/ui/preferences.rs:619
 msgid "Use the current track's cover as a blurred window background"
 msgstr ""
 "Das Cover des aktuellen Titels als unscharfen Fensterhintergrund verwenden"
 
-#: src/ui/preferences.rs:625
+#: src/ui/preferences.rs:635
 msgid "Match the app accent color to the current track's cover"
 msgstr "Akzentfarbe der App an das Cover des aktuellen Titels anpassen"
 
-#: src/ui/preferences.rs:630
+#: src/ui/preferences.rs:640
 msgid "Tinted Background"
 msgstr "Getönter Hintergrund"
 
-#: src/ui/preferences.rs:630
+#: src/ui/preferences.rs:640
 msgid "Tint the app background with accent color"
 msgstr "Den App-Hintergrund mit der Akzentfarbe tönen"
 
-#: src/ui/preferences.rs:659
+#: src/ui/preferences.rs:669
 msgid "Layout"
 msgstr "Layout"
 
-#: src/ui/preferences.rs:661
+#: src/ui/preferences.rs:671
 msgid "Queue on the Right"
 msgstr "Wiedergabeliste rechts"
 
-#: src/ui/preferences.rs:661
+#: src/ui/preferences.rs:671
 msgid "Place the queue sidebar on the right edge of the window"
 msgstr ""
 "Die Seitenleiste mit der Wiedergabeliste am rechten Fensterrand platzieren"
 
-#: src/ui/preferences.rs:679
+#: src/ui/preferences.rs:689
 msgid "Visualizer"
 msgstr "Visualizer"
 
-#: src/ui/preferences.rs:679
+#: src/ui/preferences.rs:689
 msgid "Bar visualizer beneath the cover art in the expanded player"
 msgstr "Balken-Visualizer unter dem Cover im ausgeklappten Player"
 
-#: src/ui/preferences.rs:685
+#: src/ui/preferences.rs:695
 msgid "Enable Visualizer"
 msgstr "Visualizer aktivieren"
 
-#: src/ui/preferences.rs:685
+#: src/ui/preferences.rs:695
 msgid "Show audio bars beneath the cover art"
 msgstr "Audiobalken unter dem Cover anzeigen"
 
-#: src/ui/preferences.rs:686
+#: src/ui/preferences.rs:696
 msgid "Bar Count"
 msgstr "Balkenanzahl"
 
-#: src/ui/preferences.rs:686
+#: src/ui/preferences.rs:696
 msgid "Number of bars in the visualizer (more = finer)"
 msgstr "Anzahl der Balken im Visualizer (mehr = feiner)"
 
-#: src/ui/preferences.rs:687
+#: src/ui/preferences.rs:697
 msgid "Smoothing"
 msgstr "Glättung"
 
-#: src/ui/preferences.rs:687
+#: src/ui/preferences.rs:697
 msgid "Higher = tighter spikes, lower = peaks bleed into neighbors"
 msgstr ""
 "Höher = schmalere Ausschläge, niedriger = Spitzen greifen auf Nachbarbalken "
 "über"
 
-#: src/ui/preferences.rs:749
+#: src/ui/preferences.rs:759
 msgid "Connection Status"
 msgstr "Verbindungsstatus"
 
-#: src/ui/preferences.rs:755
+#: src/ui/preferences.rs:765
 msgid "Enable Discord RPC"
 msgstr "Discord RPC aktivieren"
 
-#: src/ui/preferences.rs:755
+#: src/ui/preferences.rs:765
 msgid "Show what you're listening to on Discord"
 msgstr "Auf Discord anzeigen, was du gerade hörst"
 
-#: src/ui/preferences.rs:758
+#: src/ui/preferences.rs:768
 msgid "Status Display"
 msgstr "Statusanzeige"
 
-#: src/ui/preferences.rs:758
+#: src/ui/preferences.rs:768
 msgid "What appears in the status line under your name"
 msgstr "Was in der Statuszeile unter deinem Namen steht"
 
-#: src/ui/preferences.rs:759
+#: src/ui/preferences.rs:769
 msgid "Hide on Pause"
 msgstr "Bei Pause ausblenden"
 
-#: src/ui/preferences.rs:759
+#: src/ui/preferences.rs:769
 msgid "Hide Discord RPC when music is paused"
 msgstr "Discord RPC ausblenden, wenn die Musik pausiert ist"
 
-#: src/ui/preferences.rs:760
+#: src/ui/preferences.rs:770
 msgid "Show Play/Pause Icon"
 msgstr "Wiedergabe-/Pause-Symbol anzeigen"
 
-#: src/ui/preferences.rs:760
+#: src/ui/preferences.rs:770
 msgid "Display a small play or pause indicator on the album art"
 msgstr "Ein kleines Wiedergabe- oder Pause-Symbol auf dem Albumcover anzeigen"
 
-#: src/ui/preferences.rs:838
+#: src/ui/preferences.rs:848
 msgid "This build ships without Last.fm API credentials"
 msgstr "Dieser Build enthält keine Last.fm-API-Zugangsdaten"
 
-#: src/ui/preferences.rs:839 src/ui/preferences.rs:855
-#: src/ui/preferences.rs:977
+#: src/ui/preferences.rs:849 src/ui/preferences.rs:865
+#: src/ui/preferences.rs:987
 msgid "Connect"
 msgstr "Verbinden"
 
-#: src/ui/preferences.rs:846
+#: src/ui/preferences.rs:856
 #, rust-format
 msgid "Connected as {name}"
 msgstr "Verbunden als {name}"
 
-#: src/ui/preferences.rs:848
+#: src/ui/preferences.rs:858
 msgid "Disconnect"
 msgstr "Trennen"
 
-#: src/ui/preferences.rs:853
+#: src/ui/preferences.rs:863
 msgid "Not connected"
 msgstr "Nicht verbunden"
 
-#: src/ui/preferences.rs:862
+#: src/ui/preferences.rs:872
 #, rust-format
 msgid "{n} play saved while offline, retried automatically"
 msgid_plural "{n} plays saved while offline, retried automatically"
@@ -2495,21 +2504,21 @@ msgstr[0] ""
 msgstr[1] ""
 "{n} Wiedergaben offline gespeichert, werden automatisch erneut gesendet"
 
-#: src/ui/preferences.rs:873
+#: src/ui/preferences.rs:883
 msgid "Could not open your browser"
 msgstr "Dein Browser konnte nicht geöffnet werden"
 
 #. Translators: {service} is Last.fm or ListenBrainz.
-#: src/ui/preferences.rs:884
+#: src/ui/preferences.rs:894
 #, rust-format
 msgid "Disconnected from {service}"
 msgstr "Von {service} getrennt"
 
-#: src/ui/preferences.rs:914
+#: src/ui/preferences.rs:924
 msgid "Authorize Mixtapes"
 msgstr "Mixtapes autorisieren"
 
-#: src/ui/preferences.rs:915
+#: src/ui/preferences.rs:925
 msgid ""
 "Approve access in the browser tab that just opened. This closes on its own "
 "once Last.fm confirms."
@@ -2517,79 +2526,79 @@ msgstr ""
 "Erlaube den Zugriff im gerade geöffneten Browser-Tab. Dieses Fenster "
 "schließt sich von selbst, sobald Last.fm bestätigt."
 
-#: src/ui/preferences.rs:942
+#: src/ui/preferences.rs:952
 msgid "Connected to Last.fm"
 msgstr "Mit Last.fm verbunden"
 
-#: src/ui/preferences.rs:942
+#: src/ui/preferences.rs:952
 #, rust-format
 msgid "Scrobbling to Last.fm as {name}"
 msgstr "Scrobbling an Last.fm als {name}"
 
-#: src/ui/preferences.rs:947
+#: src/ui/preferences.rs:957
 msgid "Last.fm authorization timed out"
 msgstr "Zeitüberschreitung bei der Last.fm-Autorisierung"
 
-#: src/ui/preferences.rs:954
+#: src/ui/preferences.rs:964
 msgid "Connect ListenBrainz"
 msgstr "ListenBrainz verbinden"
 
-#: src/ui/preferences.rs:955
+#: src/ui/preferences.rs:965
 msgid "Paste the user token from your ListenBrainz settings."
 msgstr "Füge das Nutzertoken aus deinen ListenBrainz-Einstellungen ein."
 
-#: src/ui/preferences.rs:959
+#: src/ui/preferences.rs:969
 msgid "User Token"
 msgstr "Nutzertoken"
 
-#: src/ui/preferences.rs:962
+#: src/ui/preferences.rs:972
 msgid "Get Your Token"
 msgstr "Token abrufen"
 
-#: src/ui/preferences.rs:992
+#: src/ui/preferences.rs:1002
 msgid "Connected to ListenBrainz"
 msgstr "Mit ListenBrainz verbunden"
 
-#: src/ui/preferences.rs:992
+#: src/ui/preferences.rs:1002
 #, rust-format
 msgid "Scrobbling to ListenBrainz as {name}"
 msgstr "Scrobbling an ListenBrainz als {name}"
 
-#: src/ui/preferences.rs:1004
+#: src/ui/preferences.rs:1014
 msgid "Submit the tracks you play to Last.fm and ListenBrainz"
 msgstr "Gespielte Titel an Last.fm und ListenBrainz übermitteln"
 
-#: src/ui/preferences.rs:1006
+#: src/ui/preferences.rs:1016
 msgid "Enable Scrobbling"
 msgstr "Scrobbling aktivieren"
 
-#: src/ui/preferences.rs:1006
+#: src/ui/preferences.rs:1016
 msgid "Submit a play once you've heard half a track, or four minutes"
 msgstr ""
 "Eine Wiedergabe übermitteln, sobald du die Hälfte eines Titels oder vier "
 "Minuten gehört hast"
 
-#: src/ui/preferences.rs:1016
+#: src/ui/preferences.rs:1026
 msgid "Send \"Now Playing\""
 msgstr "„Läuft gerade“ senden"
 
-#: src/ui/preferences.rs:1016
+#: src/ui/preferences.rs:1026
 msgid "Show the current track on your profile while it plays"
 msgstr "Den aktuellen Titel in deinem Profil anzeigen, solange er läuft"
 
-#: src/ui/preferences.rs:1034
+#: src/ui/preferences.rs:1044
 msgid "Queued Listens"
 msgstr "Wartende Wiedergaben"
 
-#: src/ui/preferences.rs:1056
+#: src/ui/preferences.rs:1066
 msgid "Reorganizing downloads..."
 msgstr "Downloads werden neu sortiert..."
 
-#: src/ui/preferences.rs:1063
+#: src/ui/preferences.rs:1073
 msgid "Downloads already organized"
 msgstr "Downloads sind bereits sortiert"
 
-#: src/ui/preferences.rs:1064
+#: src/ui/preferences.rs:1074
 #, rust-format
 msgid "Reorganized {n} file(s)"
 msgid_plural "Reorganized {n} file(s)"
@@ -2597,46 +2606,46 @@ msgstr[0] "{n} Datei neu sortiert"
 msgstr[1] "{n} Dateien neu sortiert"
 
 #. Translators: {n} files were moved, {errors} is how many were left where they are.
-#: src/ui/preferences.rs:1066
+#: src/ui/preferences.rs:1076
 #, rust-format
 msgid "Reorganized {n} file(s); {errors} skipped"
 msgid_plural "Reorganized {n} file(s); {errors} skipped"
 msgstr[0] "{n} Datei neu sortiert, {errors} übersprungen"
 msgstr[1] "{n} Dateien neu sortiert, {errors} übersprungen"
 
-#: src/ui/preferences.rs:1079
+#: src/ui/preferences.rs:1089
 #, rust-format
 msgid "Songs are saved to {folder}"
 msgstr "Songs werden in {folder} gespeichert"
 
-#: src/ui/preferences.rs:1080
+#: src/ui/preferences.rs:1090
 msgid "Audio Format"
 msgstr "Audioformat"
 
-#: src/ui/preferences.rs:1095
+#: src/ui/preferences.rs:1105
 msgid "Folder Structure"
 msgstr "Ordnerstruktur"
 
-#: src/ui/preferences.rs:1095
+#: src/ui/preferences.rs:1105
 msgid "How new downloads are organized on disk"
 msgstr "Wie neue Downloads auf dem Datenträger abgelegt werden"
 
-#: src/ui/preferences.rs:1106
+#: src/ui/preferences.rs:1116
 msgid ""
 "Structure saved. Existing files will be reorganized after downloads finish."
 msgstr ""
 "Struktur gespeichert. Vorhandene Dateien werden neu sortiert, sobald die "
 "Downloads fertig sind."
 
-#: src/ui/preferences.rs:1112
+#: src/ui/preferences.rs:1122
 msgid "Use Songs Subfolder"
 msgstr "Unterordner „Songs“ verwenden"
 
-#: src/ui/preferences.rs:1112
+#: src/ui/preferences.rs:1122
 msgid "Place downloads inside a Songs/ subfolder within the music directory"
 msgstr "Downloads in einem Unterordner Songs/ im Musikverzeichnis ablegen"
 
-#: src/ui/preferences.rs:1119
+#: src/ui/preferences.rs:1129
 msgid ""
 "Subfolder setting saved. Existing files will be reorganized after downloads "
 "finish."
@@ -2644,11 +2653,11 @@ msgstr ""
 "Unterordner-Einstellung gespeichert. Vorhandene Dateien werden neu sortiert, "
 "sobald die Downloads fertig sind."
 
-#: src/ui/preferences.rs:1125
+#: src/ui/preferences.rs:1135
 msgid "Download Liked Songs"
 msgstr "Lieblingssongs herunterladen"
 
-#: src/ui/preferences.rs:1125
+#: src/ui/preferences.rs:1135
 msgid "Download a song when you like it"
 msgstr "Einen Song herunterladen, sobald du ihn mit „Mag ich“ bewertest"
 
