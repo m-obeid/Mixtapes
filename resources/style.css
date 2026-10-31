@@ -924,3 +924,11 @@ button.view-all {
 button.view-all image {
   -gtk-icon-size: 12px;
 }
+
+/* A row of moods or genres on Explore */
+.category-chip {
+  padding: 6px 14px;
+  min-height: 0;
+  border-radius: 999px;
+  font-weight: 500;
+}

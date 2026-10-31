@@ -306,12 +306,10 @@ impl ExplorePage {
         });
         section.append(&section_header(title, on_view_all));
         let scroll_box = HorizontalScrollBox::new();
-        // Outside the scrolled window: a margin within it is empty space for
-        // the overlay scrollbar to draw a line in.
-        scroll_box.widget().set_margin_bottom(12);
-        let strip = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).build();
+        scroll_box.set_edge_fade(true);
+        let strip = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
         for category in categories.iter().take(PILL_LIMIT) {
-            let button = gtk::Button::builder().label(&category.title).css_classes(["pill"]).build();
+            let button = gtk::Button::builder().label(&category.title).css_classes(["category-chip"]).build();
             let ctx = self.ctx.clone();
             let category = category.clone();
             button.connect_clicked(move |_| ctx.nav.go(NavRequest::Category { title: category.title.clone(), params: category.params.clone() }));

@@ -5,6 +5,7 @@ pub mod allocate_bin;
 pub mod card_grid;
 pub mod cover_picture;
 pub mod drag_scroll;
+pub mod fade_edges;
 pub mod fade_bottom_bin;
 pub mod fade_edges_bin;
 pub mod lyric_rows;
