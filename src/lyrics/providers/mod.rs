@@ -8,6 +8,7 @@ pub mod binilyrics;
 pub mod captions;
 pub mod lrclib;
 pub mod netease;
+pub mod qqmusic;
 pub mod unison;
 pub mod ytm;
 
@@ -30,6 +31,7 @@ pub enum Provider {
     Unison,
     BiniLyrics,
     NetEase,
+    QqMusic,
     Lrclib,
     YouTubeCaptions,
     YouTubeMusic,
@@ -37,10 +39,10 @@ pub enum Provider {
 
 impl Provider {
     /// Catalog order, the same as prefs::DEFAULT_PROVIDER_ORDER.
-    pub const ALL: [Provider; 8] = [Provider::AppleMusic, Provider::Unison, Provider::BetterLyrics, Provider::BiniLyrics, Provider::NetEase, Provider::Lrclib, Provider::YouTubeCaptions, Provider::YouTubeMusic];
+    pub const ALL: [Provider; 9] = [Provider::AppleMusic, Provider::Unison, Provider::BetterLyrics, Provider::BiniLyrics, Provider::NetEase, Provider::QqMusic, Provider::Lrclib, Provider::YouTubeCaptions, Provider::YouTubeMusic];
 
     /// The providers whose other matches can be listed, in the order the manual search walks them.
-    pub const MATCH_BROWSERS: [Provider; 3] = [Provider::AppleMusic, Provider::NetEase, Provider::Lrclib];
+    pub const MATCH_BROWSERS: [Provider; 4] = [Provider::AppleMusic, Provider::NetEase, Provider::QqMusic, Provider::Lrclib];
 
     /// Providers that carry a romanization of their own, richest first.
     pub const ROMANIZATION_SOURCES: [Provider; 2] = [Provider::NetEase, Provider::AppleMusic];
@@ -52,6 +54,7 @@ impl Provider {
             Provider::Unison => "Unison",
             Provider::BiniLyrics => "BiniLyrics",
             Provider::NetEase => "NetEase",
+            Provider::QqMusic => "QQ Music",
             Provider::Lrclib => "LRCLIB",
             Provider::YouTubeCaptions => "YouTube Captions",
             Provider::YouTubeMusic => "YouTube Music",
@@ -66,7 +69,7 @@ impl Provider {
     pub fn native_rank(self) -> u8 {
         match self {
             Provider::AppleMusic | Provider::BetterLyrics | Provider::Unison | Provider::BiniLyrics => RANK_WORD,
-            Provider::NetEase | Provider::Lrclib | Provider::YouTubeCaptions => RANK_LINE,
+            Provider::NetEase | Provider::QqMusic | Provider::Lrclib | Provider::YouTubeCaptions => RANK_LINE,
             Provider::YouTubeMusic => RANK_PLAIN,
         }
     }
@@ -234,6 +237,7 @@ impl Source for Live {
                 Provider::BetterLyrics => betterlyrics::fetch(&self.http, request).await,
                 Provider::BiniLyrics => binilyrics::fetch(&self.http, request).await,
                 Provider::NetEase => netease::fetch(&self.http, request).await,
+                Provider::QqMusic => qqmusic::fetch(&self.http, request).await,
                 Provider::Lrclib => lrclib::fetch(&self.http, &self.cooldowns, request).await,
                 Provider::Unison => unison::fetch(&self.http, &self.cooldowns, request).await,
                 Provider::YouTubeCaptions => captions::fetch(&self.http, request).await,
@@ -251,6 +255,7 @@ impl Source for Live {
             match provider {
                 Provider::AppleMusic => self.apple.matches(request, limit).await,
                 Provider::NetEase => netease::matches(&self.http, request, limit).await,
+                Provider::QqMusic => qqmusic::matches(&self.http, request, limit).await,
                 Provider::Lrclib => lrclib::matches(&self.http, request, limit).await,
                 _ => Vec::new(),
             }

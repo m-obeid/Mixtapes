@@ -319,7 +319,7 @@ pub(crate) mod tests {
         let lonely = self::rig();
         lonely.source.answer(Provider::BetterLyrics, "Song", plain("BetterLyrics", "la"));
         assert_eq!(lonely.chain.run(&track("Song")).await.unwrap().source, "BetterLyrics");
-        assert_eq!(lonely.source.called(), [Provider::AppleMusic, Provider::Unison, Provider::BetterLyrics, Provider::BiniLyrics, Provider::NetEase, Provider::Lrclib, Provider::YouTubeCaptions]);
+        assert_eq!(lonely.source.called(), [Provider::AppleMusic, Provider::Unison, Provider::BetterLyrics, Provider::BiniLyrics, Provider::NetEase, Provider::QqMusic, Provider::Lrclib, Provider::YouTubeCaptions]);
     }
 
     #[tokio::test]
@@ -378,7 +378,7 @@ pub(crate) mod tests {
     async fn nothing_anywhere_is_none() {
         let rig = rig();
         assert!(rig.chain.run(&track("Song")).await.is_none());
-        assert_eq!(rig.source.called().len(), 8);
+        assert_eq!(rig.source.called().len(), 9);
     }
 
     #[tokio::test]

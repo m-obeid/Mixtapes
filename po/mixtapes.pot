@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 19:36+0100\n"
+"POT-Creation-Date: 2026-10-31 20:05+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -21,7 +21,7 @@ msgstr ""
 #. Translators: stands in for a missing track title in the Discord status.
 #. Translators: a lyrics search result whose catalog entry has no title.
 #. Translators: stands in for a missing artist name
-#: src/discord.rs:92 src/lyrics/providers/mod.rs:212
+#: src/discord.rs:92 src/lyrics/providers/mod.rs:215
 #: src/ui/pages/playlist.rs:2987
 msgid "Unknown"
 msgstr ""
@@ -898,7 +898,7 @@ msgid "Player"
 msgstr ""
 
 #: src/ui/cover_view.rs:76 src/ui/expanded_player.rs:65
-#: src/ui/expanded_player.rs:246 src/ui/preferences_lyrics.rs:119
+#: src/ui/expanded_player.rs:246 src/ui/preferences_lyrics.rs:120
 msgid "Lyrics"
 msgstr ""
 
@@ -2694,94 +2694,98 @@ msgid "Line-synced. Romanization and translation for CJK"
 msgstr ""
 
 #: src/ui/preferences_lyrics.rs:23
-msgid "Line-synced. Large community LRC database"
+msgid "Line-synced. Strong on Japanese and Chinese tracks"
 msgstr ""
 
 #: src/ui/preferences_lyrics.rs:24
-msgid "Line-synced. Subtitles written for music videos"
+msgid "Line-synced. Large community LRC database"
 msgstr ""
 
 #: src/ui/preferences_lyrics.rs:25
+msgid "Line-synced. Subtitles written for music videos"
+msgstr ""
+
+#: src/ui/preferences_lyrics.rs:26
 msgid "Plain text, no timing. Always available when signed in"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:31
+#: src/ui/preferences_lyrics.rs:32
 msgid "Quality-aware"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:31
+#: src/ui/preferences_lyrics.rs:32
 msgid "Strict"
 msgstr ""
 
 #. Translators: the choices for the second lyric line. "Background" is the background vocals of a song.
-#: src/ui/preferences_lyrics.rs:33 src/ui/preferences_lyrics.rs:34
+#: src/ui/preferences_lyrics.rs:34 src/ui/preferences_lyrics.rs:35
 #: src/ui/widgets/lyrics_view.rs:38
 msgid "Off"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:38
+#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:38
 msgid "Auto"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:38
+#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:38
 msgid "Romanization"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:38
+#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:38
 msgid "Translation"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:33
+#: src/ui/preferences_lyrics.rs:34
 msgid "Background"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:34
+#: src/ui/preferences_lyrics.rs:35
 msgid "Subtle"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:34
+#: src/ui/preferences_lyrics.rs:35
 msgid "Full"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:53
+#: src/ui/preferences_lyrics.rs:54
 msgid "Move up"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:53
+#: src/ui/preferences_lyrics.rs:54
 msgid "Move down"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:99
+#: src/ui/preferences_lyrics.rs:100
 msgid "Keep at least one lyrics provider enabled"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:133
+#: src/ui/preferences_lyrics.rs:134
 msgid "Search Queue"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:133
+#: src/ui/preferences_lyrics.rs:134
 msgid "Tried from the top down. Switch one off to skip it."
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:142
+#: src/ui/preferences_lyrics.rs:143
 msgid "Matching"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:143
+#: src/ui/preferences_lyrics.rs:144
 msgid ""
 "Quality-aware keeps looking for synced lyrics before settling for plain "
 "text. Strict takes the first hit of any kind."
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:148
+#: src/ui/preferences_lyrics.rs:149
 msgid "When to Stop Searching"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:162
+#: src/ui/preferences_lyrics.rs:163
 msgid "Second Line"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:163
+#: src/ui/preferences_lyrics.rs:164
 msgid ""
 "An extra line under each lyric. Auto picks a romanization for non-Latin "
 "scripts and background vocals otherwise. What's available depends on the "
@@ -2789,15 +2793,15 @@ msgid ""
 msgstr ""
 
 #. Translators: row title, followed by what the second lyric line shows: Off, Auto, Romanization, Translation or Background.
-#: src/ui/preferences_lyrics.rs:168
+#: src/ui/preferences_lyrics.rs:169
 msgid "Show"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:183
+#: src/ui/preferences_lyrics.rs:184
 msgid "Effects"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:184
+#: src/ui/preferences_lyrics.rs:185
 msgid ""
 "Subtle fades each word in over the time it's actually held and grows the "
 "active line. Full adds a glow on the active line and blurs the lines "
@@ -2805,55 +2809,55 @@ msgid ""
 msgstr ""
 
 #. Translators: how strong the lyric effects are: Off, Subtle or Full.
-#: src/ui/preferences_lyrics.rs:189
+#: src/ui/preferences_lyrics.rs:190
 msgid "Level"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:192
+#: src/ui/preferences_lyrics.rs:193
 msgid "Emulate Word Timing"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:192
+#: src/ui/preferences_lyrics.rs:193
 msgid ""
 "On sources with no word timing, move the highlight across the line instead "
 "of lighting the whole line at once"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:205
+#: src/ui/preferences_lyrics.rs:206
 msgid "Text Size"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:206
+#: src/ui/preferences_lyrics.rs:207
 msgid ""
 "Resting size of the lyric column, and how much bigger the line being sung is "
 "drawn. The active line is scaled when it is painted, so growing it never "
 "changes the row's height or disturbs the scrolling."
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:210
+#: src/ui/preferences_lyrics.rs:211
 msgid "Lyrics Size"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:222
+#: src/ui/preferences_lyrics.rs:223
 msgid "Active Line Size"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:247
+#: src/ui/preferences_lyrics.rs:248
 msgid "Queue changes only apply to tracks that aren't cached yet"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:248
+#: src/ui/preferences_lyrics.rs:249
 msgid "Clear Cached Lyrics"
 msgstr ""
 
-#: src/ui/preferences_lyrics.rs:257
+#: src/ui/preferences_lyrics.rs:258
 #, rust-format
 msgid "Cleared {n} cached track(s)"
 msgid_plural "Cleared {n} cached track(s)"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/preferences_lyrics.rs:257
+#: src/ui/preferences_lyrics.rs:258
 msgid "No cached lyrics to clear"
 msgstr ""
 

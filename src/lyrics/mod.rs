@@ -103,7 +103,7 @@ impl Lyrics {
     }
 
     /// Every provider's display name, in catalog order.
-    pub fn provider_names() -> [&'static str; 8] {
+    pub fn provider_names() -> [&'static str; 9] {
         prefs::DEFAULT_PROVIDER_ORDER
     }
 
@@ -353,7 +353,7 @@ mod tests {
         while let Ok(item) = receiver.try_recv() {
             got.push(item);
         }
-        assert_eq!(got.len(), 8);
+        assert_eq!(got.len(), 9);
         assert_eq!(got[0].source, "LRCLIB");
         assert_eq!(got[0].result.as_ref().unwrap().lines[0].text, "cached");
         let found = |name: &str| got.iter().find(|a| a.source == name).unwrap().result.clone();
@@ -395,7 +395,7 @@ mod tests {
         assert!(!Lyrics::provider_supports_matches("Nope"));
         assert!(lyrics.fetch_provider_matches("Nope", &track(), DEFAULT_MATCH_LIMIT).await.is_empty());
         assert!(lyrics.search_manually("typed", None, None, DEFAULT_MANUAL_SEARCH_LIMIT).await.is_empty());
-        assert_eq!(Lyrics::provider_names().len(), 8);
+        assert_eq!(Lyrics::provider_names().len(), 9);
     }
 
     /// Live checks, one per provider. Run with `cargo test lyrics::tests::live -- --ignored --nocapture --test-threads=1`.

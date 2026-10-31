@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 19:36+0100\n"
+"POT-Creation-Date: 2026-10-31 20:05+0100\n"
 "PO-Revision-Date: 2026-10-07 13:09+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -20,7 +20,7 @@ msgstr ""
 #. Translators: stands in for a missing track title in the Discord status.
 #. Translators: a lyrics search result whose catalog entry has no title.
 #. Translators: stands in for a missing artist name
-#: src/discord.rs:92 src/lyrics/providers/mod.rs:212
+#: src/discord.rs:92 src/lyrics/providers/mod.rs:215
 #: src/ui/pages/playlist.rs:2987
 msgid "Unknown"
 msgstr "Unbekannt"
@@ -900,7 +900,7 @@ msgid "Player"
 msgstr "Player"
 
 #: src/ui/cover_view.rs:76 src/ui/expanded_player.rs:65
-#: src/ui/expanded_player.rs:246 src/ui/preferences_lyrics.rs:119
+#: src/ui/expanded_player.rs:246 src/ui/preferences_lyrics.rs:120
 msgid "Lyrics"
 msgstr "Songtext"
 
@@ -2304,8 +2304,12 @@ msgid "Lower Volume for Other Players"
 msgstr "Lautstärke für andere Player senken"
 
 #: src/ui/preferences.rs:409
-msgid "Turn the music down while another app plays media, like a voice message in a browser"
-msgstr "Musik leiser stellen, während eine andere App Medien abspielt, etwa eine Sprachnachricht im Browser"
+msgid ""
+"Turn the music down while another app plays media, like a voice message in a "
+"browser"
+msgstr ""
+"Musik leiser stellen, während eine andere App Medien abspielt, etwa eine "
+"Sprachnachricht im Browser"
 
 #: src/ui/preferences.rs:415
 msgid "Normalize Volume"
@@ -2763,82 +2767,86 @@ msgid "Line-synced. Romanization and translation for CJK"
 msgstr "Zeilensynchron. Romanisierung und Übersetzung für CJK"
 
 #: src/ui/preferences_lyrics.rs:23
+msgid "Line-synced. Strong on Japanese and Chinese tracks"
+msgstr "Zeilensynchron. Stark bei japanischen und chinesischen Titeln"
+
+#: src/ui/preferences_lyrics.rs:24
 msgid "Line-synced. Large community LRC database"
 msgstr "Zeilensynchron. Große LRC-Datenbank der Community"
 
-#: src/ui/preferences_lyrics.rs:24
+#: src/ui/preferences_lyrics.rs:25
 msgid "Line-synced. Subtitles written for music videos"
 msgstr "Zeilensynchron. Untertitel von Musikvideos"
 
-#: src/ui/preferences_lyrics.rs:25
+#: src/ui/preferences_lyrics.rs:26
 msgid "Plain text, no timing. Always available when signed in"
 msgstr "Reiner Text ohne Timing. Mit Anmeldung immer verfügbar"
 
-#: src/ui/preferences_lyrics.rs:31
+#: src/ui/preferences_lyrics.rs:32
 msgid "Quality-aware"
 msgstr "Qualitätsbewusst"
 
-#: src/ui/preferences_lyrics.rs:31
+#: src/ui/preferences_lyrics.rs:32
 msgid "Strict"
 msgstr "Streng"
 
 #. Translators: the choices for the second lyric line. "Background" is the background vocals of a song.
-#: src/ui/preferences_lyrics.rs:33 src/ui/preferences_lyrics.rs:34
+#: src/ui/preferences_lyrics.rs:34 src/ui/preferences_lyrics.rs:35
 #: src/ui/widgets/lyrics_view.rs:38
 msgid "Off"
 msgstr "Aus"
 
-#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:38
+#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:38
 msgid "Auto"
 msgstr "Auto"
 
-#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:38
+#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:38
 msgid "Romanization"
 msgstr "Romanisierung"
 
-#: src/ui/preferences_lyrics.rs:33 src/ui/widgets/lyrics_view.rs:38
+#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:38
 msgid "Translation"
 msgstr "Übersetzung"
 
-#: src/ui/preferences_lyrics.rs:33
+#: src/ui/preferences_lyrics.rs:34
 msgid "Background"
 msgstr "Hintergrundgesang"
 
-#: src/ui/preferences_lyrics.rs:34
+#: src/ui/preferences_lyrics.rs:35
 msgid "Subtle"
 msgstr "Dezent"
 
-#: src/ui/preferences_lyrics.rs:34
+#: src/ui/preferences_lyrics.rs:35
 msgid "Full"
 msgstr "Voll"
 
-#: src/ui/preferences_lyrics.rs:53
+#: src/ui/preferences_lyrics.rs:54
 msgid "Move up"
 msgstr "Nach oben"
 
-#: src/ui/preferences_lyrics.rs:53
+#: src/ui/preferences_lyrics.rs:54
 msgid "Move down"
 msgstr "Nach unten"
 
-#: src/ui/preferences_lyrics.rs:99
+#: src/ui/preferences_lyrics.rs:100
 msgid "Keep at least one lyrics provider enabled"
 msgstr "Mindestens ein Songtext-Anbieter muss aktiviert bleiben"
 
-#: src/ui/preferences_lyrics.rs:133
+#: src/ui/preferences_lyrics.rs:134
 msgid "Search Queue"
 msgstr "Suchreihenfolge"
 
-#: src/ui/preferences_lyrics.rs:133
+#: src/ui/preferences_lyrics.rs:134
 msgid "Tried from the top down. Switch one off to skip it."
 msgstr ""
 "Wird von oben nach unten durchprobiert. Schalte einen Anbieter aus, um ihn "
 "zu überspringen."
 
-#: src/ui/preferences_lyrics.rs:142
+#: src/ui/preferences_lyrics.rs:143
 msgid "Matching"
 msgstr "Abgleich"
 
-#: src/ui/preferences_lyrics.rs:143
+#: src/ui/preferences_lyrics.rs:144
 msgid ""
 "Quality-aware keeps looking for synced lyrics before settling for plain "
 "text. Strict takes the first hit of any kind."
@@ -2846,15 +2854,15 @@ msgstr ""
 "Qualitätsbewusst sucht weiter nach synchronisierten Songtexten, bevor reiner "
 "Text genommen wird. Streng nimmt den ersten Treffer, egal welcher Art."
 
-#: src/ui/preferences_lyrics.rs:148
+#: src/ui/preferences_lyrics.rs:149
 msgid "When to Stop Searching"
 msgstr "Wann die Suche endet"
 
-#: src/ui/preferences_lyrics.rs:162
+#: src/ui/preferences_lyrics.rs:163
 msgid "Second Line"
 msgstr "Zweite Zeile"
 
-#: src/ui/preferences_lyrics.rs:163
+#: src/ui/preferences_lyrics.rs:164
 msgid ""
 "An extra line under each lyric. Auto picks a romanization for non-Latin "
 "scripts and background vocals otherwise. What's available depends on the "
@@ -2865,15 +2873,15 @@ msgstr ""
 "Was verfügbar ist, hängt vom Anbieter ab."
 
 #. Translators: row title, followed by what the second lyric line shows: Off, Auto, Romanization, Translation or Background.
-#: src/ui/preferences_lyrics.rs:168
+#: src/ui/preferences_lyrics.rs:169
 msgid "Show"
 msgstr "Anzeigen"
 
-#: src/ui/preferences_lyrics.rs:183
+#: src/ui/preferences_lyrics.rs:184
 msgid "Effects"
 msgstr "Effekte"
 
-#: src/ui/preferences_lyrics.rs:184
+#: src/ui/preferences_lyrics.rs:185
 msgid ""
 "Subtle fades each word in over the time it's actually held and grows the "
 "active line. Full adds a glow on the active line and blurs the lines "
@@ -2884,15 +2892,15 @@ msgstr ""
 "und zeichnet die am weitesten entfernten Zeilen unscharf."
 
 #. Translators: how strong the lyric effects are: Off, Subtle or Full.
-#: src/ui/preferences_lyrics.rs:189
+#: src/ui/preferences_lyrics.rs:190
 msgid "Level"
 msgstr "Stärke"
 
-#: src/ui/preferences_lyrics.rs:192
+#: src/ui/preferences_lyrics.rs:193
 msgid "Emulate Word Timing"
 msgstr "Wort-Timing simulieren"
 
-#: src/ui/preferences_lyrics.rs:192
+#: src/ui/preferences_lyrics.rs:193
 msgid ""
 "On sources with no word timing, move the highlight across the line instead "
 "of lighting the whole line at once"
@@ -2900,11 +2908,11 @@ msgstr ""
 "Bei Quellen ohne Wort-Timing die Hervorhebung über die Zeile wandern lassen, "
 "statt die ganze Zeile auf einmal hervorzuheben"
 
-#: src/ui/preferences_lyrics.rs:205
+#: src/ui/preferences_lyrics.rs:206
 msgid "Text Size"
 msgstr "Textgröße"
 
-#: src/ui/preferences_lyrics.rs:206
+#: src/ui/preferences_lyrics.rs:207
 msgid ""
 "Resting size of the lyric column, and how much bigger the line being sung is "
 "drawn. The active line is scaled when it is painted, so growing it never "
@@ -2914,32 +2922,32 @@ msgstr ""
 "gezeichnet wird. Die aktive Zeile wird erst beim Zeichnen skaliert. Ihre "
 "Vergrößerung ändert daher weder die Zeilenhöhe noch stört sie das Scrollen."
 
-#: src/ui/preferences_lyrics.rs:210
+#: src/ui/preferences_lyrics.rs:211
 msgid "Lyrics Size"
 msgstr "Songtextgröße"
 
-#: src/ui/preferences_lyrics.rs:222
+#: src/ui/preferences_lyrics.rs:223
 msgid "Active Line Size"
 msgstr "Größe der aktiven Zeile"
 
-#: src/ui/preferences_lyrics.rs:247
+#: src/ui/preferences_lyrics.rs:248
 msgid "Queue changes only apply to tracks that aren't cached yet"
 msgstr ""
 "Änderungen an der Reihenfolge gelten nur für Titel, die noch nicht "
 "zwischengespeichert sind"
 
-#: src/ui/preferences_lyrics.rs:248
+#: src/ui/preferences_lyrics.rs:249
 msgid "Clear Cached Lyrics"
 msgstr "Zwischengespeicherte Songtexte löschen"
 
-#: src/ui/preferences_lyrics.rs:257
+#: src/ui/preferences_lyrics.rs:258
 #, rust-format
 msgid "Cleared {n} cached track(s)"
 msgid_plural "Cleared {n} cached track(s)"
 msgstr[0] "Songtext-Cache für {n} Titel geleert"
 msgstr[1] "Songtext-Cache für {n} Titel geleert"
 
-#: src/ui/preferences_lyrics.rs:257
+#: src/ui/preferences_lyrics.rs:258
 msgid "No cached lyrics to clear"
 msgstr "Keine zwischengespeicherten Songtexte vorhanden"
 

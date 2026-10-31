@@ -18,10 +18,10 @@ use serde_json::{Map, Value, json};
 use crate::paths::Paths;
 
 /// Canonical provider names in the order the chain used before the queue was configurable.
-pub const DEFAULT_PROVIDER_ORDER: [&str; 8] = ["Apple Music", "Unison", "BetterLyrics", "BiniLyrics", "NetEase", "LRCLIB", "YouTube Captions", "YouTube Music"];
+pub const DEFAULT_PROVIDER_ORDER: [&str; 9] = ["Apple Music", "Unison", "BetterLyrics", "BiniLyrics", "NetEase", "QQ Music", "LRCLIB", "YouTube Captions", "YouTube Music"];
 
-/// Providers added after orders were first saved, and the one each goes in front of.
-const NEWCOMERS: [(&str, &str); 2] = [("Unison", "BetterLyrics"), ("YouTube Captions", "YouTube Music")];
+/// Providers added after orders were first saved, the one each joins, and whether it goes after that one.
+const NEWCOMERS: [(&str, &str, bool); 3] = [("Unison", "BetterLyrics", false), ("QQ Music", "NetEase", true), ("YouTube Captions", "YouTube Music", false)];
 
 pub const MATCH_QUALITY: &str = "quality";
 pub const MATCH_STRICT: &str = "strict";
@@ -103,19 +103,24 @@ impl LyricsPrefs {
             }
         }
         let mut newcomers = Vec::new();
+        let mut had_gaps = false;
         for name in DEFAULT_PROVIDER_ORDER {
             if !out.iter().any(|n| n == name) {
-                if NEWCOMERS.iter().any(|(new, _)| *new == name) {
+                if NEWCOMERS.iter().any(|(new, _, _)| *new == name) {
                     newcomers.push(name);
+                } else {
+                    had_gaps = true;
                 }
                 out.push(name.to_owned());
             }
         }
-        // A provider newer than the saved order goes in front of its neighbour, not to the bottom.
-        for (name, neighbour) in NEWCOMERS.iter().filter(|(name, _)| newcomers.contains(name)) {
+        // A provider newer than the saved order joins its neighbour, not the bottom.
+        // Only over a complete order: a shorter list is one this app never saved.
+        let saved_whole = !had_gaps;
+        for (name, neighbour, after) in NEWCOMERS.iter().filter(|(name, _, _)| saved_whole && newcomers.contains(name)) {
             if let Some(from) = out.iter().position(|n| n == name) {
                 let moved = out.remove(from);
-                let to = out.iter().position(|n| n == neighbour).unwrap_or(out.len());
+                let to = out.iter().position(|n| n == neighbour).map_or(out.len(), |at| at + usize::from(*after));
                 out.insert(to, moved);
             }
         }
@@ -284,7 +289,14 @@ mod tests {
     fn saved_order_drops_unknown_names_and_appends_new_providers() {
         let (_dir, prefs) = prefs();
         put(&prefs, json!({"lyrics_provider_order": ["LRCLIB", "Gone", "LRCLIB", 7, "NetEase"]}));
-        assert_eq!(prefs.full_provider_order(), ["LRCLIB", "NetEase", "Apple Music", "Unison", "BetterLyrics", "BiniLyrics", "YouTube Captions", "YouTube Music"]);
+        assert_eq!(prefs.full_provider_order(), ["LRCLIB", "NetEase", "Apple Music", "BetterLyrics", "Unison", "BiniLyrics", "QQ Music", "YouTube Captions", "YouTube Music"]);
+    }
+
+    #[test]
+    fn a_whole_saved_order_takes_new_providers_beside_their_neighbours() {
+        let (_dir, prefs) = prefs();
+        put(&prefs, json!({"lyrics_provider_order": ["LRCLIB", "NetEase", "BetterLyrics", "Apple Music", "BiniLyrics", "YouTube Music"]}));
+        assert_eq!(prefs.full_provider_order(), ["LRCLIB", "NetEase", "QQ Music", "Unison", "BetterLyrics", "Apple Music", "BiniLyrics", "YouTube Captions", "YouTube Music"]);
     }
 
     #[test]
