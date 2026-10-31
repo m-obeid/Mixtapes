@@ -143,7 +143,7 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
     toolbar.add_top_bar(&adw::HeaderBar::builder().show_title(false).css_classes(["flat"]).build());
     toolbar.set_content(Some(&scroller));
     // Breakpoints want a minimum size on the dialog.
-    let dialog = adw::Dialog::builder().title(tr!("What's New")).content_width(560).content_height(720).width_request(300).height_request(400).child(&toolbar).build();
+    let dialog = adw::Dialog::builder().title(tr!("What's New")).content_width(560).width_request(300).height_request(400).child(&toolbar).build();
     if pref_bool(ctx, DONATION_PREF, true) {
         // Pinned under the notes on a desktop. Narrow, it took half the sheet, so there it
         // scrolls with the notes. The dialog's own width decides, so a live resize moves it.
