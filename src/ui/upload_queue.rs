@@ -61,17 +61,17 @@ impl UploadQueue {
     /// Ask for files and upload what comes back.
     pub fn pick_files(self: &Rc<Self>, parent: &impl IsA<gtk::Widget>) {
         if !self.ctx.net.client().is_authenticated() {
-            crate::ui::toast(parent, "Sign in to upload songs");
+            crate::ui::toast(parent, &tr!("Sign in to upload songs"));
             return;
         }
         let filter = gtk::FileFilter::new();
-        filter.set_name(Some("Audio Files"));
+        filter.set_name(Some(&tr!("Audio Files")));
         for extension in crate::net::uploads::SUPPORTED {
             filter.add_pattern(&format!("*.{extension}"));
         }
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
-        let dialog = gtk::FileDialog::builder().title("Upload Songs").filters(&filters).default_filter(&filter).build();
+        let dialog = gtk::FileDialog::builder().title(tr!("Upload Songs")).filters(&filters).default_filter(&filter).build();
         let window = parent.as_ref().root().and_downcast::<gtk::Window>();
         let this = self.clone();
         dialog.open_multiple(window.as_ref(), None::<&gio::Cancellable>, move |result| {
@@ -102,7 +102,8 @@ impl UploadQueue {
         let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let widget = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).margin_top(4).margin_bottom(4).build();
         widget.append(&gtk::Label::builder().label(&name).halign(gtk::Align::Start).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["caption"]).build());
-        let status = gtk::Label::builder().label("Waiting").halign(gtk::Align::Start).css_classes(["caption", "dim-label"]).build();
+        // Translators: status of a file waiting for its turn to upload.
+        let status = gtk::Label::builder().label(tr!("Waiting")).halign(gtk::Align::Start).css_classes(["caption", "dim-label"]).build();
         widget.append(&status);
         self.items.append(&widget);
         self.rows.borrow_mut().push((file.to_path_buf(), Row { widget, status }));
@@ -134,7 +135,7 @@ impl UploadQueue {
     async fn work(self: Rc<Self>) {
         loop {
             let Some(file) = self.waiting.borrow_mut().pop_front() else { break };
-            self.set_status(&file, "Uploading...");
+            self.set_status(&file, &tr!("Uploading..."));
             let http = self.ctx.net.client().http().clone();
             let headers = self.ctx.net.client().browser_headers();
             let path = file.clone();
@@ -147,7 +148,7 @@ impl UploadQueue {
             match handle.await {
                 Ok(Ok(())) => {
                     tracing::info!(file = %file.display(), "song uploaded");
-                    self.set_status(&file, "Uploaded");
+                    self.set_status(&file, &tr!("Uploaded"));
                 }
                 Ok(Err(err)) => {
                     tracing::warn!(%err, file = %file.display(), "upload failed");

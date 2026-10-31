@@ -90,9 +90,9 @@ pub fn section_header(title: &str, on_view_all: Option<Box<dyn Fn()>>) -> gtk::B
     header.append(&gtk::Label::builder().label(title).css_classes(["heading"]).halign(gtk::Align::Start).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build());
     if let Some(on_view_all) = on_view_all {
         let content = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).build();
-        content.append(&gtk::Label::new(Some("View All")));
+        content.append(&gtk::Label::new(Some(&tr!("View All"))));
         content.append(&gtk::Image::from_icon_name("go-next-symbolic"));
-        let button = gtk::Button::builder().child(&content).css_classes(["flat", "dim-label", "caption", "view-all"]).valign(gtk::Align::Center).tooltip_text(format!("View All {title}")).build();
+        let button = gtk::Button::builder().child(&content).css_classes(["flat", "dim-label", "caption", "view-all"]).valign(gtk::Align::Center).tooltip_text(tr!("View All {title}", title)).build();
         button.set_cursor_from_name(Some("pointer"));
         button.connect_clicked(move |_| on_view_all());
         header.append(&button);

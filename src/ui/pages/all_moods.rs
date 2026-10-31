@@ -64,5 +64,6 @@ impl AllMoodsPage {
 
 /// The page and its navigation entry are both named after the row.
 pub fn display_title(title: &str) -> String {
-    format!("All {title}")
+    // Translators: {title} is the name of a row of categories, like Genres
+    tr!("All {title}", title)
 }

@@ -32,7 +32,7 @@ use crate::ui::{copy_to_clipboard, toast};
 
 // Sort dropdown positions. The first five come straight off the track data;
 // the last two need a side fetch, so they are appended rather than slotted in.
-const SORT_LABELS: [&str; 7] = ["Default", "Title (A-Z)", "Artist (A-Z)", "Album (A-Z)", "Duration", "Most viewed", "Recently added"];
+const SORT_LABELS: [&str; 7] = [tr_noop!("Default"), tr_noop!("Title (A-Z)"), tr_noop!("Artist (A-Z)"), tr_noop!("Album (A-Z)"), tr_noop!("Duration"), tr_noop!("Most viewed"), tr_noop!("Recently added")];
 
 /// Delay the live refresh when something is on screen already, so the
 /// chunked re-render does not fight the page-open animation.
@@ -167,10 +167,10 @@ impl PlaylistPage {
         header_info_box.append(&cover_wrapper);
 
         let details_col = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).valign(gtk::Align::Center).hexpand(true).build();
-        let name_label = gtk::Label::builder().label("Playlist Title").css_classes(["title-1"]).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).justify(gtk::Justification::Left).halign(gtk::Align::Start).vexpand(false).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).lines(3).build();
+        let name_label = gtk::Label::builder().label(tr!("Playlist Title")).css_classes(["title-1"]).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).justify(gtk::Justification::Left).halign(gtk::Align::Start).vexpand(false).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).lines(3).build();
         details_col.append(&name_label);
         let description_label = gtk::Label::builder().css_classes(["body"]).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).justify(gtk::Justification::Left).halign(gtk::Align::Start).vexpand(false).hexpand(true).build();
-        let read_more = read_more_label("Read more");
+        let read_more = read_more_label(&tr!("Read more"));
         read_more.set_visible(false);
         let desc_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(0).visible(false).build();
         desc_box.append(&description_label);
@@ -182,16 +182,16 @@ impl PlaylistPage {
         details_col.append(&stats_label);
 
         let actions_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).margin_top(12).build();
-        let play_btn = gtk::Button::builder().label("Play").css_classes(["suggested-action", "pill"]).build();
+        let play_btn = gtk::Button::builder().label(tr!("Play")).css_classes(["suggested-action", "pill"]).build();
         actions_box.append(&play_btn);
         let shuffle_btn = gtk::Button::builder().icon_name("media-playlist-shuffle-symbolic").css_classes(["circular"]).valign(gtk::Align::Center).halign(gtk::Align::Center).build();
         shuffle_btn.set_size_request(48, 48);
         actions_box.append(&shuffle_btn);
         // Add to Library, a button of its own beside shuffle like in YouTube Music. Shown once the page knows it can be saved.
-        let library_btn = gtk::Button::builder().icon_name("non-starred-symbolic").css_classes(["circular"]).valign(gtk::Align::Center).halign(gtk::Align::Center).tooltip_text("Add to Library").visible(false).build();
+        let library_btn = gtk::Button::builder().icon_name("non-starred-symbolic").css_classes(["circular"]).valign(gtk::Align::Center).halign(gtk::Align::Center).tooltip_text(tr!("Add to Library")).visible(false).build();
         library_btn.set_size_request(48, 48);
         actions_box.append(&library_btn);
-        let more_btn = gtk::MenuButton::builder().icon_name("view-more-symbolic").css_classes(["circular"]).tooltip_text("More Options").build();
+        let more_btn = gtk::MenuButton::builder().icon_name("view-more-symbolic").css_classes(["circular"]).tooltip_text(tr!("More Options")).build();
         more_btn.set_size_request(48, 48);
         let more_menu = gio::Menu::new();
         more_btn.set_menu_model(Some(&more_menu));
@@ -201,15 +201,16 @@ impl PlaylistPage {
         header_container.append(&header_info_box);
 
         // -- sort row ----------------------------------------------------
-        let sort_dropdown = gtk::DropDown::from_strings(&SORT_LABELS);
+        let sort_labels = SORT_LABELS.map(crate::i18n::gettext);
+        let sort_dropdown = gtk::DropDown::from_strings(&sort_labels.each_ref().map(String::as_str));
         sort_dropdown.set_valign(gtk::Align::Center);
         sort_dropdown.add_css_class("pill");
         sort_dropdown.add_css_class("sort-dropdown");
-        let sort_dir_btn = gtk::Button::builder().icon_name("view-sort-ascending-symbolic").css_classes(["flat", "circular"]).tooltip_text("Toggle sort direction").build();
+        let sort_dir_btn = gtk::Button::builder().icon_name("view-sort-ascending-symbolic").css_classes(["flat", "circular"]).tooltip_text(tr!("Toggle sort direction")).build();
         let sort_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).margin_top(12).css_classes(["playlist-sort-row"]).visible(false).build();
         sort_row.append(&sort_dropdown);
         sort_row.append(&sort_dir_btn);
-        let select_btn = gtk::ToggleButton::builder().icon_name("selection-mode-symbolic").css_classes(["flat", "circular"]).tooltip_text("Select multiple songs").build();
+        let select_btn = gtk::ToggleButton::builder().icon_name("selection-mode-symbolic").css_classes(["flat", "circular"]).tooltip_text(tr!("Select multiple songs")).build();
         let spacer = gtk::Box::builder().hexpand(true).build();
         // Small inline spinner just left of the multi-select button while tracks load.
         let content_spinner = adw::Spinner::builder().valign(gtk::Align::Center).margin_end(4).visible(false).build();
@@ -221,26 +222,26 @@ impl PlaylistPage {
 
         // -- selection bar -----------------------------------------------
         let selection_bar = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).margin_top(8).margin_bottom(4).visible(false).build();
-        let selection_count_label = gtk::Label::builder().label("0 selected").css_classes(["caption"]).ellipsize(gtk::pango::EllipsizeMode::End).hexpand(true).xalign(0.0).build();
+        let selection_count_label = gtk::Label::builder().label(trn!("{n} selected", "{n} selected", 0)).css_classes(["caption"]).ellipsize(gtk::pango::EllipsizeMode::End).hexpand(true).xalign(0.0).build();
         selection_bar.append(&selection_count_label);
-        let sel_play_btn = gtk::Button::builder().icon_name("media-playback-start-symbolic").css_classes(["flat"]).tooltip_text("Play selected").build();
+        let sel_play_btn = gtk::Button::builder().icon_name("media-playback-start-symbolic").css_classes(["flat"]).tooltip_text(tr!("Play selected")).build();
         selection_bar.append(&sel_play_btn);
-        let sel_add_btn = gtk::Button::builder().icon_name("list-add-symbolic").css_classes(["flat"]).tooltip_text("Add selected to playlist").build();
+        let sel_add_btn = gtk::Button::builder().icon_name("list-add-symbolic").css_classes(["flat"]).tooltip_text(tr!("Add selected to playlist")).build();
         selection_bar.append(&sel_add_btn);
-        let sel_remove_btn = gtk::Button::builder().icon_name("user-trash-symbolic").css_classes(["flat", "destructive-action"]).tooltip_text("Remove selected from playlist").visible(false).build();
+        let sel_remove_btn = gtk::Button::builder().icon_name("user-trash-symbolic").css_classes(["flat", "destructive-action"]).tooltip_text(tr!("Remove selected from playlist")).visible(false).build();
         selection_bar.append(&sel_remove_btn);
-        let sel_overflow_btn = gtk::MenuButton::builder().icon_name("view-more-symbolic").css_classes(["flat"]).tooltip_text("More").build();
+        let sel_overflow_btn = gtk::MenuButton::builder().icon_name("view-more-symbolic").css_classes(["flat"]).tooltip_text(tr!("More")).build();
         let sel_overflow_menu = gio::Menu::new();
-        sel_overflow_menu.append(Some("Select All"), Some("page.sel_all"));
-        sel_overflow_menu.append(Some("Deselect All"), Some("page.sel_none"));
+        sel_overflow_menu.append(Some(&tr!("Select All")), Some("page.sel_all"));
+        sel_overflow_menu.append(Some(&tr!("Deselect All")), Some("page.sel_none"));
         sel_overflow_btn.set_menu_model(Some(&sel_overflow_menu));
         selection_bar.append(&sel_overflow_btn);
         // Cancel is an X icon so it fits next to the others on narrow viewports.
-        let sel_cancel_btn = gtk::Button::builder().icon_name("window-close-symbolic").css_classes(["flat"]).tooltip_text("Cancel selection").build();
+        let sel_cancel_btn = gtk::Button::builder().icon_name("window-close-symbolic").css_classes(["flat"]).tooltip_text(tr!("Cancel selection")).build();
         selection_bar.append(&sel_cancel_btn);
         header_container.append(&selection_bar);
 
-        let empty_label = gtk::Label::builder().label("This playlist has no songs").css_classes(["dim-label"]).margin_top(24).halign(gtk::Align::Center).visible(false).build();
+        let empty_label = gtk::Label::builder().label(tr!("This playlist has no songs")).css_classes(["dim-label"]).margin_top(24).halign(gtk::Align::Center).visible(false).build();
         header_container.append(&empty_label);
 
         // -- models and list view ----------------------------------------
@@ -599,7 +600,7 @@ impl PlaylistPage {
         let weak = Rc::downgrade(self);
         self.meta_label.connect_activate_link(move |_, uri| {
             if let (Some(p), Some(aid)) = (weak.upgrade(), uri.strip_prefix("artist:")) {
-                p.ctx.nav.go(NavRequest::Artist { id: Some(aid.to_owned()), name: "Artist".to_owned() });
+                p.ctx.nav.go(NavRequest::Artist { id: Some(aid.to_owned()), name: tr!("Artist") });
                 return glib::Propagation::Stop;
             }
             glib::Propagation::Proceed
@@ -746,8 +747,8 @@ impl PlaylistPage {
             self.name_label.set_label(&initial.title);
             self.description_label.set_label("");
             match initial.author.as_deref().filter(|a| *a != "Unknown") {
-                Some(author) => self.meta_label.set_label(&format!("{author} • Loading tracks...")),
-                None => self.meta_label.set_label("Loading tracks..."),
+                Some(author) => self.meta_label.set_label(&format!("{author} • {}", tr!("Loading tracks..."))),
+                None => self.meta_label.set_label(&tr!("Loading tracks...")),
             }
             match &initial.thumb {
                 Some(thumb) => {
@@ -786,7 +787,7 @@ impl PlaylistPage {
             return;
         } else if self.stack.visible_child_name().as_deref() != Some("content") {
             self.stack.set_visible_child_name("loading");
-            self.name_label.set_label("Loading...");
+            self.name_label.set_label(&tr!("Loading..."));
             self.description_label.set_label("");
             self.meta_label.set_label("");
             self.cover.clear();
@@ -800,7 +801,7 @@ impl PlaylistPage {
     /// A playlist kept on this device: rendered from the store in one go.
     fn load_local(self: &Rc<Self>, playlist_id: &str) {
         let Some(details) = self.ctx.local.details(playlist_id) else {
-            self.update_ui(HeaderText { title: "Playlist Not Found".into(), description: String::new(), meta1: "Playlist".into(), meta2: "0 songs".into() }, Vec::new(), Vec::new(), false, Some(0), false);
+            self.update_ui(HeaderText { title: tr!("Playlist Not Found"), description: String::new(), meta1: tr!("Playlist"), meta2: count_text(0, false) }, Vec::new(), Vec::new(), false, Some(0), false);
             return;
         };
         self.is_fully_loaded.set(true);
@@ -857,7 +858,7 @@ impl PlaylistPage {
             meta1_parts.push(if n == 1 { "Single" } else if (2..=6).contains(&n) { "EP" } else { "Album" }.to_owned());
         } else {
             let privacy = cached.meta.privacy.clone().map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
-            meta1_parts.push(privacy.map(capitalize).unwrap_or_else(|| "Playlist".to_owned()));
+            meta1_parts.push(privacy.map(privacy_label).unwrap_or_else(|| tr!("Playlist")));
         }
         if let Some(year) = cached.meta.year.as_ref().filter(|y| !y.is_empty()) {
             meta1_parts.push(year.clone());
@@ -997,7 +998,7 @@ impl PlaylistPage {
             }
             match cached.filter(|c| !c.tracks.is_empty()) {
                 Some(cached) => {
-                    let title = if !cached.title.is_empty() { cached.title.clone() } else { initial.as_ref().map(|i| i.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| "Playlist".to_owned()) };
+                    let title = if !cached.title.is_empty() { cached.title.clone() } else { initial.as_ref().map(|i| i.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| tr!("Playlist")) };
                     let tracks = cached.tracks;
                     page.title_text.replace(title.clone());
                     page.tracks.borrow_mut().set(tracks.clone());
@@ -1006,7 +1007,7 @@ impl PlaylistPage {
                     let total: u32 = tracks.iter().filter_map(|t| t.duration_seconds).sum();
                     let n = tracks.len();
                     let thumbnails: Vec<String> = tracks.first().and_then(|t| t.thumb.clone()).into_iter().collect();
-                    page.update_ui(HeaderText { title, description: String::new(), meta1: "Offline".to_owned(), meta2: format!("{n} songs • {}", short_duration(total)) }, thumbnails, tracks, false, Some(n as u32), false);
+                    page.update_ui(HeaderText { title, description: String::new(), meta1: tr!("Offline"), meta2: format!("{} • {}", count_text(n, false), short_duration(total)) }, thumbnails, tracks, false, Some(n as u32), false);
                 }
                 None => page.show_offline_empty(initial),
             }
@@ -1016,18 +1017,18 @@ impl PlaylistPage {
     fn show_offline_empty(&self, initial: Option<InitialData>) {
         match initial {
             Some(initial) => {
-                let title = if initial.title.is_empty() { "Playlist".to_owned() } else { initial.title };
+                let title = if initial.title.is_empty() { tr!("Playlist") } else { initial.title };
                 self.title_text.replace(title.clone());
                 self.name_label.set_label(&title);
-                self.meta_label.set_label("Offline - no cached data");
+                self.meta_label.set_label(&tr!("Offline - no cached data"));
                 self.stack.set_visible_child_name("content");
-                self.empty_label.set_label("This playlist hasn't been cached for offline use");
+                self.empty_label.set_label(&tr!("This playlist hasn't been cached for offline use"));
                 self.empty_label.set_visible(true);
                 self.is_fully_loaded.set(true);
             }
             None => {
                 self.stack.set_visible_child_name("content");
-                self.empty_label.set_label("Offline - no cached data");
+                self.empty_label.set_label(&tr!("Offline - no cached data"));
                 self.empty_label.set_visible(true);
                 self.is_fully_loaded.set(true);
             }
@@ -1084,7 +1085,7 @@ impl PlaylistPage {
                 Ok(Err(err)) => {
                     tracing::warn!(%err, id, "playlist fetch failed");
                     if !incremental && page.tracks.borrow().rendered().is_empty() {
-                        page.update_ui(HeaderText { title: "Error Loading Playlist".into(), description: err.to_string(), meta1: "Playlist • Error".into(), meta2: "0 songs".into() }, Vec::new(), Vec::new(), false, Some(0), false);
+                        page.update_ui(HeaderText { title: tr!("Error Loading Playlist"), description: err.to_string(), meta1: format!("{} • {}", tr!("Playlist"), tr!("Error")), meta2: count_text(0, false) }, Vec::new(), Vec::new(), false, Some(0), false);
                     }
                     page.is_loading_more.set(false);
                     page.load_more_spinner.set_visible(false);
@@ -1099,14 +1100,14 @@ impl PlaylistPage {
     fn apply_fetch(self: &Rc<Self>, playlist_id: &str, fetched: Fetched, incremental: bool) {
         let mut details = match fetched {
             Fetched::Raw { title, tracks } => {
-                let title = title.or_else(|| Some(self.title_text.borrow().clone()).filter(|t| !t.is_empty())).unwrap_or_else(|| "Chart Playlist".to_owned());
+                let title = title.or_else(|| Some(self.title_text.borrow().clone()).filter(|t| !t.is_empty())).unwrap_or_else(|| tr!("Chart Playlist"));
                 self.tracks.borrow_mut().set(tracks.clone());
                 self.is_fully_fetched.set(true);
                 self.is_fully_loaded.set(true);
                 let total: u32 = tracks.iter().filter_map(|t| t.duration_seconds).sum();
                 let count = tracks.len();
-                let meta2 = format!("{count} songs • {}", short_duration(total));
-                self.update_ui(HeaderText { title, description: String::new(), meta1: "Playlist".into(), meta2 }, Vec::new(), tracks, false, Some(count as u32), false);
+                let meta2 = format!("{} • {}", count_text(count, false), short_duration(total));
+                self.update_ui(HeaderText { title, description: String::new(), meta1: tr!("Playlist"), meta2 }, Vec::new(), tracks, false, Some(count as u32), false);
                 return;
             }
             Fetched::Details(d) => *d,
@@ -1118,17 +1119,24 @@ impl PlaylistPage {
         let is_podcast = playlists::is_podcast(playlist_id) || playlists::is_podcast(&details.id);
         let song_count = count_text(track_len, is_podcast);
 
+        // YouTube's own lists (LM, SS, SE) come named in English. The net layer and the cache keep them so.
+        if playlist_id.len() == 2 {
+            details.title = crate::i18n::gettext(&details.title);
+        }
         let (count_str, is_owned, author, album_type) = if is_local {
             // The likes list is yours but not something to rename or delete.
             let owned = playlist_id != crate::local_library::LIKED_ID;
-            (song_count.clone(), owned, crate::local_library::HERE.to_owned(), None)
+            (song_count.clone(), owned, crate::i18n::gettext(crate::local_library::HERE), None)
         } else if is_upload {
             let author = details.author.iter().map(|a| glib::markup_escape_text(&a.name).to_string()).collect::<Vec<_>>().join(", ");
             (song_count.clone(), false, author, Some("Upload".to_owned()))
         } else if playlist_id == "LM" {
             // Liked Music shows no year, as the Python branch set year = None.
             details.year = None;
-            (song_count.clone(), false, "You".to_owned(), None)
+            // The net layer and the cache keep this in English.
+            details.description = crate::i18n::gettext(&details.description);
+            // Translators: the owner shown on the Liked Music list, meaning the listener
+            (song_count.clone(), false, tr!("You"), None)
         } else if is_album {
             self.audio_playlist_id.replace(details.audio_playlist_id.clone());
             let track_count = details.track_count.unwrap_or(track_len as u32);
@@ -1137,13 +1145,15 @@ impl PlaylistPage {
             self.ctx.net.caches().set_album_track_count(playlist_id, track_count);
             let author = artist_markup(&details.author);
             let owned = playlists::is_own_playlist(&details, playlist_id, self.account_name().as_deref());
-            (song_count.clone(), owned, author, Some(album_type.to_owned()))
+            (song_count.clone(), owned, author, Some(crate::i18n::gettext(album_type)))
         } else {
-            let count_str = if details.track_count.is_none() && self.is_inf() { "Infinite".to_owned() } else { song_count.clone() };
+            // Translators: shown in place of the song count on an endless radio list
+            let count_str = if details.track_count.is_none() && self.is_inf() { tr!("Infinite") } else { song_count.clone() };
             let owned = playlists::is_own_playlist(&details, playlist_id, self.account_name().as_deref());
             self.privacy_text.replace(Some(details.privacy.clone().unwrap_or_else(|| "PUBLIC".to_owned())));
-            let mut author = if details.author.is_empty() { "Unknown".to_owned() } else { artist_markup(&details.author) };
-            if author.contains("Unknown") && !author.starts_with("<a") {
+            let unknown = unknown_artist();
+            let mut author = if details.author.is_empty() { unknown.clone() } else { artist_markup(&details.author) };
+            if author.contains(&unknown) && !author.starts_with("<a") {
                 if let Some(text) = &details.collaborators {
                     let clean = text.strip_prefix("by ").unwrap_or(text);
                     author = glib::markup_escape_text(clean).to_string();
@@ -1159,19 +1169,20 @@ impl PlaylistPage {
         };
         let mut meta1_parts: Vec<String> = Vec::new();
         if is_album {
-            meta1_parts.push(album_type.clone().unwrap_or_else(|| "Album".to_owned()));
+            meta1_parts.push(album_type.clone().unwrap_or_else(|| tr!("Album")));
         } else if is_upload {
-            meta1_parts.push("Upload".to_owned());
+            // Translators: noun, an album the listener uploaded to YouTube Music
+            meta1_parts.push(tr!("Upload"));
         } else if is_local {
-            meta1_parts.push("Playlist".to_owned());
+            meta1_parts.push(tr!("Playlist"));
         } else {
             if is_podcast {
                 // A show has no privacy to speak of.
                 self.privacy_text.replace(None);
-                meta1_parts.push("Podcast".to_owned());
+                meta1_parts.push(tr!("Podcast"));
             } else {
                 let privacy = self.privacy_text.borrow().clone().or_else(|| details.privacy.clone());
-                meta1_parts.push(privacy.map(capitalize).unwrap_or_else(|| "Playlist".to_owned()));
+                meta1_parts.push(privacy.map(privacy_label).unwrap_or_else(|| tr!("Playlist")));
             }
         }
         if let Some(year) = details.year.as_ref().filter(|y| !y.is_empty()) {
@@ -1184,7 +1195,7 @@ impl PlaylistPage {
         if !duration_str.is_empty() {
             meta2_parts.push(duration_str);
         }
-        let title = if details.title.is_empty() { let t = self.title_text.borrow().clone(); if t.is_empty() { "Unknown Playlist".to_owned() } else { t } } else { details.title.clone() };
+        let title = if details.title.is_empty() { let t = self.title_text.borrow().clone(); if t.is_empty() { tr!("Unknown Playlist") } else { t } } else { details.title.clone() };
         let track_count = details.track_count;
         let thumbnails = details.thumbnails.clone();
         let mut tracks = std::mem::take(&mut details.tracks);
@@ -1317,7 +1328,7 @@ impl PlaylistPage {
         }
         self.full_description.replace(description.to_owned());
         self.description_expanded.set(false);
-        self.read_more.borrow().set_markup("<a href='toggle'>Read more</a>");
+        self.read_more.borrow().set_markup(&format!("<a href='toggle'>{}</a>", glib::markup_escape_text(&tr!("Read more"))));
         if description.chars().count() > 200 {
             self.description_label.set_label(&truncate_description(description));
             self.read_more.borrow().set_visible(true);
@@ -1335,14 +1346,14 @@ impl PlaylistPage {
         let full = self.full_description.borrow().clone();
         let text = if expanded {
             self.description_label.set_label(&full);
-            "Show less"
+            tr!("Show less")
         } else {
             self.description_label.set_label(&truncate_description(&full));
-            "Read more"
+            tr!("Read more")
         };
         let old = self.read_more.borrow().clone();
         self.desc_box.remove(&old);
-        let label = read_more_label(text);
+        let label = read_more_label(&text);
         self.desc_box.append(&label);
         self.read_more.replace(label);
         self.connect_read_more();
@@ -1682,7 +1693,7 @@ impl PlaylistPage {
                 let Some(page) = weak.upgrade() else { return };
                 match online {
                     true => page.play_track(&track),
-                    false => toast(&page.stack, "This song isn't downloaded"),
+                    false => toast(&page.stack, &tr!("This song isn't downloaded")),
                 }
             })));
             return;
@@ -1737,7 +1748,7 @@ impl PlaylistPage {
         }
         let queue = self.offline_filter_queue(self.best_queue());
         if queue.is_empty() {
-            toast(&self.stack, "No downloaded songs to play");
+            toast(&self.stack, &tr!("No downloaded songs to play"));
             return;
         }
         self.ctx.player.play_tracks(queue, 0, false, self.queue_source(), self.is_inf());
@@ -1752,7 +1763,7 @@ impl PlaylistPage {
         }
         let queue = self.offline_filter_queue(self.best_queue());
         if queue.is_empty() {
-            toast(&self.stack, "No downloaded songs to shuffle");
+            toast(&self.stack, &tr!("No downloaded songs to shuffle"));
             return;
         }
         self.ctx.player.play_tracks(queue, usize::MAX, true, self.queue_source(), self.is_inf());
@@ -1786,7 +1797,7 @@ impl PlaylistPage {
         let authenticated = self.ctx.net.client().is_authenticated();
         self.library_btn.set_sensitive(if authenticated { !pid.starts_with("MPRE") || self.audio_playlist_id.borrow().is_some() } else { self.library_item.borrow().is_some() });
         self.library_btn.set_icon_name(if saved { "starred-symbolic" } else { "non-starred-symbolic" });
-        self.library_btn.set_tooltip_text(Some(if saved { "Remove from Library" } else { "Add to Library" }));
+        self.library_btn.set_tooltip_text(Some(&if saved { tr!("Remove from Library") } else { tr!("Add to Library") }));
         // The accent the artist page's star takes once subscribed.
         if saved {
             self.library_btn.add_css_class("liked-button");
@@ -1798,21 +1809,21 @@ impl PlaylistPage {
     fn rebuild_more_menu(&self, is_owned: bool) {
         self.more_menu.remove_all();
         let queue_section = gio::Menu::new();
-        queue_section.append(Some("Play Next"), Some("page.play_all_next"));
-        queue_section.append(Some("Add to Queue"), Some("page.add_all_to_queue"));
+        queue_section.append(Some(&tr!("Play Next")), Some("page.play_all_next"));
+        queue_section.append(Some(&tr!("Add to Queue")), Some("page.add_all_to_queue"));
         self.more_menu.append_section(None, &queue_section);
         let local = self.playlist_id.borrow().as_deref().is_some_and(crate::local_library::is_local);
-        self.more_menu.append(Some("Add all to Playlist…"), Some("page.show_add_all_to_playlist"));
+        self.more_menu.append(Some(&tr!("Add all to Playlist…")), Some("page.show_add_all_to_playlist"));
         if self.ctx.online.is_online() && (self.audio_playlist_id.borrow().is_some() || self.playlist_id.borrow().is_some()) {
-            self.more_menu.append(Some("Start Radio"), Some("page.start_radio"));
+            self.more_menu.append(Some(&tr!("Start Radio")), Some("page.start_radio"));
         }
         if !local {
-            self.more_menu.append(Some("Copy Link"), Some("page.copy_link"));
+            self.more_menu.append(Some(&tr!("Copy Link")), Some("page.copy_link"));
         }
-        self.more_menu.append(Some("Download All"), Some("page.download_all"));
+        self.more_menu.append(Some(&tr!("Download All")), Some("page.download_all"));
         if is_owned {
-            self.more_menu.append(Some("Edit Playlist"), Some("page.edit"));
-            self.more_menu.append(Some("Delete Playlist"), Some("page.delete"));
+            self.more_menu.append(Some(&tr!("Edit Playlist")), Some("page.edit"));
+            self.more_menu.append(Some(&tr!("Delete Playlist")), Some("page.delete"));
         }
     }
 
@@ -1825,7 +1836,7 @@ impl PlaylistPage {
         if !tracks.is_empty() {
             let n = tracks.len();
             self.ctx.player.add_to_queue(tracks, true);
-            toast(&self.stack, &format!("Playing {n} tracks next"));
+            toast(&self.stack, &trn!("Playing {n} track next", "Playing {n} tracks next", n));
         }
     }
 
@@ -1834,7 +1845,7 @@ impl PlaylistPage {
         if !tracks.is_empty() {
             let n = tracks.len();
             self.ctx.player.add_to_queue(tracks, false);
-            toast(&self.stack, &format!("Added {n} tracks to queue"));
+            toast(&self.stack, &trn!("Added {n} track to queue", "Added {n} tracks to queue", n));
         }
     }
 
@@ -1843,7 +1854,7 @@ impl PlaylistPage {
         let Some(pid) = pid else { return };
         let radio_id = if pid.starts_with("RDAMPL") { pid } else { format!("RDAMPL{pid}") };
         self.ctx.player.start_radio(None, Some(radio_id), &self.title_text.borrow());
-        toast(&self.stack, "Starting radio...");
+        toast(&self.stack, &tr!("Starting radio..."));
     }
 
     /// Port of _on_download_all: every track the page knows, tagged with the
@@ -1854,7 +1865,7 @@ impl PlaylistPage {
             return;
         }
         if !self.ctx.online.is_online() {
-            toast(&self.stack, "Downloads need an internet connection");
+            toast(&self.stack, &tr!("Downloads need an internet connection"));
             return;
         }
         let title = self.title_text.borrow().clone();
@@ -1881,7 +1892,7 @@ impl PlaylistPage {
         let link = yt_music_link(&pid, is_album, self.audio_playlist_id.borrow().as_deref());
         if !link.is_empty() {
             copy_to_clipboard(&link);
-            toast(&self.stack, "Link copied to clipboard");
+            toast(&self.stack, &tr!("Link copied to clipboard"));
             tracing::info!(link, "copied link");
         }
     }
@@ -1949,7 +1960,7 @@ impl PlaylistPage {
             let Some(item) = self.library_item.borrow().clone() else { return };
             self.ctx.local.set_saved(&item, saving);
             self.is_saved_to_library.set(saving);
-            toast(&self.stack, if saving { "Saved to library" } else { "Removed from library" });
+            toast(&self.stack, &if saving { tr!("Saved to library") } else { tr!("Removed from library") });
             self.refresh_more_menu(self.is_owned.get());
             self.ctx.nav.refresh_library();
             return;
@@ -1970,7 +1981,7 @@ impl PlaylistPage {
             let Some(page) = weak.upgrade() else { return };
             match handle.await {
                 Ok(Ok(())) => {
-                    toast(&page.stack, if saving { "Saved to library" } else { "Removed from library" });
+                    toast(&page.stack, &if saving { tr!("Saved to library") } else { tr!("Removed from library") });
                     page.ctx.nav.refresh_library();
                 }
                 Ok(Err(err)) => {
@@ -1980,7 +1991,7 @@ impl PlaylistPage {
                     page.header_says_saved.set(was.1);
                     page.ctx.net.caches().mark_library(&known_as, is_album, was.0);
                     page.refresh_more_menu(page.is_owned.get());
-                    toast(&page.stack, if saving { "Failed to save" } else { "Failed to remove" });
+                    toast(&page.stack, &if saving { tr!("Failed to save") } else { tr!("Failed to remove") });
                 }
                 Err(_) => {}
             }
@@ -2065,7 +2076,7 @@ impl PlaylistPage {
     fn update_selection_count(&self) {
         let count = self.tracks.borrow().selected_count();
         let total = self.visible_tracks().len();
-        self.selection_count_label.set_label(&format!("{count} of {total} selected"));
+        self.selection_count_label.set_label(&trn!("{n} of {total} selected", "{n} of {total} selected", count, total));
     }
 
     /// Selected tracks in the current sort order.
@@ -2105,7 +2116,7 @@ impl PlaylistPage {
                 self.ctx.local.remove_tracks(&pid, &ids);
             }
             if announce {
-                toast(&self.stack, &format!("Removed {} tracks", ids.len()));
+                toast(&self.stack, &trn!("Removed {n} track", "Removed {n} tracks", ids.len()));
             }
             self.ctx.nav.refresh_library();
             self.load_playlist(&pid, None);
@@ -2122,14 +2133,14 @@ impl PlaylistPage {
                 Ok(Ok(())) => {
                     page.invalidate_disk_cache();
                     if announce {
-                        toast(&page.stack, &format!("Removed {count} tracks"));
+                        toast(&page.stack, &trn!("Removed {n} track", "Removed {n} tracks", count));
                     }
                     page.load_playlist(&pid, None);
                 }
                 Ok(Err(err)) => {
                     tracing::warn!(%err, "remove failed");
                     if announce {
-                        toast(&page.stack, "Failed to remove tracks");
+                        toast(&page.stack, &tr!("Failed to remove tracks"));
                     }
                 }
                 Err(_) => {}
@@ -2151,7 +2162,7 @@ impl PlaylistPage {
             })).collect::<Vec<_>>(),
         });
         copy_to_clipboard(&serde_json::to_string_pretty(&debug).unwrap_or_default());
-        toast(&self.stack, &format!("Copied debug data for {} tracks", tracks.len()));
+        toast(&self.stack, &trn!("Copied debug data for {n} track", "Copied debug data for {n} tracks", tracks.len()));
     }
 
     // -- sort -------------------------------------------------------------
@@ -2239,13 +2250,22 @@ impl PlaylistPage {
         if total == 0 || ranked as f64 >= total as f64 * 0.9 {
             return;
         }
-        let label = if sort_type == SORT_VIEWS { "view counts" } else { "add dates" };
-        toast(&self.stack, &format!("Only {ranked} of {total} songs have {label} — the rest stay at the end"));
+        let message = if sort_type == SORT_VIEWS {
+            trn!("Only {ranked} of {n} song has view counts — the rest stay at the end", "Only {ranked} of {n} songs have view counts — the rest stay at the end", total, ranked)
+        } else {
+            trn!("Only {ranked} of {n} song has add dates — the rest stay at the end", "Only {ranked} of {n} songs have add dates — the rest stay at the end", total, ranked)
+        };
+        toast(&self.stack, &message);
     }
 
     fn sort_metric_unavailable(&self, sort_type: u32, offline: bool) {
-        let label = if sort_type == SORT_VIEWS { "View counts" } else { "Add dates" };
-        toast(&self.stack, &if offline { format!("{label} need an internet connection") } else { format!("{label} aren't available for this list") });
+        let message = match (sort_type == SORT_VIEWS, offline) {
+            (true, true) => tr!("View counts need an internet connection"),
+            (true, false) => tr!("View counts aren't available for this list"),
+            (false, true) => tr!("Add dates need an internet connection"),
+            (false, false) => tr!("Add dates aren't available for this list"),
+        };
+        toast(&self.stack, &message);
         self.content_spinner.set_visible(false);
         self.sort_dropdown.set_sensitive(true);
         if self.sort_dropdown.selected() != SORT_DEFAULT {
@@ -2286,32 +2306,34 @@ impl PlaylistPage {
             if has_selection {
                 let n = self.tracks.borrow().selected_count();
                 let page = self.clone();
-                extras.push(MenuAction::new(&format!("Remove {n} from Playlist"), Section::Remove, move || page.remove_selected_from_playlist()));
+                // Translators: {n} is the number of selected songs
+                extras.push(MenuAction::new(&trn!("Remove {n} from Playlist", "Remove {n} from Playlist", n), Section::Remove, move || page.remove_selected_from_playlist()));
             } else if let (Some(set_id), false) = (track.set_video_id.clone(), vid.is_empty()) {
                 let page = self.clone();
                 let vid_c = vid.clone();
-                extras.push(MenuAction::new("Remove from Playlist", Section::Remove, move || page.remove_items(vec![(vid_c.clone(), set_id.clone())], false)));
+                extras.push(MenuAction::new(&tr!("Remove from Playlist"), Section::Remove, move || page.remove_items(vec![(vid_c.clone(), set_id.clone())], false)));
             }
         }
         let is_upload = self.playlist_id().is_some_and(|p| p.starts_with("UPLOAD"));
         if let (true, Some(entity_id)) = (is_upload, track.entity_id.clone()) {
             let page = self.clone();
-            let title = if track.title.is_empty() { "this song".to_owned() } else { track.title.clone() };
-            extras.push(MenuAction::new("Delete Upload", Section::Remove, move || page.confirm_delete_upload_track(&entity_id, &title)));
+            // Translators: stands in for a missing song title in "Are you sure you want to delete "{title}"?" and "Deleted {title}"
+            let title = if track.title.is_empty() { tr!("this song") } else { track.title.clone() };
+            extras.push(MenuAction::new(&tr!("Delete Upload"), Section::Remove, move || page.confirm_delete_upload_track(&entity_id, &title)));
         }
         if self.multi_select.get() {
             let is_selected = !vid.is_empty() && self.tracks.borrow().is_selected(&vid);
             let page = self.clone();
             let row_c = row.clone();
             let vid_c = vid.clone();
-            extras.push(MenuAction::new(if is_selected { "Deselect This" } else { "Select This" }, Section::Remove, move || page.toggle_track_selection(&vid_c, Some(&row_c))));
+            extras.push(MenuAction::new(&if is_selected { tr!("Deselect This") } else { tr!("Select This") }, Section::Remove, move || page.toggle_track_selection(&vid_c, Some(&row_c))));
             let page = self.clone();
-            extras.push(MenuAction::new("Select All", Section::Remove, move || page.select_all()));
+            extras.push(MenuAction::new(&tr!("Select All"), Section::Remove, move || page.select_all()));
             let page = self.clone();
-            extras.push(MenuAction::new("Deselect All", Section::Remove, move || page.deselect_all()));
+            extras.push(MenuAction::new(&tr!("Deselect All"), Section::Remove, move || page.deselect_all()));
             if self.tracks.borrow().has_selection() {
                 let page = self.clone();
-                extras.push(MenuAction::new("Copy Selection Data (Debug)", Section::Clipboard, move || page.copy_selection_debug()));
+                extras.push(MenuAction::new(&tr!("Copy Selection Data (Debug)"), Section::Clipboard, move || page.copy_selection_debug()));
             }
         }
         let album = Some((self.title_text.borrow().clone(), self.playlist_id().unwrap_or_default()));
@@ -2328,9 +2350,9 @@ impl PlaylistPage {
     }
 
     fn confirm_delete_upload_track(self: &Rc<Self>, entity_id: &str, title: &str) {
-        let dialog = adw::AlertDialog::builder().heading("Delete Upload?").body(format!("Are you sure you want to delete \"{title}\"?\nThis cannot be undone.")).build();
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("delete", "Delete");
+        let dialog = adw::AlertDialog::builder().heading(tr!("Delete Upload?")).body(tr!("Are you sure you want to delete \"{title}\"?\nThis cannot be undone.", title)).build();
+        dialog.add_response("cancel", &tr!("Cancel"));
+        dialog.add_response("delete", &tr!("Delete"));
         dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
@@ -2351,7 +2373,7 @@ impl PlaylistPage {
                 let Some(page) = weak.upgrade() else { return };
                 match handle.await {
                     Ok(Ok(_)) => {
-                        toast(&page.stack, &format!("Deleted {title}"));
+                        toast(&page.stack, &tr!("Deleted {title}", title));
                         page.remove_track_by_entity_id(&eid);
                     }
                     Ok(Err(err)) => tracing::warn!(%err, "delete upload failed"),
@@ -2399,11 +2421,11 @@ impl PlaylistPage {
             return;
         }
         if pid == "HISTORY" {
-            toast(&self.stack, "History requires an internet connection");
+            toast(&self.stack, &tr!("History requires an internet connection"));
             return;
         }
         if !self.ctx.online.is_online() {
-            toast(&self.stack, "Refresh requires an internet connection");
+            toast(&self.stack, &tr!("Refresh requires an internet connection"));
             return;
         }
         self.invalidate_disk_cache();
@@ -2427,8 +2449,8 @@ impl PlaylistPage {
     /// Fill the Downloads page from what is on disk now.
     pub fn show_downloads(self: &Rc<Self>) {
         let tracks: Vec<Track> = self.ctx.downloads.all().iter().map(|entry| entry.track()).collect();
-        let meta = format!("{} {} available offline", tracks.len(), if tracks.len() == 1 { "song" } else { "songs" });
-        self.show_virtual("Downloaded Songs", tracks, &meta);
+        let meta = trn!("{n} song available offline", "{n} songs available offline", tracks.len());
+        self.show_virtual(&tr!("Downloaded Songs"), tracks, &meta);
     }
 
     /// Port of _reshow_virtual and _fill_downloads_page.
@@ -2471,13 +2493,13 @@ impl PlaylistPage {
         let menu = gio::Menu::new();
         let group = gio::SimpleActionGroup::new();
         if let Some(url) = url {
-            menu.append(Some("Copy Cover URL"), Some("cover.copy_url"));
+            menu.append(Some(&tr!("Copy Cover URL")), Some("cover.copy_url"));
             let action = gio::SimpleAction::new("copy_url", None);
             action.connect_activate(move |_, _| copy_to_clipboard(&url));
             group.add_action(&action);
         }
         if can_edit {
-            menu.append(Some("Edit Playlist"), Some("cover.edit_playlist"));
+            menu.append(Some(&tr!("Edit Playlist")), Some("cover.edit_playlist"));
             let action = gio::SimpleAction::new("edit_playlist", None);
             let weak = Rc::downgrade(self);
             action.connect_activate(move |_, _| {
@@ -2500,9 +2522,9 @@ impl PlaylistPage {
 
     fn on_delete_clicked(self: &Rc<Self>) {
         let title = self.title_text.borrow().clone();
-        let dialog = adw::AlertDialog::builder().heading("Delete Playlist?").body(format!("Are you sure you want to delete \"{title}\"?\nThis action cannot be undone.")).build();
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("delete", "Delete");
+        let dialog = adw::AlertDialog::builder().heading(tr!("Delete Playlist?")).body(tr!("Are you sure you want to delete \"{title}\"?\nThis action cannot be undone.", title)).build();
+        dialog.add_response("cancel", &tr!("Cancel"));
+        dialog.add_response("delete", &tr!("Delete"));
         dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
@@ -2558,43 +2580,43 @@ impl PlaylistPage {
     /// cover locally and reloaded; this one also sends the changed title,
     /// description and privacy to the edit endpoint.
     fn show_edit_dialog(self: &Rc<Self>) {
-        let dialog = adw::Dialog::builder().title("Edit Playlist").content_width(500).build();
+        let dialog = adw::Dialog::builder().title(tr!("Edit Playlist")).content_width(500).build();
         let main_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         dialog.set_child(Some(&main_box));
         let header = adw::HeaderBar::builder().css_classes(["flat"]).build();
         main_box.append(&header);
-        let save_btn = gtk::Button::builder().label("Save").css_classes(["suggested-action"]).build();
+        let save_btn = gtk::Button::builder().label(tr!("Save")).css_classes(["suggested-action"]).build();
         header.pack_start(&save_btn);
         let page = adw::PreferencesPage::new();
         main_box.append(&page);
-        let group = adw::PreferencesGroup::builder().title("Playlist Details").margin_start(12).margin_end(12).margin_top(12).margin_bottom(12).build();
+        let group = adw::PreferencesGroup::builder().title(tr!("Playlist Details")).margin_start(12).margin_end(12).margin_top(12).margin_bottom(12).build();
         page.add(&group);
-        let title_row = adw::EntryRow::builder().title("Title").text(self.title_text.borrow().as_str()).build();
+        let title_row = adw::EntryRow::builder().title(tr!("Title")).text(self.title_text.borrow().as_str()).build();
         group.add(&title_row);
-        let desc_row = adw::EntryRow::builder().title("Description").text(self.description_text.borrow().as_str()).build();
+        let desc_row = adw::EntryRow::builder().title(tr!("Description")).text(self.description_text.borrow().as_str()).build();
         group.add(&desc_row);
-        let privacy_row = adw::ComboRow::builder().title("Visibility").build();
-        privacy_row.set_model(Some(&gtk::StringList::new(&["Public", "Private", "Unlisted"])));
+        let privacy_row = adw::ComboRow::builder().title(tr!("Visibility")).build();
+        privacy_row.set_model(Some(&gtk::StringList::new(&[&tr!("Public"), &tr!("Private"), &tr!("Unlisted")])));
         let current_privacy = self.privacy_text.borrow().clone().unwrap_or_else(|| "PUBLIC".to_owned()).to_uppercase();
         privacy_row.set_selected(match current_privacy.as_str() { "PRIVATE" => 1, "UNLISTED" => 2, _ => 0 });
         group.add(&privacy_row);
-        let cover_row = adw::ActionRow::builder().title("Playlist Cover").subtitle("No file selected").build();
+        let cover_row = adw::ActionRow::builder().title(tr!("Playlist Cover")).subtitle(tr!("No file selected")).build();
         group.add(&cover_row);
         self.selected_cover_path.replace(None);
 
-        let choose_btn = gtk::Button::builder().label("Choose File...").valign(gtk::Align::Center).build();
+        let choose_btn = gtk::Button::builder().label(tr!("Choose File...")).valign(gtk::Align::Center).build();
         {
             let weak = Rc::downgrade(self);
             let cover_row = cover_row.clone();
             choose_btn.connect_clicked(move |_| {
                 let Some(p) = weak.upgrade() else { return };
                 let filter = gtk::FileFilter::new();
-                filter.set_name(Some("Images"));
+                filter.set_name(Some(&tr!("Images")));
                 filter.add_mime_type("image/jpeg");
                 filter.add_mime_type("image/png");
                 let filters = gio::ListStore::new::<gtk::FileFilter>();
                 filters.append(&filter);
-                let file_dialog = gtk::FileDialog::builder().title("Select Cover Image").filters(&filters).build();
+                let file_dialog = gtk::FileDialog::builder().title(tr!("Select Cover Image")).filters(&filters).build();
                 let parent = p.stack.root().and_downcast::<gtk::Window>();
                 let weak = Rc::downgrade(&p);
                 let cover_row = cover_row.clone();
@@ -2620,7 +2642,7 @@ impl PlaylistPage {
                             if let Some(p) = weak.upgrade() {
                                 p.selected_cover_path.replace(Some(temp));
                             }
-                            cover_row.set_subtitle(&format!("Cropped PNG: {basename}"));
+                            cover_row.set_subtitle(&tr!("Cropped PNG: {basename}", basename));
                         }
                     });
                 });
@@ -2835,7 +2857,7 @@ fn row_of(item: &gtk::ListItem) -> Option<Rc<TrackRow>> {
 
 fn read_more_label(text: &str) -> gtk::Label {
     let label = gtk::Label::builder().use_markup(true).css_classes(["caption"]).halign(gtk::Align::Start).build();
-    label.set_markup(&format!("<a href='toggle'>{text}</a>"));
+    label.set_markup(&format!("<a href='toggle'>{}</a>", glib::markup_escape_text(text)));
     label
 }
 
@@ -2846,6 +2868,22 @@ fn truncate_description(text: &str) -> String {
         Some(i) => format!("{}...", &head[..i]),
         None => format!("{head}..."),
     }
+}
+
+/// YouTube's privacy value as the header shows it.
+fn privacy_label(text: String) -> String {
+    match text.to_uppercase().as_str() {
+        "PUBLIC" => tr!("Public"),
+        "PRIVATE" => tr!("Private"),
+        "UNLISTED" => tr!("Unlisted"),
+        _ => capitalize(text),
+    }
+}
+
+/// What stands in for an artist with no name.
+fn unknown_artist() -> String {
+    // Translators: stands in for a missing artist name
+    tr!("Unknown")
 }
 
 fn capitalize(text: String) -> String {
@@ -2861,16 +2899,14 @@ fn long_duration(total: u32) -> String {
     let hours = total / 3600;
     let minutes = (total % 3600) / 60;
     let seconds = total % 60;
-    if hours > 0 { format!("{hours} hr {minutes} min") } else { format!("{minutes} min {seconds} sec") }
+    if hours > 0 { tr!("{hours} hr {minutes} min", hours, minutes) } else { tr!("{minutes} min {seconds} sec", minutes, seconds) }
 }
 
 /// "12 songs", or "12 episodes" on a podcast show.
 fn count_text(n: usize, podcast: bool) -> String {
     match (podcast, n) {
-        (true, 1) => "1 episode".to_owned(),
-        (true, n) => format!("{n} episodes"),
-        (false, 1) => "1 song".to_owned(),
-        (false, n) => format!("{n} songs"),
+        (true, n) => trn!("{n} episode", "{n} episodes", n),
+        (false, n) => trn!("{n} song", "{n} songs", n),
     }
 }
 
@@ -2878,7 +2914,7 @@ fn count_text(n: usize, podcast: bool) -> String {
 fn short_duration(total: u32) -> String {
     let hours = total / 3600;
     let minutes = (total % 3600) / 60;
-    if hours > 0 { format!("{hours} hr {minutes} min") } else { format!("{minutes} min") }
+    if hours > 0 { tr!("{hours} hr {minutes} min", hours, minutes) } else { tr!("{minutes} min", minutes) }
 }
 
 /// `<a href='artist:ID'>Name</a>` per artist, plain when there is no id.
@@ -2886,7 +2922,7 @@ fn artist_markup(artists: &[Person]) -> String {
     artists
         .iter()
         .map(|a| {
-            let name = glib::markup_escape_text(if a.name.is_empty() { "Unknown" } else { &a.name });
+            let name = if a.name.is_empty() { glib::markup_escape_text(&unknown_artist()) } else { glib::markup_escape_text(&a.name) };
             match &a.id {
                 Some(id) => format!("<a href='artist:{id}'>{name}</a>"),
                 None => name.to_string(),
@@ -3003,7 +3039,7 @@ async fn fetch_details(api: &ytmusicapi::YTMusicClient, http: &reqwest::Client, 
             tokio::time::sleep(Duration::from_millis(1500)).await;
         }
     }
-    Err(last_err.unwrap_or_else(|| NetError::Message("Failed to fetch playlist after retries".into())))
+    Err(last_err.unwrap_or_else(|| NetError::Message(tr!("Failed to fetch playlist after retries"))))
 }
 
 /// Port of get_playlist_full's first two stages: ytmusicapi, then the raw

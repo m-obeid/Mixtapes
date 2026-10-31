@@ -9,6 +9,10 @@
 // Release builds on Windows open no console window next to the app.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+// First, so every module below sees tr! and its siblings.
+#[macro_use]
+mod i18n;
+
 mod audio;
 mod bootstrap;
 mod demo;
@@ -84,6 +88,7 @@ fn main() -> glib::ExitCode {
     let paths = Paths::discover();
     bootstrap::init_logging(&paths);
     bootstrap::apply_gsk_renderer_pref(&paths);
+    i18n::init(&paths);
 
     // The stylesheet and icons, compiled in by build.rs.
     if let Err(err) = gio::resources_register_include!("mixtapes.gresource") {

@@ -182,16 +182,18 @@ mod win {
         // SAFETY: a menu we create, show and destroy here; the window is ours.
         let chosen = unsafe {
             let Ok(menu) = CreatePopupMenu() else { return };
-            let item = |id: usize, text: PCWSTR, enabled: bool| {
+            let item = |id: usize, text: String, enabled: bool| {
                 let flags = if enabled { MF_STRING } else { MF_STRING | windows::Win32::UI::WindowsAndMessaging::MF_GRAYED };
-                let _ = AppendMenuW(menu, flags, id, text);
+                // The menu copies the text, so the buffer only has to live through the call.
+                let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+                let _ = AppendMenuW(menu, flags, id, PCWSTR(wide.as_ptr()));
             };
-            item(MENU_PLAY_PAUSE, if playing { w!("Pause") } else { w!("Play") }, has_track);
-            item(MENU_PREVIOUS, w!("Previous"), has_track);
-            item(MENU_NEXT, w!("Next"), bounds.can_next);
+            item(MENU_PLAY_PAUSE, if playing { tr!("Pause") } else { tr!("Play") }, has_track);
+            item(MENU_PREVIOUS, tr!("Previous"), has_track);
+            item(MENU_NEXT, tr!("Next"), bounds.can_next);
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-            item(MENU_SHOW, w!("Show Mixtapes"), true);
-            item(MENU_QUIT, w!("Quit"), true);
+            item(MENU_SHOW, tr!("Show Mixtapes"), true);
+            item(MENU_QUIT, tr!("Quit"), true);
             let mut point = POINT::default();
             let _ = GetCursorPos(&mut point);
             // Without this the menu stays open when the pointer clicks elsewhere.

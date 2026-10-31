@@ -17,8 +17,8 @@ use crate::ui::widgets::song_row::SongRow;
 
 /// How far the page scrolls before the header takes over the title.
 const TITLE_HANDOVER: f64 = 50.0;
-const EMPTY_TEXT: &str = "Your listening history will appear here after you play something.";
-const LOCAL_EMPTY_TEXT: &str = "Songs you play without signing in appear here. They stay on this device.";
+const EMPTY_TEXT: &str = tr_noop!("Your listening history will appear here after you play something.");
+const LOCAL_EMPTY_TEXT: &str = tr_noop!("Songs you play without signing in appear here. They stay on this device.");
 /// How many local plays the page lists.
 const LOCAL_LIMIT: usize = 500;
 /// The queue a history row plays is the history itself, not a playlist.
@@ -68,12 +68,12 @@ impl HistoryPage {
         crate::ui::suppress_hover_while_scrolling(&scrolled);
 
         let content_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).margin_top(24).margin_bottom(24).margin_start(24).margin_end(24).build();
-        content_box.append(&gtk::Label::builder().label("Listening History").css_classes(["title-1"]).halign(gtk::Align::Start).build());
+        content_box.append(&gtk::Label::builder().label(tr!("Listening History")).css_classes(["title-1"]).halign(gtk::Align::Start).build());
 
         let sections_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).build();
         content_box.append(&sections_box);
 
-        let empty_label = gtk::Label::builder().label(EMPTY_TEXT).css_classes(["dim-label"]).wrap(true).halign(gtk::Align::Center).margin_top(48).visible(false).build();
+        let empty_label = gtk::Label::builder().label(crate::i18n::gettext(EMPTY_TEXT)).css_classes(["dim-label"]).wrap(true).halign(gtk::Align::Center).margin_top(48).visible(false).build();
         content_box.append(&empty_label);
 
         let clamp = adw::Clamp::builder().maximum_size(1024).tightening_threshold(600).child(&content_box).build();
@@ -85,7 +85,7 @@ impl HistoryPage {
         let spinner = adw::Spinner::new();
         spinner.set_size_request(48, 48);
         loading_wrap.append(&spinner);
-        loading_wrap.append(&gtk::Label::builder().label("Loading history...").css_classes(["caption"]).build());
+        loading_wrap.append(&gtk::Label::builder().label(tr!("Loading history...")).css_classes(["caption"]).build());
         let overlay = gtk::Overlay::builder().vexpand(true).child(&scrolled).build();
         overlay.add_overlay(&loading_wrap);
         root.append(&overlay);
@@ -107,7 +107,7 @@ impl HistoryPage {
         let weak = Rc::downgrade(&page);
         scrolled.vadjustment().connect_value_changed(move |adj| {
             if let Some(p) = weak.upgrade() {
-                p.emit_title(if adj.value() > TITLE_HANDOVER { "Listening History" } else { "" });
+                if adj.value() > TITLE_HANDOVER { p.emit_title(&tr!("Listening History")) } else { p.emit_title("") }
             }
         });
         let weak = Rc::downgrade(&page);
@@ -179,7 +179,7 @@ impl HistoryPage {
         }
         if !self.ctx.online.is_online() {
             if self.entries.borrow().is_empty() {
-                self.show_empty("History requires an internet connection.");
+                self.show_empty(&tr!("History requires an internet connection."));
             }
             return;
         }
@@ -206,7 +206,7 @@ impl HistoryPage {
                 Ok(Err(err)) => {
                     tracing::warn!(%err, "history fetch failed");
                     if page.entries.borrow().is_empty() {
-                        page.show_empty(EMPTY_TEXT);
+                        page.show_empty(&crate::i18n::gettext(EMPTY_TEXT));
                     }
                 }
                 Err(_) => {}
@@ -219,7 +219,7 @@ impl HistoryPage {
         let now = glib::DateTime::now_local().ok();
         let mut entries: Vec<HistoryEntry> = Vec::new();
         for (track, played_at) in self.ctx.local.play_history(LOCAL_LIMIT) {
-            let played = now.as_ref().and_then(|now| local_heading(played_at, now)).unwrap_or_else(|| "Earlier".to_owned());
+            let played = now.as_ref().and_then(|now| local_heading(played_at, now)).unwrap_or_else(|| tr_noop!("Earlier").to_owned());
             if entries.iter().any(|e| e.played == played && e.track.video_id == track.video_id) {
                 continue;
             }
@@ -227,7 +227,7 @@ impl HistoryPage {
         }
         if entries.is_empty() {
             self.entries.borrow_mut().clear();
-            self.show_empty(LOCAL_EMPTY_TEXT);
+            self.show_empty(&crate::i18n::gettext(LOCAL_EMPTY_TEXT));
             return;
         }
         self.render(entries);
@@ -242,7 +242,7 @@ impl HistoryPage {
         self.rows.borrow_mut().clear();
         if entries.is_empty() {
             self.entries.borrow_mut().clear();
-            self.show_empty(EMPTY_TEXT);
+            self.show_empty(&crate::i18n::gettext(EMPTY_TEXT));
             return;
         }
         self.empty_label.set_visible(false);
@@ -296,7 +296,7 @@ impl HistoryPage {
     /// A heading with an empty list under it, which `add_row` fills.
     fn add_section(self: &Rc<Self>, title: &str, indexes: &[usize]) -> gtk::ListBox {
         let section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
-        section.append(&gtk::Label::builder().label(title).css_classes(["title-3"]).halign(gtk::Align::Start).build());
+        section.append(&gtk::Label::builder().label(crate::i18n::gettext(title)).css_classes(["title-3"]).halign(gtk::Align::Start).build());
         let list = gtk::ListBox::builder().css_classes(["boxed-list", "songs-list"]).selection_mode(gtk::SelectionMode::None).build();
         let weak = Rc::downgrade(self);
         let indexes = indexes.to_vec();
@@ -336,7 +336,7 @@ impl HistoryPage {
         if index >= tracks.len() {
             return;
         }
-        self.ctx.player.play_tracks(tracks, index, false, Some(QueueSource::new(QUEUE_SOURCE, "History")), false);
+        self.ctx.player.play_tracks(tracks, index, false, Some(QueueSource::new(QUEUE_SOURCE, tr!("History"))), false);
     }
 
     /// The two entries history.py adds to a row's song menu.
@@ -345,14 +345,14 @@ impl HistoryPage {
         let video_id = self.entries.borrow().get(index).map(|entry| entry.track.video_id.0.clone()).unwrap_or_default();
 
         let weak = Rc::downgrade(self);
-        let mut extras = vec![MenuAction { first: true, ..MenuAction::new("Play", Section::Queue, move || {
+        let mut extras = vec![MenuAction { first: true, ..MenuAction::new(&tr!("Play"), Section::Queue, move || {
             if let Some(page) = weak.upgrade() {
                 page.play_from(index);
             }
         })}];
         if !self.ctx.player.state().authenticated() {
             let weak = Rc::downgrade(self);
-            extras.push(MenuAction::new("Remove from History", Section::Remove, move || {
+            extras.push(MenuAction::new(&tr!("Remove from History"), Section::Remove, move || {
                 if let Some(page) = weak.upgrade() {
                     page.ctx.local.forget_plays(&video_id);
                     page.load_local();
@@ -363,7 +363,7 @@ impl HistoryPage {
         // No token means a brand account, where YouTube offers no removal.
         if let Some(token) = token {
             let weak = Rc::downgrade(self);
-            extras.push(MenuAction::new("Remove from History", Section::Remove, move || {
+            extras.push(MenuAction::new(&tr!("Remove from History"), Section::Remove, move || {
                 if let Some(page) = weak.upgrade() {
                     page.remove_play(&video_id, &token);
                 }
@@ -418,12 +418,13 @@ fn local_heading(played_at: i64, now: &glib::DateTime) -> Option<String> {
 
 fn heading_for(days_ago: i64, month: &str) -> String {
     match days_ago {
-        ..=0 => "Today".to_owned(),
-        1 => "Yesterday".to_owned(),
-        2..=6 => "This week".to_owned(),
-        7..=13 => "Last week".to_owned(),
-        _ => month.to_owned(),
+        ..=0 => tr_noop!("Today"),
+        1 => tr_noop!("Yesterday"),
+        2..=6 => tr_noop!("This week"),
+        7..=13 => tr_noop!("Last week"),
+        _ => month,
     }
+    .to_owned()
 }
 
 /// The row's subtitle: the artists, then the album behind a dot, as the home lists write theirs.

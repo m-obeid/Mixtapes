@@ -906,6 +906,12 @@ gridview.queue-list > child {
   padding-right: 0;
 }
 
+/* The page toggles of the phone player: icons only, sized for a thumb. */
+toggle-group.sheet-toggles > toggle {
+  min-width: 56px;
+  min-height: 40px;
+}
+
 /* View All beside a section heading: small, so the heading's line stays as tall as its text. */
 button.view-all {
   min-height: 0;

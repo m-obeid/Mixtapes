@@ -31,8 +31,10 @@ const NEW_RELEASES: usize = 12;
 /// A like counts for this many plays when ranking artists.
 const LIKE_WEIGHT: usize = 2;
 
-pub const QUICK_PICKS_TITLE: &str = "Quick picks";
-pub const LISTEN_AGAIN_TITLE: &str = "Listen again";
+/// English for the same reason as Listen again below.
+pub const QUICK_PICKS_TITLE: &str = tr_noop!("Quick picks");
+/// English, because `home::classify_section` reads it. Home passes it to `i18n::gettext` where it is shown.
+pub const LISTEN_AGAIN_TITLE: &str = tr_noop!("Listen again");
 
 /// What the device knows about the listener, read on the GTK thread.
 #[derive(Clone, Debug, Default)]
@@ -107,7 +109,7 @@ pub async fn build(api: Arc<dyn Browse>, signals: Signals) -> Vec<HomeSection> {
     let mut sections = Vec::new();
     sections.extend(picks);
     if signals.recent.len() >= LISTEN_AGAIN_MIN {
-        sections.push(HomeSection { title: LISTEN_AGAIN_TITLE.to_owned(), items: signals.recent.iter().map(MediaItem::from_track).collect(), strapline_thumb: None, strapline: None });
+        sections.push(HomeSection { title: LISTEN_AGAIN_TITLE.to_owned(), items: signals.recent.iter().map(MediaItem::from_track).collect(), strapline_thumb: None, strapline: None, ..HomeSection::default() });
     }
 
     let artists: Vec<_> = artists.into_iter().filter_map(|artist| artist.inspect_err(|err| tracing::warn!(%err, "local feed artist failed")).ok()).collect();
@@ -124,7 +126,7 @@ pub async fn build(api: Arc<dyn Browse>, signals: Signals) -> Vec<HomeSection> {
     // Artists take turns, so the one with the busiest year fills no more than its share.
     let releases = interleave(per_artist, NEW_RELEASES, |item| item.id.clone());
     if !releases.is_empty() {
-        sections.push(HomeSection { title: "New from artists you like".to_owned(), items: releases, strapline_thumb: None, strapline: None });
+        sections.push(HomeSection { title: tr!("New from artists you like"), items: releases, strapline_thumb: None, strapline: None, ..HomeSection::default() });
     }
     for artist in artists.iter().take(SIMILAR_SHELVES) {
         let Some(related) = &artist.related else { continue };
@@ -132,7 +134,8 @@ pub async fn build(api: Arc<dyn Browse>, signals: Signals) -> Vec<HomeSection> {
         if items.is_empty() {
             continue;
         }
-        sections.push(HomeSection { title: artist.name.clone(), items, strapline_thumb: artist.thumbnails.first().cloned(), strapline: Some("Similar to".to_owned()) });
+        // Translators: a small line above an artist's name, which is the shelf title below it.
+        sections.push(HomeSection { title: artist.name.clone(), items, strapline_thumb: artist.thumbnails.first().cloned(), strapline: Some(tr!("Similar to")), ..HomeSection::default() });
     }
     sections
 }
@@ -155,7 +158,7 @@ pub async fn quick_picks(api: Arc<dyn Browse>, seed_ids: Vec<String>) -> Option<
     let seeds: HashSet<&str> = seed_ids.iter().map(String::as_str).collect();
     let radios = radios.into_iter().map(|radio| radio.into_iter().filter(|t| !seeds.contains(t.video_id.as_str())).collect()).collect();
     let picks = interleave(radios, QUICK_PICKS, |t| t.video_id.0.clone());
-    (!picks.is_empty()).then(|| HomeSection { title: QUICK_PICKS_TITLE.to_owned(), items: picks.iter().map(MediaItem::from_track).collect(), strapline_thumb: None, strapline: None })
+    (!picks.is_empty()).then(|| HomeSection { title: QUICK_PICKS_TITLE.to_owned(), items: picks.iter().map(MediaItem::from_track).collect(), strapline_thumb: None, strapline: None, ..HomeSection::default() })
 }
 
 /// Songs to seed quick picks with, from a feed that came without them:
@@ -224,7 +227,7 @@ mod tests {
     }
 
     fn section(title: &str) -> HomeSection {
-        HomeSection { title: title.to_owned(), items: vec![MediaItem::default()], strapline_thumb: None, strapline: None }
+        HomeSection { title: title.to_owned(), items: vec![MediaItem::default()], strapline_thumb: None, strapline: None, ..HomeSection::default() }
     }
 
     #[test]

@@ -152,6 +152,19 @@ impl YtMusic {
 
     // -- auth state ------------------------------------------------------
 
+    /// A client asking YouTube for the app's language, for text that is shown and never read.
+    /// None while the app runs in English. Parsers read English, so `api` serves everything else.
+    pub fn localized_api(&self) -> Option<Arc<YTMusicClient>> {
+        let mut builder = YTMusicClient::builder().with_language(crate::i18n::youtube_language()?);
+        if let Some(auth) = self.session.read().unwrap().browser_auth.clone() {
+            builder = builder.with_browser_auth(auth);
+            if let Some(page_id) = self.channel() {
+                builder = builder.with_user(page_id);
+            }
+        }
+        builder.build().ok().map(Arc::new)
+    }
+
     pub fn auth_state(&self) -> AuthState {
         self.auth.borrow().clone()
     }

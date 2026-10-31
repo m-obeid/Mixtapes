@@ -163,7 +163,7 @@ impl ArtistPage {
             .build();
         header_grid.attach(&info_box, 0, 0, 1, 1);
         let name_label = gtk::Label::builder()
-            .label("Artist Name")
+            .label(tr!("Artist Name"))
             .css_classes(["title-1", "banner-text"])
             .halign(gtk::Align::Start)
             .wrap(true)
@@ -186,7 +186,7 @@ impl ArtistPage {
             .build();
         info_box.append(&actions);
         let play_btn = gtk::Button::builder()
-            .label("Play")
+            .label(tr!("Play"))
             .css_classes(["suggested-action", "pill"])
             .build();
         actions.append(&play_btn);
@@ -194,7 +194,7 @@ impl ArtistPage {
             .icon_name("media-playlist-shuffle-symbolic")
             .css_classes(["circular"])
             .valign(gtk::Align::Center)
-            .tooltip_text("Shuffle")
+            .tooltip_text(tr!("Shuffle"))
             .build();
         shuffle_btn.set_size_request(48, 48);
         actions.append(&shuffle_btn);
@@ -202,7 +202,7 @@ impl ArtistPage {
             .icon_name("triangular-antenna-symbolic")
             .css_classes(["circular"])
             .valign(gtk::Align::Center)
-            .tooltip_text("Start Radio")
+            .tooltip_text(tr!("Start Radio"))
             .build();
         radio_btn.set_size_request(48, 48);
         actions.append(&radio_btn);
@@ -210,7 +210,7 @@ impl ArtistPage {
             .icon_name("non-starred-symbolic")
             .css_classes(["circular"])
             .valign(gtk::Align::Center)
-            .tooltip_text("Subscribe")
+            .tooltip_text(tr!("Subscribe"))
             .build();
         subscribe_btn.set_size_request(48, 48);
         actions.append(&subscribe_btn);
@@ -225,7 +225,7 @@ impl ArtistPage {
             .ellipsize(gtk::pango::EllipsizeMode::None)
             .margin_top(12)
             .build();
-        let read_more = read_more_label("Read more");
+        let read_more = read_more_label(&tr!("Read more"));
         read_more.set_visible(false);
         let description_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -452,7 +452,7 @@ impl ArtistPage {
         };
         self.stack.set_visible_child_name("content");
         let name = if data.name.is_empty() {
-            "Unknown Artist".to_owned()
+            tr!("Unknown Artist")
         } else {
             data.name.clone()
         };
@@ -470,7 +470,7 @@ impl ArtistPage {
                     self.description_label.set_label(&preview_of(&clean));
                     self.read_more
                         .borrow()
-                        .set_markup("<a href='toggle'>Read more</a>");
+                        .set_markup(&format!("<a href='toggle'>{}</a>", glib::markup_escape_text(&tr!("Read more"))));
                     self.read_more.borrow().set_visible(true);
                 } else {
                     self.description_label.set_label(&clean);
@@ -489,9 +489,11 @@ impl ArtistPage {
 
         let mut subs = data.subscribers.clone().unwrap_or_default();
         if !subs.is_empty() {
-            subs.push_str(" subscribers");
+            // Translators: {count} is a short number YouTube sends, like 1.2M
+            subs = tr!("{count} subscribers", count = subs);
         }
-        if let Some(views) = data.views.as_ref().filter(|v| !v.is_empty()) {
+        // "25,210,842 views" as YouTube sent it.
+        if let Some(views) = data.views.as_deref().filter(|v| !v.is_empty()).map(crate::i18n::youtube) {
             if subs.is_empty() {
                 subs = views.clone()
             } else {
@@ -542,25 +544,25 @@ impl ArtistPage {
         }
 
         if let Some(songs) = &data.songs {
-            self.add_songs_section("Top Songs", songs);
+            self.add_songs_section(tr_noop!("Top Songs"), songs);
         }
         if let Some(s) = &data.albums {
-            self.add_grid_section("Albums", s);
+            self.add_grid_section(tr_noop!("Albums"), s);
         }
         if let Some(s) = &data.singles {
-            self.add_grid_section("Singles & EPs", s);
+            self.add_grid_section(tr_noop!("Singles & EPs"), s);
         }
         if let Some(s) = &data.videos {
-            self.add_grid_section("Videos", s);
+            self.add_grid_section(tr_noop!("Videos"), s);
         }
         if let Some(s) = &data.playlists {
-            self.add_grid_section("Playlists", s);
+            self.add_grid_section(tr_noop!("Playlists"), s);
         }
         if let Some(s) = &data.featured_on {
-            self.add_grid_section("Featured On", s);
+            self.add_grid_section(tr_noop!("Featured On"), s);
         }
         if let Some(s) = &data.related {
-            self.add_grid_section("Fans Might Also Like", s);
+            self.add_grid_section(tr_noop!("Fans Might Also Like"), s);
         }
     }
 
@@ -617,7 +619,7 @@ impl ArtistPage {
         let section_box = self.section_container(title, true);
         section_box.append(
             &gtk::Label::builder()
-                .label(title)
+                .label(crate::i18n::gettext(title))
                 .css_classes(["heading"])
                 .halign(gtk::Align::Start)
                 .build(),
@@ -645,7 +647,7 @@ impl ArtistPage {
         let has_more_online = section.browse_id.is_some();
         if section.results.len() > limit || has_more_online {
             let load_more = gtk::Button::builder()
-                .label("Load More")
+                .label(tr!("Load More"))
                 .css_classes(["pill"])
                 .halign(gtk::Align::Center)
                 .margin_top(12)
@@ -810,13 +812,21 @@ impl ArtistPage {
             .unwrap_or(0);
         self.ctx
             .player
-            .play_tracks(queue, start, false, self.queue_source(), false);
+            .play_tracks(queue, start, false, self.shelf_source("Top Songs"), false);
     }
 
     /// The top songs as a queue source: the artist's name for the queue header.
     fn queue_source(&self) -> Option<QueueSource> {
         let channel_id = self.channel_id.borrow().clone();
         (!channel_id.is_empty()).then(|| QueueSource::new(channel_id, self.artist_name.borrow().clone()))
+    }
+
+    /// The queue started from one of the page's shelves: "Artist - Shelf" in the header.
+    /// `shelf` is the English name, as the sections are keyed.
+    fn shelf_source(&self, shelf: &str) -> Option<QueueSource> {
+        let mut source = self.queue_source()?;
+        source.title = format!("{} - {}", source.title, crate::i18n::gettext(shelf));
+        Some(source)
     }
 
     /// Port of _build_queue_tracks: the top songs with the page's artist
@@ -836,7 +846,7 @@ impl ArtistPage {
                 if track.artists.is_empty() {
                     track.artists = vec![Person {
                         name: if artist_name.is_empty() {
-                            "Unknown Artist".to_owned()
+                            tr!("Unknown Artist")
                         } else {
                             artist_name.clone()
                         },
@@ -959,7 +969,7 @@ impl ArtistPage {
                 }
             }) as Box<dyn Fn()>
         });
-        container.append(&section_header(title, on_view_all));
+        container.append(&section_header(&crate::i18n::gettext(title), on_view_all));
         let scroll_box = HorizontalScrollBox::new();
         let compact = self.ctx.compact.get();
         let strip = gtk::Box::builder()
@@ -976,13 +986,14 @@ impl ArtistPage {
         self.scrollers.borrow_mut().push(scroll_box);
 
         for item in section.results.iter().take(limit) {
-            let card = self.make_grid_card(item);
+            let card = self.make_grid_card(item, title);
             strip.append(card.widget());
             self.cards.borrow_mut().push(card);
         }
     }
 
-    fn make_grid_card(self: &Rc<Self>, item: &MediaItem) -> Rc<MediaCard> {
+    /// `title` is the English name of the shelf the card sits in.
+    fn make_grid_card(self: &Rc<Self>, item: &MediaItem, title: &str) -> Rc<MediaCard> {
         let card = MediaCard::new(
             &self.ctx,
             item.clone(),
@@ -992,9 +1003,10 @@ impl ArtistPage {
             },
         );
         let weak = Rc::downgrade(self);
+        let title = title.to_owned();
         card.connect_clicked(move |item| {
             if let Some(p) = weak.upgrade() {
-                p.on_grid_child_activated(item);
+                p.on_grid_child_activated(item, &title);
             }
         });
         let weak = Rc::downgrade(self);
@@ -1004,7 +1016,7 @@ impl ArtistPage {
             if let Some(p) = weak.upgrade() {
                 let data = item_c.clone();
                 let extras = vec![MenuAction::new(
-                    "Copy JSON (Debug)",
+                    &tr!("Copy JSON (Debug)"),
                     Section::Clipboard,
                     move || {
                         if let Ok(text) = serde_json::to_string_pretty(&data) {
@@ -1038,7 +1050,7 @@ impl ArtistPage {
                 self.update_ui();
             }
             Some(browse_id) => {
-                let page_title = format!("{} - {title}", self.artist_name.borrow());
+                let page_title = format!("{} - {}", self.artist_name.borrow(), crate::i18n::gettext(title));
                 self.ctx.nav.go(NavRequest::Discography {
                     channel_id: self.channel_id.borrow().clone(),
                     title: page_title,
@@ -1051,13 +1063,13 @@ impl ArtistPage {
     }
 
     /// Port of on_grid_child_activated: videos play, artists open, the rest opens as a playlist.
-    fn on_grid_child_activated(&self, item: &MediaItem) {
+    fn on_grid_child_activated(&self, item: &MediaItem, shelf: &str) {
         match item.kind {
             ItemKind::Song | ItemKind::Video => {
                 if let Some(track) = item.to_track() {
                     self.ctx
                         .player
-                        .play_tracks(vec![track], 0, false, self.queue_source(), false);
+                        .play_tracks(vec![track], 0, false, self.shelf_source(shelf), false);
                 }
             }
             ItemKind::Artist => self.ctx.nav.go(NavRequest::Artist {
@@ -1155,11 +1167,11 @@ impl ArtistPage {
     fn update_subscribe_button(&self) {
         if self.is_subscribed.get() {
             self.subscribe_btn.set_icon_name("starred-symbolic");
-            self.subscribe_btn.set_tooltip_text(Some("Unsubscribe"));
+            self.subscribe_btn.set_tooltip_text(Some(&tr!("Unsubscribe")));
             self.subscribe_btn.add_css_class("liked-button");
         } else {
             self.subscribe_btn.set_icon_name("non-starred-symbolic");
-            self.subscribe_btn.set_tooltip_text(Some("Subscribe"));
+            self.subscribe_btn.set_tooltip_text(Some(&tr!("Subscribe")));
             self.subscribe_btn.remove_css_class("liked-button");
         }
     }
@@ -1171,15 +1183,15 @@ impl ArtistPage {
         let text = if expanded {
             self.description_label.set_label(&clean);
             self.description_label.set_lines(0);
-            "Show less"
+            tr!("Show less")
         } else {
             self.description_label.set_label(&preview_of(&clean));
             self.description_label.set_lines(3);
-            "Read more"
+            tr!("Read more")
         };
         let old = self.read_more.borrow().clone();
         self.description_box.remove(&old);
-        let label = read_more_label(text);
+        let label = read_more_label(&text);
         self.description_box.append(&label);
         self.read_more.replace(label);
         self.connect_read_more();
@@ -1188,7 +1200,7 @@ impl ArtistPage {
     fn on_banner_right_click(&self, x: f64, y: f64) {
         let Some(url) = self.avatar.url() else { return };
         let menu = gio::Menu::new();
-        menu.append(Some("Copy Banner URL"), Some("banner.copy_url"));
+        menu.append(Some(&tr!("Copy Banner URL")), Some("banner.copy_url"));
         let action = gio::SimpleAction::new("copy_url", None);
         action.connect_activate(move |_, _| copy_to_clipboard(&url));
         let group = gio::SimpleActionGroup::new();
@@ -1255,7 +1267,7 @@ fn read_more_label(text: &str) -> gtk::Label {
         .css_classes(["caption"])
         .halign(gtk::Align::Start)
         .build();
-    label.set_markup(&format!("<a href='toggle'>{text}</a>"));
+    label.set_markup(&format!("<a href='toggle'>{}</a>", glib::markup_escape_text(text)));
     label
 }
 

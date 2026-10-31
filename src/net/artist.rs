@@ -300,7 +300,7 @@ pub fn newest_first(items: &mut [MediaItem]) {
 pub async fn channel_of_video(api: &dyn Browse, video_id: &str) -> Result<Option<(String, String)>, NetError> {
     let response = api.post("player", json!({ "videoId": video_id })).await?;
     let channel = owned_at(&response, "/videoDetails/channelId");
-    let author = owned_at(&response, "/videoDetails/author").unwrap_or_else(|| "Artist".to_owned());
+    let author = owned_at(&response, "/videoDetails/author").unwrap_or_else(|| tr!("Artist"));
     Ok(channel.map(|c| (c, author)))
 }
 

@@ -100,16 +100,16 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
 
     // Notes, laid out like Bazaar's: title, date, the changes, the fixes, a closing line.
     let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(6).margin_bottom(24).margin_start(18).margin_end(18).build();
-    let title = gtk::Label::builder().label(format!("What's New in {}?", release.version)).css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build();
+    let title = gtk::Label::builder().label(tr!("What's New in {version}?", version = release.version)).css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build();
     column.append(&title);
     if !release.date.is_empty() {
-        column.append(&gtk::Label::builder().label(format!("Released on {}", release.date)).css_classes(["dim-label"]).margin_bottom(12).build());
+        column.append(&gtk::Label::builder().label(tr!("Released on {date}", date = release.date)).css_classes(["dim-label"]).margin_bottom(12).build());
     }
     if !release.summary.is_empty() {
         column.append(&gtk::Label::builder().label(&release.summary).wrap(true).xalign(0.0).build());
     }
     // Every entry is shown. The reader has the update already, so nothing is cut or sent elsewhere.
-    for (heading, entries) in [("Changes", &release.items), ("Fixes", &release.fixes)] {
+    for (heading, entries) in [(tr!("Changes"), &release.items), (tr!("Fixes"), &release.fixes)] {
         if entries.is_empty() {
             continue;
         }
@@ -123,7 +123,7 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
         }
         column.append(&list);
     }
-    column.append(&gtk::Label::builder().label("Thanks for reading, and have a great day!").wrap(true).xalign(0.0).margin_top(8).build());
+    column.append(&gtk::Label::builder().label(tr!("Thanks for reading, and have a great day!")).wrap(true).xalign(0.0).margin_top(8).build());
 
     let clamp = adw::Clamp::builder().maximum_size(NOTES_WIDTH).child(&column).build();
     let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
@@ -135,7 +135,7 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
     toolbar.add_top_bar(&adw::HeaderBar::builder().show_title(false).css_classes(["flat"]).build());
     toolbar.set_content(Some(&scroller));
     // Breakpoints want a minimum size on the dialog.
-    let dialog = adw::Dialog::builder().title("What's New").content_width(560).content_height(720).width_request(300).height_request(400).child(&toolbar).build();
+    let dialog = adw::Dialog::builder().title(tr!("What's New")).content_width(560).content_height(720).width_request(300).height_request(400).child(&toolbar).build();
     if pref_bool(ctx, DONATION_PREF, true) {
         // Pinned under the notes on a desktop. Narrow, it took half the sheet, so there it
         // scrolls with the notes. The dialog's own width decides, so a live resize moves it.
@@ -167,8 +167,8 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
 fn donation_banner() -> gtk::Box {
     let banner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["donation-banner"]).build();
     let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
-    column.append(&gtk::Label::builder().label("This version of Mixtapes was made possible by users like you!").css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build());
-    column.append(&gtk::Label::builder().label("I love making Mixtapes and my other projects, but I can't do it without help. Support my work with a donation:").wrap(true).justify(gtk::Justification::Center).build());
+    column.append(&gtk::Label::builder().label(tr!("This version of Mixtapes was made possible by users like you!")).css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build());
+    column.append(&gtk::Label::builder().label(tr!("I love making Mixtapes and my other projects, but I can't do it without help. Support my work with a donation:")).wrap(true).justify(gtk::Justification::Center).build());
     let buttons = donate_buttons();
     buttons.set_margin_top(6);
     column.append(&buttons);
