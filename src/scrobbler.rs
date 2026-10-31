@@ -142,6 +142,10 @@ struct Due {
 }
 
 /// In offline mode a submission fails like a dropped connection, so the listen waits in the backlog.
+fn love_method(score: i8) -> &'static str {
+    if score > 0 { "track.love" } else { "track.unlove" }
+}
+
 fn feedback_body(recording_mbid: &str, score: i8) -> Value {
     json!({ "recording_mbid": recording_mbid, "score": score })
 }
@@ -392,9 +396,9 @@ impl Scrobbler {
         SERVICES.iter().any(|s| self.is_connected(*s))
     }
 
-    /// Pass a like (1), a dislike (-1) or a cleared rating (0) on to ListenBrainz.
+    /// Pass a like (1), a dislike (-1) or a cleared rating (0) on to the connected services.
     pub fn send_feedback(&self, artist: &str, title: &str, score: i8) {
-        if self.is_connected(Service::ListenBrainz) && self.enabled() && !self.lock().muted && !artist.is_empty() && !title.is_empty() {
+        if SERVICES.iter().any(|s| self.is_connected(*s)) && self.enabled() && !self.lock().muted && !artist.is_empty() && !title.is_empty() {
             let _ = self.tx.send(Op::Feedback(artist.to_owned(), title.to_owned(), score));
         }
     }
@@ -419,8 +423,15 @@ impl Scrobbler {
                 Op::Stop => break,
                 Op::NowPlaying(entry) => self.do_now_playing(&entry).await,
                 Op::Feedback(artist, title, score) => {
-                    if let Err(err) = self.listenbrainz_feedback(&artist, &title, score).await {
-                        tracing::warn!(%err, title, "ListenBrainz feedback failed");
+                    if self.is_connected(Service::ListenBrainz) {
+                        if let Err(err) = self.listenbrainz_feedback(&artist, &title, score).await {
+                            tracing::warn!(%err, title, "ListenBrainz feedback failed");
+                        }
+                    }
+                    if self.is_connected(Service::LastFm) {
+                        if let Err(err) = self.lastfm_love(&artist, &title, score).await {
+                            tracing::warn!(%err, title, "Last.fm love failed");
+                        }
                     }
                 }
                 Op::Scrobble(entry) => {
@@ -582,6 +593,13 @@ impl Scrobbler {
         }
         let data: Value = response.json().await.map_err(|_| Transient(format!("unreadable response (HTTP {status})")))?;
         classify_lastfm(data)
+    }
+
+    /// Last.fm has loved and not loved, so a dislike takes a love away.
+    async fn lastfm_love(&self, artist: &str, title: &str, score: i8) -> Result<(), ScrobbleError> {
+        let params = BTreeMap::from([("artist".to_owned(), artist.to_owned()), ("track".to_owned(), title.to_owned())]);
+        let sk = self.credential(Service::LastFm);
+        self.lastfm_call(love_method(score), params, true, Some(&sk)).await.map(|_| ())
     }
 
     async fn lastfm_now_playing(&self, entry: &Entry) -> Result<(), ScrobbleError> {
@@ -976,6 +994,13 @@ fn write_json(path: &std::path::Path, data: &Value, private: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_like_loves() {
+        assert_eq!(love_method(1), "track.love");
+        assert_eq!(love_method(0), "track.unlove");
+        assert_eq!(love_method(-1), "track.unlove");
+    }
 
     #[test]
     fn feedback_names_the_recording_and_the_score() {
