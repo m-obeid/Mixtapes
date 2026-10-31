@@ -27,6 +27,7 @@ use crate::ui::context_menu::{MenuAction, Section, SongMenuOptions, show_song_me
 use crate::ui::cover::CoverImage;
 use crate::ui::pages::track_list::{needs_metric, TrackList, SORT_ADDED, SORT_DEFAULT, SORT_VIEWS};
 use crate::ui::widgets::add_to_playlist::AddToPlaylistPopover;
+use crate::ui::widgets::drag_scroll::DragScroll;
 use crate::ui::widgets::track_row::{TrackRow, TrackRowHost};
 use crate::ui::{copy_to_clipboard, toast};
 
@@ -100,6 +101,7 @@ pub struct PlaylistPage {
     empty_label: gtk::Label,
     load_more_spinner: adw::Spinner,
     track_store: gio::ListStore,
+    drag_scroll: Rc<DragScroll>,
     filter_model: gtk::FilterListModel,
     track_filter: gtk::CustomFilter,
     flatten: gtk::FlattenListModel,
@@ -284,9 +286,11 @@ impl PlaylistPage {
         stack.add_named(&main_box, Some("content"));
 
         let track_filter = gtk::CustomFilter::new(|_| true);
+        let drag_scroll = DragScroll::attach(&songs_list, &scrolled);
 
         let page = Rc::new(Self {
             stack,
+            drag_scroll,
             songs_list,
             header_container,
             header_info_box,
@@ -2096,6 +2100,38 @@ impl PlaylistPage {
         self.add_to_playlist(target.to_owned(), self.selected_tracks());
     }
 
+    /// A dragged row landed. The list changes at once, YouTube follows, and a refusal brings its order back.
+    fn move_track(self: &Rc<Self>, from: &str, to: &str, after: bool) {
+        let Some(pid) = self.playlist_id() else { return };
+        let Some((moved, next)) = self.tracks.borrow_mut().move_track(from, to, after) else { return };
+        let visible = self.tracks.borrow().visible();
+        self.sync_track_store(visible);
+        if crate::local_library::is_local(&pid) {
+            let tracks = self.tracks.borrow();
+            self.ctx.local.reorder_tracks(&pid, &tracks.source().iter().map(|t| t.video_id.as_str()).collect::<Vec<_>>());
+            return;
+        }
+        let Some(set_id) = moved.set_video_id else {
+            toast(&self.stack, &tr!("Could not move the song"));
+            return;
+        };
+        let api = self.ctx.net.client().api();
+        let list = pid.clone();
+        let handle = self.ctx.net.spawn(async move { playlists::move_playlist_item(&api, &list, &set_id, next.and_then(|t| t.set_video_id).as_deref()).await });
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some(page) = weak.upgrade() else { return };
+            match handle.await {
+                Ok(Ok(())) => page.forget_cached_list(),
+                failed => {
+                    tracing::warn!(?failed, "playlist move failed");
+                    toast(&page.stack, &tr!("Could not move the song"));
+                    page.load_playlist(&pid, None);
+                }
+            }
+        });
+    }
+
     fn is_downloads_page(&self) -> bool {
         self.playlist_id().as_deref() == Some("DOWNLOADS")
     }
@@ -2403,6 +2439,11 @@ impl PlaylistPage {
     /// Port of _invalidate_disk_cache: drop cached state so a smaller fetch
     /// after a deletion replaces the old render.
     fn invalidate_disk_cache(&self) {
+        self.forget_cached_list();
+        self.tracks.borrow_mut().clear();
+    }
+
+    fn forget_cached_list(&self) {
         if let Some(pid) = self.playlist_id() {
             self.ctx.net.caches().drop_cached_tracks(&pid);
             if let Some(id) = self.cache_write.borrow_mut().take() {
@@ -2413,7 +2454,6 @@ impl PlaylistPage {
                 let _ = tokio::task::spawn_blocking(move || caches.disk().invalidate(&pid)).await;
             });
         }
-        self.tracks.borrow_mut().clear();
         self.is_fully_fetched.set(false);
         self.is_fully_loaded.set(false);
     }
@@ -2815,6 +2855,21 @@ fn shown_list_text(playlist_id: &str, text: &str) -> String {
 }
 
 impl TrackRowHost for PlaylistPage {
+    fn can_reorder(&self) -> bool {
+        let pid = self.playlist_id.borrow().clone().unwrap_or_default();
+        self.is_editable.get() && pid != "LM" && pid != crate::local_library::LIKED_ID && self.tracks.borrow().in_source_order()
+    }
+
+    fn move_row(&self, from: &str, to: &str, after: bool) {
+        if let Some(page) = self.me.borrow().upgrade() {
+            page.move_track(from, to, after);
+        }
+    }
+
+    fn drag_ended(&self) {
+        self.drag_scroll.stop();
+    }
+
     fn multi_select(&self) -> bool {
         self.multi_select.get()
     }

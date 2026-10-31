@@ -150,6 +150,29 @@ impl TrackList {
 
     // -- order -----------------------------------------------------------
 
+    /// Whether the rows sit in the list's own order, the only one a drag can change.
+    pub fn in_source_order(&self) -> bool {
+        self.sort_type == SORT_DEFAULT && !self.descending && self.filter.is_empty()
+    }
+
+    /// Put the row `from` next to the row `to`. Rows go by `row_key`. Answers the moved
+    /// track and the one now behind it, None when the list did not change.
+    pub fn move_track(&mut self, from: &str, to: &str, after: bool) -> Option<(Track, Option<Track>)> {
+        if from == to {
+            return None;
+        }
+        let mut moved = false;
+        for list in [&mut self.fetched, &mut self.rendered] {
+            moved |= move_row(list, from, to, after);
+        }
+        if !moved {
+            return None;
+        }
+        let list = self.source();
+        let at = list.iter().position(|t| row_key(t) == from)?;
+        Some((list[at].clone(), list.get(at + 1).cloned()))
+    }
+
     pub fn sort_type(&self) -> u32 {
         self.sort_type
     }
@@ -269,10 +292,35 @@ impl TrackList {
     }
 }
 
+/// What tells two rows apart: a playlist can hold one song twice, under different set ids.
+pub fn row_key(track: &Track) -> &str {
+    track.set_video_id.as_deref().unwrap_or(track.video_id.as_str())
+}
+
+fn move_row(list: &mut Vec<Track>, from: &str, to: &str, after: bool) -> bool {
+    let (Some(start), true) = (list.iter().position(|t| row_key(t) == from), list.iter().any(|t| row_key(t) == to)) else { return false };
+    let track = list.remove(start);
+    let target = list.iter().position(|t| row_key(t) == to).map_or(start, |at| at + usize::from(after));
+    list.insert(target, track);
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{Named, Person, VideoId};
+
+    #[test]
+    fn a_row_moves_next_to_another_and_names_what_follows_it() {
+        let mut list = TrackList::default();
+        list.set(vec![track("a", "A", "x", 1), track("b", "B", "x", 1), track("c", "C", "x", 1)]);
+        let (moved, next) = list.move_track("a", "b", true).unwrap();
+        assert_eq!((moved.video_id.as_str(), next.map(|t| t.video_id.0)), ("a", Some("c".to_owned())));
+        let (_, next) = list.move_track("b", "c", true).unwrap();
+        assert!(next.is_none(), "the end of the list has nothing behind it");
+        assert_eq!(list.source().iter().map(|t| t.video_id.as_str()).collect::<Vec<_>>(), ["a", "c", "b"]);
+        assert!(list.move_track("a", "a", false).is_none());
+    }
 
     fn track(id: &str, title: &str, artist: &str, seconds: u32) -> Track {
         Track {

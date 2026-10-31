@@ -604,6 +604,16 @@ pub async fn remove_playlist_items(api: &dyn Browse, playlist_id: &str, items: &
     Ok(())
 }
 
+/// Move a row in front of `next`, or to the end without one. Rows go by setVideoId.
+pub async fn move_playlist_item(api: &dyn Browse, playlist_id: &str, moved: &str, next: Option<&str>) -> Result<(), NetError> {
+    let mut action = json!({ "action": "ACTION_MOVE_VIDEO_BEFORE", "setVideoId": moved });
+    if let Some(next) = next {
+        action["movedSetVideoIdSuccessor"] = json!(next);
+    }
+    api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": [action] })).await?;
+    Ok(())
+}
+
 /// Port of MusicClient.add_playlist_items. Single adds swap a music video
 /// for its song version first, bulk adds do not.
 pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: Vec<String>, swap_to_audio: Option<bool>) -> Result<(), NetError> {

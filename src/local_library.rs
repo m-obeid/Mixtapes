@@ -276,6 +276,19 @@ impl LocalLibrary {
     }
 
     /// Remove by video id. The likes list unlikes instead.
+    /// Store the rows of a playlist in this order.
+    pub fn reorder_tracks(&self, id: &str, video_ids: &[&str]) {
+        self.with_db(|db| {
+            let tx = db.unchecked_transaction()?;
+            for (position, video_id) in video_ids.iter().enumerate() {
+                tx.execute("UPDATE playlist_tracks SET position = ?3 WHERE playlist_id = ?1 AND video_id = ?2", params![id, video_id, position as i64])?;
+            }
+            tx.execute("UPDATE playlists SET modified = ?2 WHERE id = ?1", params![id, now() as i64])?;
+            tx.commit()?;
+            Ok(())
+        });
+    }
+
     pub fn remove_tracks(&self, id: &str, video_ids: &[String]) {
         self.with_db(|db| {
             let tx = db.unchecked_transaction()?;
