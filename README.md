@@ -113,7 +113,8 @@ Edge WebView2 Runtime, which the sign-in page needs, where Windows lacks it
 ### AUR (Arch Linux)
 
 ```bash
-yay -S mixtapes-git
+yay -S mixtapes-bin   # prebuilt, x86_64
+yay -S mixtapes-git   # built from source
 ```
 
 > [!WARNING]
@@ -285,7 +286,7 @@ Your desktop sends every `https://` link to the browser and has no way to hand o
 |   ✅️   | **Discord RPC**              | Show your current track on Discord<br>✅️ Linux<br>✅️ Windows                                                                                                                                                                                                                                 |
 |   ✅️   | **Lyrics**                   | Synchronized lyrics using a bunch of providers (Apple Music, BetterLyrics, Unison, BiniLyrics, NetEase, QQ Music, LRCLIB, YouTube captions, native YT Music)<br>✅️ Reorderable provider search queue<br>✅️ Second line: romanization, translation or background vocals<br>✅️ Word-level karaoke timing with duration-aware fades |
 |   ✅️   | **Rust Rewrite**             | Rewritten in Rust for speed and memory use; the Python app is retired                                                                                                                                                                                                                        |
-|   ✅️   | **AUR**                      | Available as `mixtapes-git`                                                                                                                                                                                                                                                                  |
+|   ✅️   | **AUR**                      | Available as `mixtapes-bin` and `mixtapes-git`                                                                                                                                                                                                                                                                  |
 |   ☑️   | **Flatpak**                  | ✅️ Flatpak build (x86_64 and aarch64)<br>✅️ App icon<br>🔜 Flathub release                                                                                                                                                                                                                    |
 |   ☑️   | **Nix**                      | Flake builds; not extensively tested                                                                                                                                                                                                                                                         |
 |   ✅️   | **Windows**                  | Installer and portable builds from CI, with media controls, tray and sign-in                                                                                                                                                                                                                 |

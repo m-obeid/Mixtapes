@@ -89,6 +89,50 @@
 
   <releases>
 
+    <release version="2026-10-31.0" date="2026-10-31">
+      <description>
+        <p>A big update, built from your reports. Mixtapes speaks German now, with more languages to come, and the like button no longer crashes the app.</p>
+        <ul>
+          <li>Translations are here, starting with German. Preferences, General has a Language row</li>
+          <li>Volume normalization turns loud songs down to match the rest, like on YouTube, for streams and downloads: Preferences, Playback</li>
+          <li>Lyrics from two new sources, QQ Music and the community made Unison, both with word by word timing</li>
+          <li>Lyrics can come from a music video's subtitles too</li>
+          <li>Lyrics running early or late can be fixed from the lyrics menu, per song and source</li>
+          <li>Write your own lyrics from the lyrics menu: plain text, timed lines or word by word timing, or paste TTML</li>
+          <li>Reorder songs in your playlists: drag the handles in selection mode, one song or all ticked songs at once</li>
+          <li>Adding a song a playlist already holds asks first</li>
+          <li>Remove All Downloads for a playlist or an album, from its menu or its library card</li>
+          <li>Choose your download folder, and bring your downloads along: Preferences, Downloads</li>
+          <li>Search your listening history, and open it from History beside Listen again on Home</li>
+          <li>Recent searches show under the empty search field</li>
+          <li>Sort the library by recent, oldest or name</li>
+          <li>A new setting starts a radio from a song played from search or Home, instead of playing the rest of the list</li>
+          <li>A new setting lowers the volume while another app plays media, like a voice message in a browser</li>
+          <li>Likes reach Last.fm and ListenBrainz</li>
+          <li>On a slow connection, playback waits a few seconds for audio instead of stuttering</li>
+          <li>Explore has compact pills, with For You and Genres on one line</li>
+          <li>Holding a phone sideways puts the cover beside the controls</li>
+        </ul>
+        <ul>
+          <li>Liking a song from the player bar crashed the app</li>
+          <li>Song version lookups filled your YouTube search history</li>
+          <li>Songs started slowly because a change at YouTube sent every one of them down the slower route</li>
+          <li>Icons were missing with icon themes other than Adwaita, such as Breeze</li>
+          <li>Dragging a song in the queue one row down did nothing, and no song could reach the end</li>
+          <li>The queue kept scrolling forever when a drag ended outside it</li>
+          <li>The queue jumped to the top when a song was removed</li>
+          <li>Play Next and Add to Queue did not open an empty queue with Open Queue When Playback Starts on</li>
+          <li>Load More under Top Songs jumped to the top of the artist page</li>
+          <li>Albums and singles were only sorted by year for the first few</li>
+          <li>Music videos did not find their song when the song is titled "Original - Romanized", as many Japanese songs are</li>
+          <li>Downloaded songs could show as not downloaded on albums</li>
+          <li>The star on albums appeared late, and the artist page's star had no background</li>
+          <li>Scrollbars no longer sit on top of carousels</li>
+          <li>Lyrics showed on a dark box when they filled the player view</li>
+        </ul>
+      </description>
+    </release>
+
     <release version="2026-10-07.2" date="2026-10-11">
       <description>
         <ul>
