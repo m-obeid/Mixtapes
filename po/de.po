@@ -1800,9 +1800,8 @@ msgstr[0] "{n} von {total} ausgewählt"
 msgstr[1] "{n} von {total} ausgewählt"
 
 #: src/ui/pages/playlist.rs:2115 src/ui/pages/playlist.rs:2128
-#, fuzzy
 msgid "Could not move the song"
-msgstr "Der Link konnte nicht geöffnet werden"
+msgstr "Song konnte nicht verschoben werden"
 
 #: src/ui/pages/playlist.rs:2160 src/ui/pages/playlist.rs:2177
 #, rust-format
