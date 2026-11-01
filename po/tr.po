@@ -826,7 +826,7 @@ msgstr[1] "{n} parçayı sıradaki olarak oynat"
 #: src/ui/context_menu.rs:118 src/ui/context_menu.rs:308
 #: src/ui/pages/playlist.rs:1822
 msgid "Play Next"
-msgstr "Sıradakini Oynat"
+msgstr "Bundan sonra oynat"
 
 #: src/ui/context_menu.rs:121 src/ui/context_menu.rs:468
 #: src/ui/pages/playlist.rs:1850
