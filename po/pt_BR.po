@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
 "POT-Creation-Date: 2026-10-31 21:56+0100\n"
-"PO-Revision-Date: 2026-11-01 17:46-0300\n"
+"PO-Revision-Date: 2026-11-01 19:01-0300\n"
 "Last-Translator: \n"
 "Language-Team: \n"
 "Language: pt_BR\n"
@@ -1260,7 +1260,7 @@ msgstr "Mostrar o que você está escutando no seu perfil do Discord"
 
 #: src/ui/onboarding.rs:279 src/ui/preferences.rs:1035
 msgid "Scrobbling"
-msgstr "Scrobblando"
+msgstr "Scrobble"
 
 #: src/ui/onboarding.rs:279
 msgid ""
@@ -3010,7 +3010,7 @@ msgid ""
 "text. Strict takes the first hit of any kind."
 msgstr ""
 "\"Pela qualidade\" continua procurando por letras sincronizadas antes de "
-"parar em Texto puro. Estrito usa a primeira que aparecer."
+"parar em Texto puro. \"Estrito\" usa a primeira que aparecer."
 
 #: src/ui/preferences_lyrics.rs:149
 msgid "When to Stop Searching"
