@@ -118,7 +118,10 @@ jobs:
           if (-not (Test-Path $iscc)) {
             choco install innosetup -y --no-progress
           }
-          & $iscc /DSourcePath="$((Resolve-Path 'dist/mixtapes').Path)" windows/installer.iss
+          # The newest release in the metainfo, which release commits add first.
+          $version = ([xml](Get-Content com.pocoguy.Muse.metainfo.xml)).component.releases.release | Select-Object -First 1 -ExpandProperty version
+          Write-Output "Installer version: $version"
+          & $iscc /DSourcePath="$((Resolve-Path 'dist/mixtapes').Path)" /DMyAppVersion="$version" windows/installer.iss
           Get-ChildItem windows/Output/MixtapesSetup.exe
 
       - name: Upload portable build
