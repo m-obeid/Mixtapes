@@ -1,0 +1,73 @@
+win32: give touchpad scrolls a touchpad device
+
+Two-finger pans on precision touchpads come through DirectManipulation as
+smooth scrolls, but were sent from the core pointer, whose source is a mouse.
+Kinetic scrolling and swipe trackers such as AdwSwipeTracker only follow
+touchpads, so swiping back or between pages did nothing.
+
+The device manager now has a physical touchpad device on the seat, as the
+Wayland backend has for finger scrolling, and pans are sent from it. Pinches
+stay on the core pointer.
+
+diff --git a/gdk/win32/gdkdevicemanager-win32.c b/gdk/win32/gdkdevicemanager-win32.c
+index 6224245..a87d505 100644
+--- a/gdk/win32/gdkdevicemanager-win32.c
++++ b/gdk/win32/gdkdevicemanager-win32.c
+@@ -757,6 +757,17 @@ gdk_device_manager_win32_constructed (GObject *object)
+   _gdk_device_set_associated_device (device_manager->system_keyboard, device_manager->core_keyboard);
+   _gdk_device_add_physical_device (device_manager->core_keyboard, device_manager->system_keyboard);
+ 
++  /* Scrolls from a touchpad carry a touchpad source, as on other backends,
++   * so kinetic scrolling and swipe gestures know them from a mouse wheel. */
++  device_manager->system_touchpad = g_object_new (GDK_TYPE_DEVICE_WIN32,
++                                                  "name", "System Aggregated Touchpad",
++                                                  "source", GDK_SOURCE_TOUCHPAD,
++                                                  "has-cursor", FALSE,
++                                                  "display", device_manager->display,
++                                                  NULL);
++  _gdk_device_set_associated_device (device_manager->system_touchpad, device_manager->core_pointer);
++  _gdk_device_add_physical_device (device_manager->core_pointer, device_manager->system_touchpad);
++
+   _gdk_device_set_associated_device (device_manager->core_pointer, device_manager->core_keyboard);
+   _gdk_device_set_associated_device (device_manager->core_keyboard, device_manager->core_pointer);
+ 
+@@ -765,6 +776,7 @@ gdk_device_manager_win32_constructed (GObject *object)
+   gdk_display_add_seat (device_manager->display, seat);
+   gdk_win32_seat_add_physical_device (GDK_WIN32_SEAT (seat), device_manager->system_pointer);
+   gdk_win32_seat_add_physical_device (GDK_WIN32_SEAT (seat), device_manager->system_keyboard);
++  gdk_win32_seat_add_physical_device (GDK_WIN32_SEAT (seat), device_manager->system_touchpad);
+   g_object_unref (seat);
+ 
+   display_win32->device_manager = device_manager;
+diff --git a/gdk/win32/gdkdevicemanager-win32.h b/gdk/win32/gdkdevicemanager-win32.h
+index acc91d6..7971391 100644
+--- a/gdk/win32/gdkdevicemanager-win32.h
++++ b/gdk/win32/gdkdevicemanager-win32.h
+@@ -40,6 +40,9 @@ struct _GdkDeviceManagerWin32
+   /* Fake physical devices */
+   GdkDevice *system_pointer;
+   GdkDevice *system_keyboard;
++  /* Two-finger pans on precision touchpads, which come through
++   * DirectManipulation as scrolls */
++  GdkDevice *system_touchpad;
+ 
+   GList *winpointer_devices;
+   GList *wintab_devices;
+diff --git a/gdk/win32/gdkinput-dmanipulation.c b/gdk/win32/gdkinput-dmanipulation.c
+index aa45976..1d1a39c 100644
+--- a/gdk/win32/gdkinput-dmanipulation.c
++++ b/gdk/win32/gdkinput-dmanipulation.c
+@@ -321,7 +321,12 @@ dmanip_event_handler_new (GdkSurface *surface,
+   handler->gesture = gesture;
+ 
+   handler->surface = surface;
+-  handler->device = GDK_WIN32_DISPLAY (gdk_surface_get_display (surface))->device_manager->core_pointer;
++  /* Pans become scrolls, which need the touchpad source for swipes and
++   * kinetic scrolling. Pinches stay on the core pointer as before. */
++  if (gesture == GESTURE_PAN)
++    handler->device = GDK_WIN32_DISPLAY (gdk_surface_get_display (surface))->device_manager->system_touchpad;
++  else
++    handler->device = GDK_WIN32_DISPLAY (gdk_surface_get_display (surface))->device_manager->core_pointer;
+ 
+   dmanip_event_handler_running_state_clear (handler);
+ 

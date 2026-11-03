@@ -50,7 +50,8 @@ jobs:
 
       # GTK with windows/gtk-patches applied: GL goes through ANGLE into a
       # swapchain that keeps alpha, so the shadow around windows is not black
-      # (#130). Built from MSYS2's recipe once per GTK version and patch set.
+      # (#130), and touchpad scrolls come from a touchpad device, so two-finger
+      # swipes work. Built from MSYS2's recipe once per GTK version and patch set.
       - name: Fetch the GTK recipe
         id: gtk
         run: echo "version=$(bash windows/build-gtk.sh fetch)" >> "$GITHUB_OUTPUT"
