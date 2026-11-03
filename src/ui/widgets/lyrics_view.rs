@@ -21,6 +21,7 @@ use crate::ui::context::UiContext;
 use crate::ui::widgets::allocate_bin::AllocateBin;
 use crate::ui::widgets::fade_edges_bin::FadeEdgesBin;
 use crate::ui::widgets::lyric_rows::{Effects, InterludeRow, LyricRow, RowOptions, find_interludes};
+use crate::ui::toast;
 
 /// Autoscroll stands down this long after the listener scrolls by hand.
 const USER_SCROLL_PAUSE: Duration = Duration::from_secs(4);
@@ -916,6 +917,23 @@ impl LyricsView {
                 continue;
             }
             let row = LyricRow::new(line, i, sweep_end_ms(&lines, i, synced), &options);
+
+            // Right click on a desired line from the lyrics to copy that line's text.
+            let text = line.text.to_string();
+            let right_click = gtk::GestureClick::new();
+            right_click.set_button(gtk::gdk::BUTTON_SECONDARY);
+            let text_rc = text.clone();
+            right_click.connect_pressed(move |gesture, _, _, _| {
+                if let Some(display) = gtk::gdk::Display::default() {
+                    display.clipboard().set_text(&text_rc);
+                }
+                if let Some(widget) = gesture.widget() {
+                toast(&widget, &tr!("Song line copied."));
+                }
+                gesture.set_state(gtk::EventSequenceState::Claimed); // stop propagation
+            });
+            row.add_controller(right_click);
+
             // Unsynced text has no cursor, so every row is lit: full brightness reads as "no sync info".
             if !synced {
                 row.set_cursor_ms(0);
