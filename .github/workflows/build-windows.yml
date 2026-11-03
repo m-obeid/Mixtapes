@@ -11,9 +11,9 @@ on:
   # A branch with an open pull request is built through the pull_request
   # event. Listening to its pushes as well ran the same commit twice.
   push:
-    branches: [main]
+    branches: [main, next]
   pull_request:
-    branches: [main]
+    branches: [main, next]
   workflow_dispatch:
   # release.yml runs this too, to attach what it builds to the release.
   workflow_call:
@@ -46,6 +46,30 @@ jobs:
             mingw-w64-ucrt-x86_64-gst-plugins-base
             mingw-w64-ucrt-x86_64-gst-plugins-good
             mingw-w64-ucrt-x86_64-gst-plugins-bad
+            mingw-w64-ucrt-x86_64-angleproject
+
+      # GTK with windows/gtk-patches applied: GL goes through ANGLE into a
+      # swapchain that keeps alpha, so the shadow around windows is not black
+      # (#130). Built from MSYS2's recipe once per GTK version and patch set.
+      - name: Fetch the GTK recipe
+        id: gtk
+        run: echo "version=$(bash windows/build-gtk.sh fetch)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache patched GTK
+        id: gtk-cache
+        uses: actions/cache@v4
+        with:
+          path: gtk-pkg
+          key: windows-gtk4-${{ steps.gtk.outputs.version }}-${{ hashFiles('windows/gtk-patches/*.patch', 'windows/build-gtk.sh') }}
+
+      - name: Build patched GTK
+        if: steps.gtk-cache.outputs.cache-hit != 'true'
+        run: |
+          pacman -S --noconfirm --needed base-devel
+          bash windows/build-gtk.sh build
+
+      - name: Install patched GTK
+        run: pacman -U --noconfirm gtk-pkg/*.pkg.tar.zst
 
       - name: Cache cargo
         uses: actions/cache@v4

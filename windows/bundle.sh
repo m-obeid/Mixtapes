@@ -44,6 +44,9 @@ cp "$PREFIX"/lib/gio/modules/*.dll "$OUT/lib/gio/modules/"
 cp -r "$PREFIX/lib/gdk-pixbuf-2.0" "$OUT/lib/"
 # souphttpsrc loads libsoup at run time, so no import table names it.
 cp "$PREFIX/bin/libsoup-3.0-0.dll" "$OUT/bin/"
+# ANGLE, which the patched GTK draws through. libepoxy loads it at runtime, so
+# the import scan below finds only what these two need.
+cp "$PREFIX/bin/libEGL.dll" "$PREFIX/bin/libGLESv2.dll" "$OUT/bin/"
 
 echo "Fonts"
 # Adwaita Sans and Mono, which style.css asks for. fonts.conf points

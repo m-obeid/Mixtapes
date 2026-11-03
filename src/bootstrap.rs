@@ -211,6 +211,8 @@ pub fn use_bundled_fonts() {
 /// Let GTK render on the GPU on Windows. GTK 4.24's OpenGL and Vulkan renderers
 /// need DirectComposition there, which is opt-in through GDK_DEBUG, so without
 /// it every window falls back to the CPU renderer and animations crawl.
+/// The bundled GTK is patched to draw GL through ANGLE into a swapchain that
+/// keeps alpha, so the shadow around the window stays transparent (#130).
 pub fn enable_gpu_rendering() {
     #[cfg(windows)]
     {
@@ -251,13 +253,6 @@ pub fn apply_gsk_renderer_pref(paths: &Paths) {
     let prefs = paths.read_prefs();
     let value = prefs.get("gsk_renderer").and_then(|v| v.as_str()).unwrap_or_default();
     if value.is_empty() || value == "default" {
-        // Windows: GTK's GL renderer paints the shadow margin around the
-        // window black under DirectComposition. Vulkan keeps it transparent.
-        #[cfg(windows)]
-        // SAFETY: called from main before any other thread exists.
-        unsafe {
-            std::env::set_var("GSK_RENDERER", "vulkan")
-        };
         return;
     }
     // SAFETY: called from main before any other thread exists.
