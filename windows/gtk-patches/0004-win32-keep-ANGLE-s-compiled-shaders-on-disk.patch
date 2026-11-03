@@ -1,0 +1,93 @@
+win32: keep ANGLE's compiled shaders on disk
+
+ANGLE compiles every shader from GLSL to HLSL to D3D bytecode, which stalls
+the first frame drawing a new effect for up to a second, in every run.
+With EGL_ANDROID_blob_cache callbacks, the compiled programs are kept under
+the user cache directory, and later runs load them instead.
+
+diff --git a/gdk/win32/gdkdisplay-win32.c b/gdk/win32/gdkdisplay-win32.c
+index a22dd4d..3186892 100644
+--- a/gdk/win32/gdkdisplay-win32.c
++++ b/gdk/win32/gdkdisplay-win32.c
+@@ -1320,6 +1320,64 @@ gdk_win32_display_get_monitor_scale_factor (GdkWin32Display *display_win32,
+ #define EGL_PLATFORM_DEVICE_EXT 0x313F
+ #endif
+ 
++/* ANGLE compiles every shader from GLSL to HLSL to D3D bytecode, which
++ * stalls the first frame that draws a new effect for up to half a second.
++ * Kept on disk, the compiled programs make that a one-time cost.
++ */
++static char *
++angle_cache_path (const void      *key,
++                  EGLsizeiANDROID  key_size)
++{
++  char *hash, *path;
++
++  hash = g_compute_checksum_for_data (G_CHECKSUM_SHA256, key, key_size);
++  path = g_build_filename (g_get_user_cache_dir (), "gtk-4.0", "angle", hash, NULL);
++  g_free (hash);
++
++  return path;
++}
++
++static void EGLAPIENTRY
++angle_cache_set (const void      *key,
++                 EGLsizeiANDROID  key_size,
++                 const void      *value,
++                 EGLsizeiANDROID  value_size)
++{
++  char *path, *dir;
++
++  path = angle_cache_path (key, key_size);
++  dir = g_path_get_dirname (path);
++  if (g_mkdir_with_parents (dir, 0700) == 0)
++    g_file_set_contents (path, value, value_size, NULL);
++  g_free (dir);
++  g_free (path);
++}
++
++static EGLsizeiANDROID EGLAPIENTRY
++angle_cache_get (const void      *key,
++                 EGLsizeiANDROID  key_size,
++                 void            *value,
++                 EGLsizeiANDROID  value_size)
++{
++  char *path, *contents;
++  gsize length;
++
++  path = angle_cache_path (key, key_size);
++  if (!g_file_get_contents (path, &contents, &length, NULL))
++    {
++      g_free (path);
++      return 0;
++    }
++
++  /* A buffer too small only learns the size, and ANGLE asks again */
++  if (length <= (gsize) value_size)
++    memcpy (value, contents, length);
++  g_free (contents);
++  g_free (path);
++
++  return length;
++}
++
+ /* ANGLE on the display's D3D11 device, so its rendering, the swapchains and
+  * Direct Composition share one device. Only with Direct Composition, which
+  * the EGL contexts present through.
+@@ -1365,6 +1423,16 @@ gdk_win32_display_init_angle (GdkDisplay  *display,
+   if (!gdk_display_init_egl (display, EGL_PLATFORM_DEVICE_EXT, device, FALSE, error))
+     return NULL;
+ 
++  /* Before any context exists, as the extension requires */
++  if (epoxy_has_egl_extension (gdk_display_get_egl_display (display), "EGL_ANDROID_blob_cache"))
++    {
++      void (EGLAPIENTRY *set_cache_funcs) (EGLDisplay, EGLSetBlobFuncANDROID, EGLGetBlobFuncANDROID);
++
++      set_cache_funcs = (gpointer) eglGetProcAddress ("eglSetBlobCacheFuncsANDROID");
++      if (set_cache_funcs)
++        set_cache_funcs (gdk_display_get_egl_display (display), angle_cache_set, angle_cache_get);
++    }
++
+   return g_object_new (GDK_TYPE_WIN32_GL_CONTEXT_EGL,
+                        "display", display,
+                        "allowed-apis", GDK_GL_API_GLES,

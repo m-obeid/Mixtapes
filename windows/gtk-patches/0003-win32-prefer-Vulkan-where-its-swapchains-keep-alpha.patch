@@ -1,0 +1,96 @@
+win32: prefer Vulkan where its swapchains keep alpha
+
+GL through ANGLE pays for shader translation, with long stalls the first
+time an effect is drawn, and renders frames two to four times slower than
+Vulkan. Vulkan only keeps transparent pixels where the driver offers a
+premultiplied swapchain, though, and an opaque one shows them black under
+Direct Composition.
+
+Vulkan contexts gain a requires_alpha class flag. When set, attaching to a
+surface without premultiplied alpha fails, so the renderer falls back to GL.
+The win32 backend sets it and prefers Vulkan whenever Direct Composition is
+on.
+
+diff --git a/gdk/gdkvulkancontext.c b/gdk/gdkvulkancontext.c
+index add988d..41b8c7b 100644
+--- a/gdk/gdkvulkancontext.c
++++ b/gdk/gdkvulkancontext.c
+@@ -1012,6 +1012,20 @@ gdk_vulkan_context_end_frame (GdkDrawContext *draw_context,
+   priv->regions[present->image_index] = cairo_region_create ();
+ }
+ 
++static gboolean
++gdk_vulkan_context_surface_has_alpha (GdkVulkanContext *self)
++{
++  GdkVulkanContextPrivate *priv = gdk_vulkan_context_get_instance_private (self);
++  VkSurfaceCapabilitiesKHR capabilities;
++
++  if (GDK_VK_CHECK (vkGetPhysicalDeviceSurfaceCapabilitiesKHR, gdk_vulkan_context_get_physical_device (self),
++                                                               priv->surface,
++                                                               &capabilities) != VK_SUCCESS)
++    return FALSE;
++
++  return (capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) != 0;
++}
++
+ static gboolean
+ gdk_vulkan_context_surface_attach (GdkDrawContext  *context,
+                                    GError         **error)
+@@ -1060,6 +1074,12 @@ gdk_vulkan_context_surface_attach (GdkDrawContext  *context,
+       g_set_error (error, GDK_VULKAN_ERROR, GDK_VULKAN_ERROR_NOT_AVAILABLE,
+                    "FIXME: Queue family does not support surface. Write code to try different queue family.");
+     }
++  else if (GDK_VULKAN_CONTEXT_GET_CLASS (self)->requires_alpha &&
++           !gdk_vulkan_context_surface_has_alpha (self))
++    {
++      g_set_error (error, GDK_VULKAN_ERROR, GDK_VULKAN_ERROR_NOT_AVAILABLE,
++                   "Vulkan swapchains here cannot blend premultiplied alpha");
++    }
+   else
+     {
+       VkDevice vk_device;
+diff --git a/gdk/gdkvulkancontextprivate.h b/gdk/gdkvulkancontextprivate.h
+index b6386ac..e6afeb5 100644
+--- a/gdk/gdkvulkancontextprivate.h
++++ b/gdk/gdkvulkancontextprivate.h
+@@ -47,6 +47,10 @@ struct _GdkVulkanContextClass
+   VkResult              (* create_surface)                              (GdkVulkanContext      *context,
+                                                                          VkSurfaceKHR          *surface);
+ #endif
++
++  /* Refuse surfaces whose swapchains cannot blend premultiplied alpha, so
++   * renderers fall back to a backend that keeps transparent pixels. */
++  gboolean              requires_alpha;
+ };
+ 
+ #ifdef GDK_RENDERING_VULKAN
+diff --git a/gdk/win32/gdkdisplay-win32.c b/gdk/win32/gdkdisplay-win32.c
+index 7f3703d..a22dd4d 100644
+--- a/gdk/win32/gdkdisplay-win32.c
++++ b/gdk/win32/gdkdisplay-win32.c
+@@ -526,6 +526,11 @@ gdk_win32_display_init_dcomp (GdkWin32Display *self)
+   hr_warn (DCompositionCreateDevice (dxgi_device, &my_IID_IDCompositionDevice, (void **) &self->dcomp_device));
+ 
+   gdk_win32_com_clear (&dxgi_device);
++
++  /* Vulkan renders faster than GL through ANGLE and needs no shader
++   * translation. Surfaces where it cannot blend alpha fall back to GL. */
++  if (self->dcomp_device)
++    gdk_display_set_prefer_vulkan (GDK_DISPLAY (self), TRUE);
+ }
+ 
+ static gboolean
+diff --git a/gdk/win32/gdkvulkancontext-win32.c b/gdk/win32/gdkvulkancontext-win32.c
+index c2b2bfc..f0fd54e 100644
+--- a/gdk/win32/gdkvulkancontext-win32.c
++++ b/gdk/win32/gdkvulkancontext-win32.c
+@@ -191,6 +191,9 @@ gdk_win32_vulkan_context_class_init (GdkWin32VulkanContextClass *klass)
+   GdkDrawContextClass *draw_context_class = GDK_DRAW_CONTEXT_CLASS (klass);
+ 
+   context_class->create_surface = gdk_win32_vulkan_context_create_surface;
++  /* Direct Composition shows an opaque swapchain's transparent pixels as
++   * black, so without alpha GL draws through ANGLE instead. */
++  context_class->requires_alpha = TRUE;
+ 
+   draw_context_class->surface_attach = gdk_win32_vulkan_context_surface_attach;
+   draw_context_class->surface_detach = gdk_win32_vulkan_context_surface_detach;
