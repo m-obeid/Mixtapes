@@ -27,3 +27,7 @@ __pycache__/
 *.manifest
 # Downloaded by the Windows CI job for the installer.
 windows/MicrosoftEdgeWebview2Setup.exe
+
+# Patched GTK built by windows/build-gtk.sh.
+/gtk-recipe/
+/gtk-pkg/

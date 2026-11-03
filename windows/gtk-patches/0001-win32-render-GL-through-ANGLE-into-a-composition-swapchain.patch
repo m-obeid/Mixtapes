@@ -1,0 +1,525 @@
+win32: render GL through ANGLE into a composition swapchain
+
+WGL renders into a child window that DirectComposition shows without alpha,
+so the transparent shadow margin of client-side decorated windows and
+popovers turns black. The Vulkan path only keeps alpha when the driver offers
+a premultiplied swapchain.
+
+With Direct Composition on and ANGLE available, GDK now initializes EGL on
+ANGLE using the display's own D3D11 device. Each surface renders into a pbuffer
+wrapping the back buffer of a composition swapchain with premultiplied alpha,
+which becomes the content of the surface's visual. A Y flip on the visual
+corrects GL's bottom-up rows. Without ANGLE, WGL is used as before.
+
+Also fixes the order of the overloaded IDCompositionVisual methods in dcomp.h,
+which put SetTransform (matrix) in the slot of SetTransform (object).
+
+diff --git a/gdk/gdkglcontext.c b/gdk/gdkglcontext.c
+index ae06a06..4a800e0 100644
+--- a/gdk/gdkglcontext.c
++++ b/gdk/gdkglcontext.c
+@@ -637,7 +637,8 @@ gdk_gl_context_ensure_egl_surface (GdkGLContext   *self,
+   GdkSurface *surface = gdk_draw_context_get_surface (draw_context);
+   GdkDisplay *display = gdk_draw_context_get_display (draw_context);
+ 
+-  g_return_if_fail (priv->egl_native_window != NULL);
++  g_return_if_fail (priv->egl_native_window != NULL ||
++                    GDK_GL_CONTEXT_GET_CLASS (self)->create_egl_surface != NULL);
+ 
+   if (depth == GDK_MEMORY_NONE)
+     {
+@@ -676,11 +677,15 @@ gdk_gl_context_ensure_egl_surface (GdkGLContext   *self,
+       g_assert (i < G_N_ELEMENTS (attribs));
+       attribs[i++] = EGL_NONE;
+ 
+-      priv->egl_surface = eglCreateWindowSurface (egl_display,
+-                                                  egl_config,
+-                                                  (EGLNativeWindowType) priv->egl_native_window,
+-                                                  attribs);
+-      if (priv->egl_surface == EGL_NO_SURFACE)
++      if (GDK_GL_CONTEXT_GET_CLASS (self)->create_egl_surface != NULL)
++        priv->egl_surface = GDK_GL_CONTEXT_GET_CLASS (self)->create_egl_surface (self, egl_config);
++      else
++        priv->egl_surface = eglCreateWindowSurface (egl_display,
++                                                    egl_config,
++                                                    (EGLNativeWindowType) priv->egl_native_window,
++                                                    attribs);
++      if (priv->egl_surface == EGL_NO_SURFACE &&
++          GDK_GL_CONTEXT_GET_CLASS (self)->create_egl_surface == NULL)
+         {
+           /* just assume the error is no srgb support and try again without */
+           surface->is_srgb = FALSE;
+diff --git a/gdk/gdkglcontextprivate.h b/gdk/gdkglcontextprivate.h
+index 5411579..b594cd9 100644
+--- a/gdk/gdkglcontextprivate.h
++++ b/gdk/gdkglcontextprivate.h
+@@ -92,6 +92,11 @@ struct _GdkGLContextClass
+                                                                  GdkGLContext          *other);
+ 
+   guint                 (* get_default_framebuffer)             (GdkGLContext          *self);
++
++  /* For backends that render EGL into buffers of their own instead of a
++   * native window. Returns an EGLSurface for the given EGLConfig. */
++  gpointer              (* create_egl_surface)                  (GdkGLContext          *self,
++                                                                 gpointer               egl_config);
+ };
+ 
+ typedef struct {
+diff --git a/gdk/win32/dcomp.h b/gdk/win32/dcomp.h
+index 779c975..f11946b 100644
+--- a/gdk/win32/dcomp.h
++++ b/gdk/win32/dcomp.h
+@@ -2656,11 +2656,15 @@ typedef struct IDCompositionVisualVtbl {
+         IDCompositionVisual *This);
+ 
+     /*** IDCompositionVisual methods ***/
++    HRESULT (STDMETHODCALLTYPE *SetOffsetXAnimation)(
++        IDCompositionVisual *This,
++        IDCompositionAnimation *animation);
++
+     HRESULT (STDMETHODCALLTYPE *SetOffsetX)(
+         IDCompositionVisual *This,
+         float offset_x);
+ 
+-    HRESULT (STDMETHODCALLTYPE *SetOffsetXAnimation)(
++    HRESULT (STDMETHODCALLTYPE *SetOffsetYAnimation)(
+         IDCompositionVisual *This,
+         IDCompositionAnimation *animation);
+ 
+@@ -2668,18 +2672,14 @@ typedef struct IDCompositionVisualVtbl {
+         IDCompositionVisual *This,
+         float offset_y);
+ 
+-    HRESULT (STDMETHODCALLTYPE *SetOffsetYAnimation)(
++    HRESULT (STDMETHODCALLTYPE *SetTransformObject)(
+         IDCompositionVisual *This,
+-        IDCompositionAnimation *animation);
++        IDCompositionTransform *transform);
+ 
+     HRESULT (STDMETHODCALLTYPE *SetTransform)(
+         IDCompositionVisual *This,
+         const D2D_MATRIX_3X2_F *matrix);
+ 
+-    HRESULT (STDMETHODCALLTYPE *SetTransformObject)(
+-        IDCompositionVisual *This,
+-        IDCompositionTransform *transform);
+-
+     HRESULT (STDMETHODCALLTYPE *SetTransformParent)(
+         IDCompositionVisual *This,
+         IDCompositionVisual *visual);
+@@ -2696,14 +2696,14 @@ typedef struct IDCompositionVisualVtbl {
+         IDCompositionVisual *This,
+         enum DCOMPOSITION_BORDER_MODE border_mode);
+ 
+-    HRESULT (STDMETHODCALLTYPE *SetClip)(
+-        IDCompositionVisual *This,
+-        const D2D_RECT_F *rect);
+-
+     HRESULT (STDMETHODCALLTYPE *SetClipObject)(
+         IDCompositionVisual *This,
+         IDCompositionClip *clip);
+ 
++    HRESULT (STDMETHODCALLTYPE *SetClip)(
++        IDCompositionVisual *This,
++        const D2D_RECT_F *rect);
++
+     HRESULT (STDMETHODCALLTYPE *SetContent)(
+         IDCompositionVisual *This,
+         IUnknown *content);
+diff --git a/gdk/win32/gdkdisplay-win32.c b/gdk/win32/gdkdisplay-win32.c
+index 869e041..7f3703d 100644
+--- a/gdk/win32/gdkdisplay-win32.c
++++ b/gdk/win32/gdkdisplay-win32.c
+@@ -1307,6 +1307,66 @@ gdk_win32_display_get_monitor_scale_factor (GdkWin32Display *display_win32,
+ #define EGL_PLATFORM_ANGLE_ANGLE          0x3202
+ #endif
+ 
++#ifdef HAVE_EGL
++#ifndef EGL_D3D11_DEVICE_ANGLE
++#define EGL_D3D11_DEVICE_ANGLE 0x33A1
++#endif
++#ifndef EGL_PLATFORM_DEVICE_EXT
++#define EGL_PLATFORM_DEVICE_EXT 0x313F
++#endif
++
++/* ANGLE on the display's D3D11 device, so its rendering, the swapchains and
++ * Direct Composition share one device. Only with Direct Composition, which
++ * the EGL contexts present through.
++ */
++static GdkGLContext *
++gdk_win32_display_init_angle (GdkDisplay  *display,
++                              GError     **error)
++{
++  GdkWin32Display *display_win32 = GDK_WIN32_DISPLAY (display);
++  EGLDeviceEXT (*create_device) (EGLint, void *, const EGLAttrib *);
++  ID3D11Device *d3d11_device;
++  EGLDeviceEXT device;
++
++  if (!gdk_win32_display_get_dcomp_device (display_win32) ||
++      !gdk_has_feature (GDK_FEATURE_EGL) ||
++      !gdk_has_feature (GDK_FEATURE_GLES_API) ||
++      !epoxy_has_egl () ||
++      !epoxy_has_egl_extension (NULL, "EGL_ANGLE_device_creation") ||
++      !epoxy_has_egl_extension (NULL, "EGL_EXT_platform_device"))
++    {
++      g_set_error_literal (error, GDK_GL_ERROR, GDK_GL_ERROR_NOT_AVAILABLE,
++                           "ANGLE with Direct Composition is not available");
++      return NULL;
++    }
++
++  d3d11_device = gdk_win32_display_get_d3d11_device (display_win32);
++  create_device = (gpointer) eglGetProcAddress ("eglCreateDeviceANGLE");
++  if (d3d11_device == NULL || create_device == NULL)
++    {
++      g_set_error_literal (error, GDK_GL_ERROR, GDK_GL_ERROR_NOT_AVAILABLE,
++                           "No D3D11 device for ANGLE");
++      return NULL;
++    }
++
++  device = create_device (EGL_D3D11_DEVICE_ANGLE, d3d11_device, NULL);
++  if (device == EGL_NO_DEVICE_EXT)
++    {
++      g_set_error (error, GDK_GL_ERROR, GDK_GL_ERROR_NOT_AVAILABLE,
++                   "ANGLE refused the D3D11 device: 0x%x", eglGetError ());
++      return NULL;
++    }
++
++  if (!gdk_display_init_egl (display, EGL_PLATFORM_DEVICE_EXT, device, FALSE, error))
++    return NULL;
++
++  return g_object_new (GDK_TYPE_WIN32_GL_CONTEXT_EGL,
++                       "display", display,
++                       "allowed-apis", GDK_GL_API_GLES,
++                       NULL);
++}
++#endif
++
+ static GdkGLContext *
+ gdk_win32_display_init_gl (GdkDisplay  *display,
+                            GError     **error)
+@@ -1317,8 +1377,18 @@ gdk_win32_display_init_gl (GdkDisplay  *display,
+ #endif
+   GdkGLContext *context;
+ 
++#ifdef HAVE_EGL
++  /* WGL renders into a child window that Direct Composition shows without
++   * alpha, so transparent pixels turn black. ANGLE presents through a
++   * composition swapchain that keeps it. */
++  context = gdk_win32_display_init_angle (display, error);
++  if (context)
++    return context;
++  g_clear_error (error);
++#endif
++
+   /*
+-   * No env vars set, do the regular GL initialization, first WGL and then EGL,
++   * Otherwise do the regular GL initialization, first WGL and then EGL,
+    * as WGL is the more tried-and-tested configuration.
+    */
+ 
+diff --git a/gdk/win32/gdkglcontext-win32-egl.c b/gdk/win32/gdkglcontext-win32-egl.c
+index c5af8b2..60c9822 100644
+--- a/gdk/win32/gdkglcontext-win32-egl.c
++++ b/gdk/win32/gdkglcontext-win32-egl.c
+@@ -39,21 +39,301 @@
+ #include <cairo.h>
+ #include <epoxy/egl.h>
+ 
++#include "gdkdisplay-win32.h"
++#include "gdksurface-win32.h"
++
++#ifndef EGL_DEVICE_EXT
++#define EGL_DEVICE_EXT 0x322C
++#endif
++#ifndef EGL_D3D11_DEVICE_ANGLE
++#define EGL_D3D11_DEVICE_ANGLE 0x33A1
++#endif
++#ifndef EGL_D3D_TEXTURE_ANGLE
++#define EGL_D3D_TEXTURE_ANGLE 0x33A3
++#endif
++
++/* With DirectComposition, ANGLE renders into a pbuffer wrapping the back
++ * buffer of a composition swapchain with premultiplied alpha, which is the
++ * content of the surface's visual. DWM then blends the surface's
++ * transparent pixels (shadows, rounded corners) with what is below.
++ */
+ struct _GdkWin32GLContextEGL
+ {
+   GdkWin32GLContext parent_instance;
++
++  IDXGISwapChain1 *swap_chain;
++  DXGI_FORMAT swap_chain_format;
++  /* The buffer height the visual's flip was set up for, 0 for none */
++  guint flipped_height;
+ };
+ 
+ typedef struct _GdkWin32GLContextClass    GdkWin32GLContextEGLClass;
+ 
+ G_DEFINE_TYPE (GdkWin32GLContextEGL, gdk_win32_gl_context_egl, GDK_TYPE_WIN32_GL_CONTEXT)
+ 
++/* The D3D11 device ANGLE renders with. Not referenced. */
++static ID3D11Device *
++get_angle_d3d11_device (GdkDisplay *display)
++{
++  EGLAttrib device = 0, d3d11_device = 0;
++
++  if (!epoxy_has_egl_extension (NULL, "EGL_EXT_device_query"))
++    return NULL;
++  if (!eglQueryDisplayAttribEXT (gdk_display_get_egl_display (display), EGL_DEVICE_EXT, &device) || device == 0)
++    return NULL;
++  if (!eglQueryDeviceAttribEXT ((EGLDeviceEXT) device, EGL_D3D11_DEVICE_ANGLE, &d3d11_device))
++    return NULL;
++
++  return (ID3D11Device *) d3d11_device;
++}
++
++static gboolean
++gdk_win32_gl_context_egl_surface_attach (GdkDrawContext  *context,
++                                         GError         **error)
++{
++  GdkDisplay *display = gdk_draw_context_get_display (context);
++
++  if (!gdk_win32_display_get_dcomp_device (GDK_WIN32_DISPLAY (display)) ||
++      !epoxy_has_egl_extension (gdk_display_get_egl_display (display), "EGL_ANGLE_d3d_texture_client_buffer") ||
++      get_angle_d3d11_device (display) == NULL)
++    {
++      g_set_error (error, GDK_GL_ERROR, GDK_GL_ERROR_NOT_AVAILABLE,
++                   "EGL needs ANGLE on D3D11 and Direct Composition");
++      return FALSE;
++    }
++
++  /* The swapchain is made with the first frame, once its format is known. */
++  return TRUE;
++}
++
++/* GL's rows run bottom up and D3D's top down, so the frames land upside
++ * down in the swapchain. The visual flips them back while composing. */
++static void
++gdk_win32_gl_context_egl_set_flip (GdkWin32GLContextEGL *self,
++                                   guint                 height)
++{
++  GdkDrawContext *context = GDK_DRAW_CONTEXT (self);
++  GdkSurface *surface = gdk_draw_context_get_surface (context);
++  GdkWin32Display *display = GDK_WIN32_DISPLAY (gdk_draw_context_get_display (context));
++  D2D_MATRIX_3X2_F matrix;
++  HRESULT hr;
++
++  if (self->flipped_height == height || GDK_SURFACE_DESTROYED (surface))
++    return;
++
++  memset (&matrix, 0, sizeof (matrix));
++  matrix._11 = 1.0f;
++  matrix._22 = height ? -1.0f : 1.0f;
++  matrix._32 = (FLOAT) height;
++  hr = IDCompositionVisual_SetTransform (GDK_WIN32_SURFACE (surface)->dcomp_visual, &matrix);
++  if (FAILED (hr))
++    {
++      hr_warn (hr);
++      return;
++    }
++  hr_warn (IDCompositionDevice_Commit (gdk_win32_display_get_dcomp_device (display)));
++  self->flipped_height = height;
++}
++
++/* The pbuffer holds the back buffer, so callers drop it first. */
++static void
++gdk_win32_gl_context_egl_drop_swap_chain (GdkWin32GLContextEGL *self)
++{
++  GdkDrawContext *context = GDK_DRAW_CONTEXT (self);
++  GdkSurface *surface = gdk_draw_context_get_surface (context);
++
++  if (self->swap_chain != NULL)
++    {
++      gdk_win32_gl_context_egl_set_flip (self, 0);
++      if (!GDK_SURFACE_DESTROYED (surface))
++        gdk_win32_surface_set_dcomp_content (GDK_WIN32_SURFACE (surface), NULL);
++      gdk_win32_com_clear (&self->swap_chain);
++    }
++}
++
++static void
++gdk_win32_gl_context_egl_surface_detach (GdkDrawContext *context)
++{
++  gdk_gl_context_set_egl_native_window (GDK_GL_CONTEXT (context), NULL);
++  gdk_win32_gl_context_egl_drop_swap_chain (GDK_WIN32_GL_CONTEXT_EGL (context));
++}
++
++static gboolean
++gdk_win32_gl_context_egl_ensure_swap_chain (GdkWin32GLContextEGL *self,
++                                            DXGI_FORMAT           format)
++{
++  GdkDrawContext *context = GDK_DRAW_CONTEXT (self);
++  GdkSurface *surface = gdk_draw_context_get_surface (context);
++  ID3D11Device *d3d11_device;
++  IDXGIDevice *dxgi_device = NULL;
++  IDXGIAdapter *adapter = NULL;
++  IDXGIFactory2 *factory = NULL;
++  guint width, height;
++  HRESULT hr;
++
++  if (self->swap_chain != NULL && self->swap_chain_format == format)
++    return TRUE;
++
++  gdk_win32_gl_context_egl_drop_swap_chain (self);
++
++  d3d11_device = get_angle_d3d11_device (gdk_draw_context_get_display (context));
++  if (d3d11_device == NULL)
++    return FALSE;
++
++  gdk_draw_context_get_buffer_size (context, &width, &height);
++
++  hr = ID3D11Device_QueryInterface (d3d11_device, &IID_IDXGIDevice, (void **) &dxgi_device);
++  if (SUCCEEDED (hr))
++    hr = IDXGIDevice_GetAdapter (dxgi_device, &adapter);
++  if (SUCCEEDED (hr))
++    hr = IDXGIAdapter_GetParent (adapter, &IID_IDXGIFactory2, (void **) &factory);
++  if (SUCCEEDED (hr))
++    hr = IDXGIFactory2_CreateSwapChainForComposition (factory,
++                                                      (IUnknown *) d3d11_device,
++                                                      (&(DXGI_SWAP_CHAIN_DESC1) {
++                                                          .Width = MAX (width, 1),
++                                                          .Height = MAX (height, 1),
++                                                          .Format = format,
++                                                          .Stereo = false,
++                                                          .SampleDesc = (DXGI_SAMPLE_DESC) {
++                                                              .Count = 1,
++                                                              .Quality = 0,
++                                                          },
++                                                          .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
++                                                          .BufferCount = 2,
++                                                          .Scaling = DXGI_SCALING_STRETCH,
++                                                          .SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
++                                                          .AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED,
++                                                          .Flags = 0,
++                                                      }),
++                                                      NULL,
++                                                      &self->swap_chain);
++
++  gdk_win32_com_clear (&factory);
++  gdk_win32_com_clear (&adapter);
++  gdk_win32_com_clear (&dxgi_device);
++
++  if (FAILED (hr))
++    {
++      hr_warn (hr);
++      return FALSE;
++    }
++
++  self->swap_chain_format = format;
++  gdk_win32_surface_set_dcomp_content (GDK_WIN32_SURFACE (surface), (IUnknown *) self->swap_chain);
++
++  return TRUE;
++}
++
++static gpointer
++gdk_win32_gl_context_egl_create_egl_surface (GdkGLContext *context,
++                                             gpointer      egl_config)
++{
++  GdkWin32GLContextEGL *self = GDK_WIN32_GL_CONTEXT_EGL (context);
++  EGLDisplay egl_display = gdk_display_get_egl_display (gdk_gl_context_get_display (context));
++  ID3D11Texture2D *buffer = NULL;
++  D3D11_TEXTURE2D_DESC desc;
++  EGLSurface egl_surface;
++  EGLint red_size = 8;
++
++  eglGetConfigAttrib (egl_display, egl_config, EGL_RED_SIZE, &red_size);
++  if (!gdk_win32_gl_context_egl_ensure_swap_chain (self,
++                                                   red_size > 8 ? DXGI_FORMAT_R16G16B16A16_FLOAT
++                                                                : DXGI_FORMAT_R8G8B8A8_UNORM))
++    return EGL_NO_SURFACE;
++
++  if (FAILED (IDXGISwapChain1_GetBuffer (self->swap_chain, 0, &IID_ID3D11Texture2D, (void **) &buffer)))
++    return EGL_NO_SURFACE;
++
++  ID3D11Texture2D_GetDesc (buffer, &desc);
++  egl_surface = eglCreatePbufferFromClientBuffer (egl_display,
++                                                  EGL_D3D_TEXTURE_ANGLE,
++                                                  (EGLClientBuffer) buffer,
++                                                  egl_config,
++                                                  (EGLint[]) {
++                                                      EGL_WIDTH, desc.Width,
++                                                      EGL_HEIGHT, desc.Height,
++                                                      EGL_NONE
++                                                  });
++  if (egl_surface == EGL_NO_SURFACE)
++    g_warning ("Failed to wrap the swapchain for EGL: 0x%x", eglGetError ());
++
++  gdk_win32_com_clear (&buffer);
++
++  return egl_surface;
++}
++
++static cairo_region_t *
++gdk_win32_gl_context_egl_get_damage (GdkGLContext *context)
++{
++  guint width, height;
++
++  /* The flip swapchain hands out a buffer two frames old, and the pbuffer
++   * reports no age, so every frame is drawn in full. */
++  gdk_draw_context_get_buffer_size (GDK_DRAW_CONTEXT (context), &width, &height);
++
++  return cairo_region_create_rectangle (&(cairo_rectangle_int_t) { 0, 0, width, height });
++}
++
++static void
++gdk_win32_gl_context_egl_end_frame (GdkDrawContext *draw_context,
++                                    gpointer        context_data,
++                                    cairo_region_t *painted)
++{
++  GdkWin32GLContextEGL *self = GDK_WIN32_GL_CONTEXT_EGL (draw_context);
++  guint width, height;
++
++  /* Swapping a pbuffer does nothing, but keeps the generic bookkeeping. */
++  GDK_DRAW_CONTEXT_CLASS (gdk_win32_gl_context_egl_parent_class)->end_frame (draw_context, context_data, painted);
++
++  if (self->swap_chain == NULL)
++    return;
++
++  gdk_draw_context_get_buffer_size (draw_context, &width, &height);
++  gdk_win32_gl_context_egl_set_flip (self, MAX (height, 1));
++
++  /* ANGLE's commands go to the D3D11 device the swapchain was made on. */
++  glFlush ();
++  hr_warn (IDXGISwapChain1_Present (self->swap_chain, 0, 0));
++}
++
++static void
++gdk_win32_gl_context_egl_surface_resized (GdkDrawContext *draw_context)
++{
++  GdkWin32GLContextEGL *self = GDK_WIN32_GL_CONTEXT_EGL (draw_context);
++  guint width, height;
++
++  if (self->swap_chain != NULL)
++    {
++      /* ResizeBuffers fails while the pbuffer still holds the back buffer. */
++      gdk_gl_context_set_egl_native_window (GDK_GL_CONTEXT (self), NULL);
++
++      gdk_draw_context_get_buffer_size (draw_context, &width, &height);
++      hr_warn (IDXGISwapChain1_ResizeBuffers (self->swap_chain,
++                                              0,
++                                              MAX (width, 1),
++                                              MAX (height, 1),
++                                              DXGI_FORMAT_UNKNOWN,
++                                              0));
++    }
++
++  GDK_DRAW_CONTEXT_CLASS (gdk_win32_gl_context_egl_parent_class)->surface_resized (draw_context);
++}
++
+ static void
+ gdk_win32_gl_context_egl_class_init (GdkWin32GLContextClass *klass)
+ {
+   GdkGLContextClass *context_class = GDK_GL_CONTEXT_CLASS(klass);
++  GdkDrawContextClass *draw_context_class = GDK_DRAW_CONTEXT_CLASS (klass);
+ 
+   context_class->backend_type = GDK_GL_EGL;
++  context_class->create_egl_surface = gdk_win32_gl_context_egl_create_egl_surface;
++  context_class->get_damage = gdk_win32_gl_context_egl_get_damage;
++
++  draw_context_class->surface_attach = gdk_win32_gl_context_egl_surface_attach;
++  draw_context_class->surface_detach = gdk_win32_gl_context_egl_surface_detach;
++  draw_context_class->surface_resized = gdk_win32_gl_context_egl_surface_resized;
++  draw_context_class->end_frame = gdk_win32_gl_context_egl_end_frame;
+ }
+ 
+ static void

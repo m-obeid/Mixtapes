@@ -2,7 +2,10 @@
 ; Build with: iscc installer.iss
 
 #define MyAppName "Mixtapes"
-#define MyAppVersion "2026.12.09.0"
+; CI passes the newest release from com.pocoguy.Muse.metainfo.xml with /DMyAppVersion=.
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0.0"
+#endif
 #define MyAppPublisher "pocoguy"
 #define MyAppURL "https://github.com/m-obeid/Mixtapes"
 #define MyAppExeName "bin\mixtapes.exe"
@@ -12,6 +15,8 @@
 AppId={#MyAppId}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+; Windows file versions take dots only: 2026-10-31.1 becomes 2026.10.31.1.
+VersionInfoVersion={#StringChange(MyAppVersion, "-", ".")}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
