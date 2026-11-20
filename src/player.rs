@@ -1386,6 +1386,8 @@ impl Player {
         if let Some(t) = track.filter(|_| self.history_mode.borrow().as_str() == HISTORY_IMMEDIATE) {
             self.record_play(&t.video_id.0);
         }
+        // Notify once all fields are set, or a handler pairs the new id with the old rating.
+        let _notify = self.state.freeze_notify();
         match track {
             Some(t) => {
                 self.state.set_title(t.title.clone());
