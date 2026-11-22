@@ -42,7 +42,8 @@ pub fn init(paths: &Paths) {
     let path = paths.cache_dir.join("audio_twins.json");
     if let Some(saved) = std::fs::read_to_string(&path).ok().and_then(|text| serde_json::from_str::<HashMap<String, Track>>(&text).ok()) {
         let mut known = KNOWN.lock().unwrap();
-        for (video_id, twin) in saved {
+        // A twin named as another cut may come from the looser matching of older runs, so it is searched for again.
+        for (video_id, twin) in saved.into_iter().filter(|(_, twin)| crate::net::playlists::version_marks(&twin.title).is_empty()) {
             // A twin is its own audio version, so it is never asked about.
             known.insert(twin.video_id.0.clone(), None);
             link(&video_id, &twin);

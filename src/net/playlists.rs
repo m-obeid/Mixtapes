@@ -402,7 +402,7 @@ async fn look_up_audio_version(api: &dyn Browse, video_id: &str) -> Result<Optio
     let watch = get_watch_playlist(api, Some(video_id), None, 1, false).await.unwrap_or_default();
     let Some(current) = watch.tracks.first() else { return Ok(None) };
     let cur_type = current.track.video_type.clone().unwrap_or_default().to_uppercase();
-    if cur_type == "MUSIC_VIDEO_TYPE_ATV" {
+    if cur_type == "MUSIC_VIDEO_TYPE_ATV" || names_another_cut(&current.track) {
         return Ok(None);
     }
     if let Some(cp) = &current.counterpart {
@@ -429,9 +429,11 @@ async fn search_audio_version(api: &dyn Browse, title: &str, artists: &[String],
     };
     let search_client = twins::search_client();
     let results = search(search_client.as_deref().unwrap_or(api), &query, Some(SearchFilter::Songs)).await?;
+    // The same cut too: a looser pass cuts "(feat. X) [Remix]" down to the plain title.
+    let marks = version_marks(title);
     let by_artist = |item: &&MediaItem| {
         let names: Vec<String> = item.artists.iter().map(|a| a.name.to_lowercase()).collect();
-        item.kind == ItemKind::Song && (artists.is_empty() || artists.iter().any(|a| names.contains(a)))
+        item.kind == ItemKind::Song && (artists.is_empty() || artists.iter().any(|a| names.contains(a))) && version_marks(&item.title) == marks
     };
     let wanted = normalize_title(title);
     if let Some(item) = results.items.iter().filter(by_artist).find(|i| normalize_title(&i.title) == wanted) {
@@ -483,7 +485,34 @@ const TWIN_LOOKUPS_AT_ONCE: usize = 6;
 
 /// Whether a row is a music video a song version may replace. A row of the listener's own playlist is left alone: its id is what removes it.
 fn convertible(track: &Track) -> bool {
-    track.may_have_audio_version() && track.set_video_id.is_none() && track.is_available
+    track.may_have_audio_version() && track.set_video_id.is_none() && track.is_available && !names_another_cut(track)
+}
+
+/// Words naming another cut of a song than the one everybody knows, matched as whole words in a lowercased title.
+const VERSION_MARKS: &[&str] = &[
+    "version", "ver", "instrumental", "inst", "karaoke", "off vocal", "off-vocal", "remix", "live", "acoustic", "sped up", "slowed", "reverb", "nightcore", "cover", "tv size", "anime size", "a cappella", "acapella", "8d",
+];
+
+/// The version marks in a title, in `VERSION_MARKS` order, so two titles name the same cut when their lists are equal.
+pub(crate) fn version_marks(title: &str) -> Vec<&'static str> {
+    let lowered = title.to_lowercase();
+    VERSION_MARKS.iter().copied().filter(|mark| has_words(&lowered, mark)).collect()
+}
+
+fn has_words(text: &str, words: &str) -> bool {
+    text.match_indices(words).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + words.len()..].chars().next();
+        !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+    })
+}
+
+/// A music video YouTube Music titles after another cut of its song.
+///
+/// It names some official videos after a song they are not: the Hana Hope video reads "(English version)", the regallily one "(Instrumental)".
+/// A song search on that title finds the other cut, so such a video keeps its own audio.
+fn names_another_cut(track: &Track) -> bool {
+    track.video_type.as_deref() == Some("MUSIC_VIDEO_TYPE_OMV") && !version_marks(&track.title).is_empty()
 }
 
 /// Turn the music videos whose song version is already known into it. Asks nobody, so a list shows at once. Answers how many rows changed.
@@ -1162,6 +1191,29 @@ mod tests {
         let ids = ["a".to_owned()];
         assert_eq!(add_actions(&ids, true)[0]["dedupeOption"], "DEDUPE_OPTION_SKIP");
         assert!(add_actions(&ids, false)[0].get("dedupeOption").is_none());
+    }
+
+    #[test]
+    fn another_cut_of_a_song_is_told_apart() {
+        assert_eq!(version_marks("旅のゆくえ(English version) - Destination of the journey(English version)"), ["version"]);
+        assert_eq!(version_marks("キラキラの灰 (Anime Size Instrumental) - Twinkling Ash (Anime Size Instrumental)"), ["instrumental", "anime size"]);
+        assert_eq!(version_marks("flowers (English ver.)"), ["ver"]);
+        assert_eq!(version_marks("Song (Off Vocal)"), ["off vocal"]);
+        assert_eq!(version_marks("Song (Inst.)"), ["inst"]);
+        assert!(version_marks("旅のゆくえ - Destination of the journey").is_empty());
+        assert!(version_marks("すずめ - Suzume (feat. Toaka)").is_empty());
+        assert!(version_marks("Alive - Discover Universal").is_empty(), "only whole words count");
+        assert_eq!(version_marks("Live Forever"), version_marks("Oasis - Live Forever (Official Video)"));
+    }
+
+    #[test]
+    fn a_video_named_after_another_cut_keeps_its_own_audio() {
+        let video = |title: &str, kind: &str| Track { video_id: crate::model::VideoId("v".into()), title: title.into(), video_type: Some(kind.into()), ..Track::default() };
+        assert!(!convertible(&video("旅のゆくえ(English version) - Destination of the journey(English version)", "MUSIC_VIDEO_TYPE_OMV")));
+        assert!(!convertible(&video("キラキラの灰 (Instrumental) - Twinkling Ash (Instrumental)", "MUSIC_VIDEO_TYPE_OMV")));
+        assert!(convertible(&video("すずめ - Suzume (feat. Toaka)", "MUSIC_VIDEO_TYPE_OMV")));
+        assert!(convertible(&video("Twinkling Ash (Instrumental)", "MUSIC_VIDEO_TYPE_UGC")), "an upload says what it is");
+        assert!(!convertible(&video("すずめ - Suzume (feat. Toaka)", crate::model::AUDIO_VIDEO_TYPE)), "a song stays itself");
     }
 
     #[test]
