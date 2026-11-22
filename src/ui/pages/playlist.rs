@@ -137,6 +137,8 @@ pub struct PlaylistPage {
     /// What the listener last chose with the star on this page. It outranks the
     /// library listing, which YouTube updates a moment after the change.
     library_choice: Cell<Option<bool>>,
+    /// A star click that came before the fetch brought what saving needs, with the choice it replaced.
+    pending_library_rate: Cell<Option<(LikeStatus, Option<bool>)>>,
     /// The card this page makes in a library kept on this device. None for lists that cannot be saved.
     library_item: RefCell<Option<MediaItem>>,
     is_album_view: Cell<bool>,
@@ -348,6 +350,7 @@ impl PlaylistPage {
             header_says_saved: Cell::new(false),
             library_choice: Cell::new(None),
             library_item: RefCell::new(None),
+            pending_library_rate: Cell::new(None),
             is_album_view: Cell::new(false),
             is_previewing_cover: Cell::new(false),
             more_menu_dirty: Cell::new(true),
@@ -728,6 +731,7 @@ impl PlaylistPage {
         if self.playlist_id.borrow().as_deref() != Some(playlist_id) {
             self.playlist_id.replace(Some(playlist_id.to_owned()));
             self.audio_playlist_id.replace(None);
+            self.pending_library_rate.set(None);
             self.title_text.replace(String::new());
             self.current_limit.set(INITIAL_LIMIT);
             self.emit_title("");
@@ -903,6 +907,7 @@ impl PlaylistPage {
         // The star too: the page from disk is on screen seconds before the live one.
         self.is_saved_to_library.set(self.saved_in_library(&pid, owned));
         self.refresh_more_menu(owned);
+        self.flush_pending_library_rate();
         self.set_description(&description);
         if let Some(url) = thumbnails.last() {
             if self.cover.url().as_deref() != Some(url.as_str()) {
@@ -1274,6 +1279,7 @@ impl PlaylistPage {
         self.is_editable.set(editable);
         self.is_saved_to_library.set(self.saved_in_library(&pid, is_owned));
         self.refresh_more_menu(editable);
+        self.flush_pending_library_rate();
 
         if let Some(url) = thumbnails.last().filter(|_| !append) {
             if self.cover.url().as_deref() != Some(url.as_str()) {
@@ -1803,9 +1809,8 @@ impl PlaylistPage {
         let savable = if self.ctx.net.client().is_authenticated() { !pid.is_empty() && !Self::is_virtual(&pid) && pid != "LM" } else { self.library_item.borrow().is_some() || Self::is_album_id(&pid) };
         let saved = self.is_saved_to_library.get();
         self.library_btn.set_visible(!is_owned && !crate::local_library::is_local(&pid) && savable);
-        // Shown ahead of the fetch, but saving needs what the fetch brings: the album's audio playlist, or its card here.
-        let authenticated = self.ctx.net.client().is_authenticated();
-        self.library_btn.set_sensitive(if authenticated { !pid.starts_with("MPRE") || self.audio_playlist_id.borrow().is_some() } else { self.library_item.borrow().is_some() });
+        // A click ahead of the fetch waits for it, so the star is ready at once.
+        self.library_btn.set_sensitive(true);
         self.library_btn.set_icon_name(if saved { "starred-symbolic" } else { "non-starred-symbolic" });
         self.library_btn.set_tooltip_text(Some(&if saved { tr!("Remove from Library") } else { tr!("Add to Library") }));
         // The accent the artist page's star takes once subscribed.
@@ -1976,6 +1981,16 @@ impl PlaylistPage {
             return;
         }
         let saving = rating == LikeStatus::Like;
+        // Saving needs what the fetch brings: the album's audio playlist, or its card here. Show the choice now, send it then.
+        let waiting = if self.ctx.net.client().is_authenticated() { pid.starts_with("MPRE") } else { self.library_item.borrow().is_none() };
+        if waiting {
+            let chosen_before = self.pending_library_rate.get().map_or_else(|| self.library_choice.get(), |(_, before)| before);
+            self.pending_library_rate.set(Some((rating, chosen_before)));
+            self.library_choice.set(Some(saving));
+            self.is_saved_to_library.set(saving);
+            self.refresh_more_menu(self.is_owned.get());
+            return;
+        }
         // Without an account the card is kept on this device.
         if !self.ctx.net.client().is_authenticated() {
             let Some(item) = self.library_item.borrow().clone() else { return };
@@ -2017,6 +2032,20 @@ impl PlaylistPage {
                 Err(_) => {}
             }
         });
+    }
+
+    /// Sends a star click made before the fetch landed, unless the list is already where the click asked.
+    fn flush_pending_library_rate(self: &Rc<Self>) {
+        let Some((rating, chosen_before)) = self.pending_library_rate.take() else { return };
+        let pid = self.playlist_id().unwrap_or_default();
+        self.library_choice.set(chosen_before);
+        let saved = self.saved_in_library(&pid, self.is_owned.get());
+        self.is_saved_to_library.set(saved);
+        if saved == (rating == LikeStatus::Like) {
+            self.refresh_more_menu(self.is_owned.get());
+            return;
+        }
+        self.rate_library(rating);
     }
 
     // -- multi-select -----------------------------------------------------
