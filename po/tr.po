@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-11-22 17:42+0100\n"
+"POT-Creation-Date: 2026-11-22 17:49+0100\n"
 "PO-Revision-Date: 2026-11-01 14:00+0300\n"
 "Last-Translator: f4646\n"
 "Language-Team: Turkish\n"
@@ -757,23 +757,31 @@ msgstr ""
 "YouTube Music {extension} dosyalarını kabul etmiyor. Desteklenen biçimler: "
 "{formats}."
 
-#: src/player.rs:95
+#: src/player.rs:99
 msgid "Could not load this track"
 msgstr "Bu parça yüklenemedi"
 
-#: src/player.rs:498
+#: src/player.rs:502
 msgid "Couldn't update rating"
 msgstr "Değerlendirme güncellenemedi"
 
-#: src/player.rs:1138
+#: src/player.rs:1137
 msgid "Offline mode is on, and this song is not downloaded"
 msgstr "Çevrimdışı mod açık ve bu şarkı indirilmemiş"
 
-#: src/player.rs:1794
+#: src/player.rs:1172
+msgid "Waiting for the network…"
+msgstr ""
+
+#: src/player.rs:1184
+msgid "No network, playback stopped"
+msgstr ""
+
+#: src/player.rs:1837
 msgid "Radio"
 msgstr "Radyo"
 
-#: src/player.rs:1794
+#: src/player.rs:1837
 #, rust-format
 msgid "Radio of {seed_name}"
 msgstr "{seed_name} radyosu"

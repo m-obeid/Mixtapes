@@ -8,6 +8,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use gio::prelude::*;
 use tokio::task::AbortHandle;
@@ -24,6 +25,9 @@ use crate::state::{PlayerState, QueueEntry};
 use gtk::glib;
 
 const STREAM_RETRY_MAX: u8 = 2;
+/// How often a song that failed offline checks for the network, and how long it waits in all.
+const NETWORK_RECHECK: Duration = Duration::from_secs(3);
+const NETWORK_WAIT_MAX: Duration = Duration::from_secs(300);
 
 /// `history_mode`, the pref both apps read: when a play is recorded.
 const HISTORY_IMMEDIATE: &str = "immediate";
@@ -1038,12 +1042,7 @@ impl Player {
                 }
                 Err(err) => {
                     tracing::warn!(video_id = %track.video_id, %err, "resolution failed");
-                    player.state.emit_track_error(
-                        track.video_id.as_str(),
-                        &track.title,
-                        &summarize_error(&err.to_string()),
-                    );
-                    player.advance_after_failure();
+                    player.track_failed(track, summarize_error(&err.to_string()));
                 }
             }
         });
@@ -1153,6 +1152,52 @@ impl Player {
         if streaming || self.state.status() == PlaybackStatus::Loading {
             self.stop();
         }
+    }
+
+    /// A song would not load. With the network gone, as just after waking from sleep, every
+    /// next song fails the same way, and moving on would run through the whole queue. So the
+    /// song waits for the network instead, and only a song that fails online is skipped.
+    fn track_failed(&self, track: Track, error: String) {
+        let generation = self.current.get();
+        let handle = self.net.spawn(crate::net::online::reachable());
+        let weak = self.weak_self();
+        glib::spawn_future_local(async move {
+            let online = handle.await.unwrap_or(true);
+            let Some(player) = weak.upgrade().filter(|p| p.current.get() == generation) else { return };
+            if online {
+                player.state.emit_track_error(track.video_id.as_str(), &track.title, &error);
+                player.advance_after_failure();
+            } else {
+                tracing::info!(video_id = %track.video_id, "offline, the song waits for the network");
+                player.state.emit_notice(&tr!("Waiting for the network…"));
+                player.wait_for_network(generation, Instant::now());
+            }
+        });
+    }
+
+    /// Check every few seconds until the network is back, then load the same song again.
+    fn wait_for_network(&self, generation: u64, since: Instant) {
+        let weak = self.weak_self();
+        glib::timeout_add_local_once(NETWORK_RECHECK, move || {
+            let Some(player) = weak.upgrade().filter(|p| p.current.get() == generation) else { return };
+            if since.elapsed() > NETWORK_WAIT_MAX {
+                player.state.emit_notice(&tr!("No network, playback stopped"));
+                player.stop();
+                return;
+            }
+            let handle = player.net.spawn(crate::net::online::reachable());
+            let weak = player.weak_self();
+            glib::spawn_future_local(async move {
+                let online = handle.await.unwrap_or(false);
+                let Some(player) = weak.upgrade().filter(|p| p.current.get() == generation) else { return };
+                if online {
+                    tracing::info!("network back, loading the song again");
+                    player.load_current();
+                } else {
+                    player.wait_for_network(generation, since);
+                }
+            });
+        });
     }
 
     fn advance_after_failure(&self) {
@@ -1288,9 +1333,7 @@ impl Player {
                     self.load_current();
                     self.retries.set(retries);
                 } else {
-                    self.state
-                        .emit_track_error(track.video_id.as_str(), &track.title, &summarize_error(&message));
-                    self.advance_after_failure();
+                    self.track_failed(track, summarize_error(&message));
                 }
             }
         }

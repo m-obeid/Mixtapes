@@ -22,6 +22,11 @@ const FORCE_OFFLINE_TTL: Duration = Duration::from_secs(10);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PROBE_HOST: (&str, u16) = ("music.youtube.com", 443);
 
+/// Whether music.youtube.com answers a TCP connect. Runs on tokio.
+pub async fn reachable() -> bool {
+    matches!(tokio::time::timeout(PROBE_TIMEOUT, tokio::net::TcpStream::connect(PROBE_HOST)).await, Ok(Ok(_)))
+}
+
 type Listener = Rc<dyn Fn(bool)>;
 type Waiter = Box<dyn FnOnce(bool)>;
 
@@ -117,10 +122,7 @@ impl Online {
             if forced {
                 return false;
             }
-            match tokio::time::timeout(PROBE_TIMEOUT, tokio::net::TcpStream::connect(PROBE_HOST)).await {
-                Ok(Ok(_)) => true,
-                Ok(Err(_)) | Err(_) => false,
-            }
+            reachable().await
         });
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {

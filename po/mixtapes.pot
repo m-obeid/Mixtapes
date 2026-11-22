@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-11-22 17:42+0100\n"
+"POT-Creation-Date: 2026-11-22 17:49+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -756,23 +756,31 @@ msgstr ""
 msgid "YouTube Music does not take {extension} files. It takes {formats}."
 msgstr ""
 
-#: src/player.rs:95
+#: src/player.rs:99
 msgid "Could not load this track"
 msgstr ""
 
-#: src/player.rs:498
+#: src/player.rs:502
 msgid "Couldn't update rating"
 msgstr ""
 
-#: src/player.rs:1138
+#: src/player.rs:1137
 msgid "Offline mode is on, and this song is not downloaded"
 msgstr ""
 
-#: src/player.rs:1794
+#: src/player.rs:1172
+msgid "Waiting for the network…"
+msgstr ""
+
+#: src/player.rs:1184
+msgid "No network, playback stopped"
+msgstr ""
+
+#: src/player.rs:1837
 msgid "Radio"
 msgstr ""
 
-#: src/player.rs:1794
+#: src/player.rs:1837
 #, rust-format
 msgid "Radio of {seed_name}"
 msgstr ""
