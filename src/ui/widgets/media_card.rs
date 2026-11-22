@@ -54,7 +54,8 @@ impl MediaCard {
         let wrapper = gtk::Box::builder().overflow(gtk::Overflow::Hidden).css_classes(["card-cover"]).halign(gtk::Align::Start).valign(gtk::Align::Start).build();
         let (cover, icon_box) = match opts.custom_icon {
             Some(icon_name) => {
-                let icon_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["card-download-icon"]).build();
+                // An explicit vexpand keeps the icon's from reaching the card, where a taller grid row grew the tile and pushed the title down.
+                let icon_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["card-download-icon"]).vexpand(false).build();
                 let icon = gtk::Image::builder().icon_name(icon_name).hexpand(true).vexpand(true).build();
                 icon_box.append(&icon);
                 wrapper.append(&icon_box);
