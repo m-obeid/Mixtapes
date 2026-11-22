@@ -13,6 +13,7 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
 use crate::App;
+use crate::paths::Paths;
 use crate::net::ytmusic::AuthState;
 use crate::state::PlayerState;
 use crate::model::Track;
@@ -122,6 +123,10 @@ impl MainWindow {
             .default_width(1040)
             .default_height(700)
             .build();
+        restore_window_size(&window, &ctx.paths);
+        if ctx.demo.is_none() {
+            remember_window_size(&window, &ctx.paths);
+        }
         let toast_overlay = adw::ToastOverlay::new();
         install_actions(&window, app, ctx);
 
@@ -2998,6 +3003,70 @@ fn build_shortcuts_dialog() -> adw::ShortcutsDialog {
         dialog.add(section);
     }
     dialog
+}
+
+const WINDOW_WIDTH_PREF: &str = "window_width";
+const WINDOW_HEIGHT_PREF: &str = "window_height";
+const WINDOW_MAXIMIZED_PREF: &str = "window_maximized";
+
+/// The size and maximized state from the last session (#180).
+fn restore_window_size(window: &adw::ApplicationWindow, paths: &Paths) {
+    let prefs = paths.read_prefs();
+    let dim = |key: &str| prefs.get(key).and_then(|v| v.as_i64()).filter(|v| (320..=16384).contains(v)).map(|v| v as i32);
+    if let (Some(width), Some(height)) = (dim(WINDOW_WIDTH_PREF), dim(WINDOW_HEIGHT_PREF)) {
+        window.set_default_size(width, height);
+    }
+    if prefs.get(WINDOW_MAXIMIZED_PREF).and_then(|v| v.as_bool()).unwrap_or(false) {
+        window.maximize();
+    }
+}
+
+/// Save the size a moment after it settles, so every way of quitting keeps it.
+fn remember_window_size(window: &adw::ApplicationWindow, paths: &Paths) {
+    let timer: Rc<RefCell<Option<glib::SourceId>>> = Rc::default();
+    let save = {
+        let paths = paths.clone();
+        move |win: &adw::ApplicationWindow| {
+            // Fullscreen is not kept, and it would hide the real maximized state.
+            if win.is_fullscreen() {
+                return;
+            }
+            // GTK keeps the default size at the unmaximized size while maximized.
+            let (width, height) = win.default_size();
+            let maximized = win.is_maximized();
+            paths.update_prefs(|prefs| {
+                if width > 0 && height > 0 {
+                    prefs.insert(WINDOW_WIDTH_PREF.into(), width.into());
+                    prefs.insert(WINDOW_HEIGHT_PREF.into(), height.into());
+                }
+                prefs.insert(WINDOW_MAXIMIZED_PREF.into(), maximized.into());
+            });
+        }
+    };
+    let save = Rc::new(save);
+    for prop in ["default-width", "default-height", "maximized"] {
+        let (timer, save) = (timer.clone(), save.clone());
+        window.connect_notify_local(Some(prop), move |win, _| {
+            if let Some(id) = timer.borrow_mut().take() {
+                id.remove();
+            }
+            let (timer_in, save, win) = (timer.clone(), save.clone(), win.downgrade());
+            let id = glib::timeout_add_local_once(Duration::from_millis(500), move || {
+                timer_in.borrow_mut().take();
+                if let Some(win) = win.upgrade() {
+                    save(&win);
+                }
+            });
+            timer.borrow_mut().replace(id);
+        });
+    }
+    window.connect_close_request(move |win| {
+        if let Some(id) = timer.borrow_mut().take() {
+            id.remove();
+        }
+        save(win);
+        glib::Propagation::Proceed
+    });
 }
 
 /// Hide instead of quitting while something is queued, unless background play is off.
