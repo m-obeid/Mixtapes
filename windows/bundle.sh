@@ -29,7 +29,13 @@ curl -fsSL --retry 5 -o "$OUT/bin/yt-dlp.exe" https://github.com/yt-dlp/yt-dlp/r
 # another window.
 cp "$PREFIX/bin/gdbus.exe" "$OUT/bin/"
 # WebView2's loader for the sign-in page, from the webview2-com-sys build.
-cp "$(ls -t target/release/build/webview2-com-sys-*/out/x64/WebView2Loader.dll | head -n 1)" "$OUT/bin/"
+# Searched for, since newer Cargo keeps build script output in another layout.
+loader=$(find target -path '*webview2-com-sys*' -path '*/x64/WebView2Loader.dll' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -n 1 | cut -d' ' -f2-)
+if [ -z "$loader" ]; then
+    echo "WebView2Loader.dll not found under target" >&2
+    exit 1
+fi
+cp "$loader" "$OUT/bin/"
 # Vendored, since Codeberg's bot filter rejects CI downloads.
 BG_ZIP=vendor/rustypipe-botguard/rustypipe-botguard-v0.1.2-x86_64-pc-windows-msvc.zip
 echo "edb9e482ca77e3e4ecd4a2d3270f58c9169f03770db1568b3429cc8cf4c4b279  $BG_ZIP" | sha256sum -c -
