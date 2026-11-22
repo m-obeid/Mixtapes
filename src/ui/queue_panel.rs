@@ -292,7 +292,7 @@ impl QueuePanel {
             add_btn.connect_clicked(move |btn| {
                 if let Some(panel) = weak.upgrade() {
                     let p = panel.clone();
-                    AddToPlaylistPopover::show(&panel.ctx, btn, move |pid| p.add_all_to_playlist(&pid));
+                    AddToPlaylistPopover::show(&panel.ctx, btn, Vec::new(), move |pid| p.add_all_to_playlist(&pid));
                 }
             });
         }

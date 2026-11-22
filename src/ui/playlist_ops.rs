@@ -1,4 +1,4 @@
-//! Adding tracks to a playlist, from wherever a menu offers it. A `LOCAL_`
+//! Adding tracks to a playlist and taking them out, from wherever a menu offers it. A `LOCAL_`
 //! id goes to the local library, anything else to the network. One place, so
 //! the song menu, the queue and the playlist page agree on the toasts.
 
@@ -61,6 +61,32 @@ pub fn add_tracks(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: String
             _ => {}
         });
         dialog.present(Some(&anchor));
+    });
+}
+
+/// Take songs out of a playlist, every row of each, as unticking it in the picker does. `done` hears whether it worked.
+pub fn remove_tracks(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: String, ids: Vec<String>, done: impl FnOnce(bool) + 'static) {
+    if is_local(&playlist_id) {
+        ctx.local.remove_tracks(&playlist_id, &ids);
+        toast(anchor, &tr!("Removed from playlist"));
+        ctx.nav.refresh_library();
+        done(true);
+        return;
+    }
+    let api = ctx.net.client().api();
+    let handle = ctx.net.spawn(async move { crate::net::playlists::remove_videos(&api, &playlist_id, &ids).await });
+    let anchor = anchor.clone();
+    glib::spawn_future_local(async move {
+        let removed = match handle.await {
+            Ok(Ok(())) => true,
+            Ok(Err(err)) => {
+                tracing::warn!(%err, "remove from playlist failed");
+                false
+            }
+            Err(_) => false,
+        };
+        toast(&anchor, &if removed { tr!("Removed from playlist") } else { tr!("Failed to remove from playlist") });
+        done(removed);
     });
 }
 

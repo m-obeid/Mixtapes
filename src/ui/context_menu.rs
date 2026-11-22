@@ -257,7 +257,8 @@ pub fn confirm_remove_downloads(ctx: &Rc<UiContext>, anchor: &gtk::Widget, ids: 
 pub fn add_to_playlist_via_popover(ctx: &Rc<UiContext>, anchor: &gtk::Widget, tracks: Vec<Track>) {
     let ctx_c = ctx.clone();
     let anchor_c = anchor.clone();
-    crate::ui::widgets::add_to_playlist::AddToPlaylistPopover::show(ctx, anchor, move |playlist_id| {
+    let ids = tracks.iter().map(|t| t.video_id.0.clone()).collect();
+    crate::ui::widgets::add_to_playlist::AddToPlaylistPopover::show(ctx, anchor, ids, move |playlist_id| {
         crate::ui::playlist_ops::add_tracks(&ctx_c, &anchor_c, playlist_id, tracks.clone());
     });
 }

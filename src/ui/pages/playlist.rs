@@ -592,7 +592,8 @@ impl PlaylistPage {
         self.sel_add_btn.connect_clicked(move |btn| {
             if let Some(p) = weak.upgrade() {
                 let page = p.clone();
-                AddToPlaylistPopover::show(&p.ctx, btn, move |pid| page.do_sel_add_to_playlist(&pid));
+                let ids = p.selected_tracks().iter().map(|t| t.video_id.0.clone()).collect();
+                AddToPlaylistPopover::show(&p.ctx, btn, ids, move |pid| page.do_sel_add_to_playlist(&pid));
             }
         });
         let weak = Rc::downgrade(self);
@@ -1914,7 +1915,7 @@ impl PlaylistPage {
 
     fn on_show_add_all_to_playlist(self: &Rc<Self>) {
         let page = self.clone();
-        AddToPlaylistPopover::show(&self.ctx, &self.more_btn, move |pid| page.do_add_all_to_playlist(&pid));
+        AddToPlaylistPopover::show(&self.ctx, &self.more_btn, Vec::new(), move |pid| page.do_add_all_to_playlist(&pid));
     }
 
     fn do_add_all_to_playlist(self: &Rc<Self>, playlist_id: &str) {

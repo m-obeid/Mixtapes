@@ -3,7 +3,7 @@
 //! status the rows show, so the page parses the response itself. Everything
 //! here is a port of the MusicClient method of the same name.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
@@ -26,6 +26,7 @@ const SINGLE_SECTIONS: &str = "/contents/singleColumnBrowseResultsRenderer/tabs/
 const MAX_METRIC_PAGES: usize = 60;
 const MAX_CONTINUATION_PAGES: usize = 100;
 const YT_WEB_BROWSE_URL: &str = "https://www.youtube.com/youtubei/v1/browse?prettyPrint=false";
+const YT_WEB_ADD_TO_PLAYLIST_URL: &str = "https://www.youtube.com/youtubei/v1/playlist/get_add_to_playlist?prettyPrint=false";
 
 static VIEWS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^([\d.,]+)\s*([KMB])?\s+views?$").unwrap());
 static MPRE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""(MPRE[A-Za-z0-9_\-]+)""#).unwrap());
@@ -663,6 +664,16 @@ pub async fn remove_playlist_items(api: &dyn Browse, playlist_id: &str, items: &
     Ok(())
 }
 
+/// Remove songs by their ids, every row of each, as the picker's untick does. No setVideoId needed.
+pub async fn remove_videos(api: &dyn Browse, playlist_id: &str, video_ids: &[String]) -> Result<(), NetError> {
+    let actions: Vec<Value> = video_ids.iter().map(|video| json!({ "action": "ACTION_REMOVE_VIDEO_BY_VIDEO_ID", "removedVideoId": video })).collect();
+    if actions.is_empty() {
+        return Ok(());
+    }
+    let response = api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
+    edit_status(&response)
+}
+
 /// Move rows, in this order, in front of `next`, or to the end without one. Rows go by setVideoId.
 pub async fn move_playlist_items(api: &dyn Browse, playlist_id: &str, moved: &[String], next: Option<&str>) -> Result<(), NetError> {
     let actions: Vec<Value> = moved
@@ -993,27 +1004,52 @@ fn sapisid_hash(cookie: &str, origin: &str) -> Option<String> {
     Some(format!("SAPISIDHASH {ts}_{digest:x}"))
 }
 
+/// A signed in POST to youtube.com's own InnerTube, which answers some things YouTube Music's does not.
+fn yt_web_request(http: &reqwest::Client, auth: Option<&HttpAuth>, url: &str) -> reqwest::RequestBuilder {
+    let mut request = http
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .header("Origin", "https://www.youtube.com")
+        .header("Referer", "https://www.youtube.com/");
+    if let Some(auth) = auth {
+        if let Some(hash) = sapisid_hash(&auth.cookie, "https://www.youtube.com") {
+            request = request.header("Cookie", &auth.cookie).header("Authorization", hash).header("X-Origin", "https://www.youtube.com");
+        }
+    }
+    request
+}
+
+/// The playlists that already hold every one of these songs.
+///
+/// YouTube Music's own picker does not say. youtube.com's "Save to" dialog does, for the same playlists.
+/// `channel` is the brand account acted for, None for the Google account itself.
+pub async fn playlists_holding(http: &reqwest::Client, auth: &HttpAuth, channel: Option<&str>, video_ids: &[String]) -> Result<HashSet<String>, NetError> {
+    let mut context = json!({ "client": { "clientName": "WEB", "clientVersion": "2.20251120.00.00", "hl": "en", "gl": "US" } });
+    if let Some(channel) = channel {
+        context["user"] = json!({ "onBehalfOfUser": channel });
+    }
+    let body = json!({ "context": context, "videoIds": video_ids, "excludeWatchLater": true });
+    let response: Value = yt_web_request(http, Some(auth), YT_WEB_ADD_TO_PLAYLIST_URL).json(&body).send().await?.error_for_status()?.json().await?;
+    Ok(holding_playlists(&response))
+}
+
+fn holding_playlists(response: &Value) -> HashSet<String> {
+    walk_key(response, "playlistAddToOptionRenderer")
+        .into_iter()
+        .filter(|option| str_at(option, "/containsSelectedVideos") == Some("ALL"))
+        .filter_map(|option| str_at(option, "/playlistId").map(str::to_owned))
+        .collect()
+}
+
 /// Port of get_playlist_view_counts: youtube.com's copy of the playlist
 /// carries a view count per row, YouTube Music's does not.
 pub async fn playlist_view_counts(http: &reqwest::Client, auth: Option<&HttpAuth>, playlist_id: &str) -> Result<SortMetric, NetError> {
     let Some(browse_id) = normalize_browse_playlist_id(playlist_id) else { return Ok(SortMetric::new()) };
     let mut body = json!({ "context": { "client": { "clientName": "WEB", "clientVersion": "2.20240101.00.00", "hl": "en", "gl": "US" } }, "browseId": browse_id });
     let mut views = SortMetric::new();
-    let send = |body: Value| {
-        let mut request = http
-            .post(YT_WEB_BROWSE_URL)
-            .header("Content-Type", "application/json")
-            .header("Accept-Language", "en-US,en;q=0.9")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .header("Origin", "https://www.youtube.com")
-            .header("Referer", "https://www.youtube.com/");
-        if let Some(auth) = auth {
-            if let Some(hash) = sapisid_hash(&auth.cookie, "https://www.youtube.com") {
-                request = request.header("Cookie", &auth.cookie).header("Authorization", hash).header("X-Origin", "https://www.youtube.com");
-            }
-        }
-        request.json(&body).send()
-    };
+    let send = |body: Value| yt_web_request(http, auth, YT_WEB_BROWSE_URL).json(&body).send();
     let mut response: Value = match send(body.clone()).await {
         Ok(r) => r.json().await?,
         Err(err) => {
@@ -1210,6 +1246,13 @@ mod tests {
         let ids = ["a".to_owned()];
         assert_eq!(add_actions(&ids, true)[0]["dedupeOption"], "DEDUPE_OPTION_SKIP");
         assert!(add_actions(&ids, false)[0].get("dedupeOption").is_none());
+    }
+
+    #[test]
+    fn a_playlist_holds_the_songs_only_when_youtube_says_all() {
+        let option = |id: &str, contains: &str| json!({ "playlistAddToOptionRenderer": { "playlistId": id, "containsSelectedVideos": contains } });
+        let response = json!({ "contents": [{ "addToPlaylistRenderer": { "playlists": [option("PLa", "ALL"), option("PLb", "NONE"), option("PLc", "SOME")] } }] });
+        assert_eq!(holding_playlists(&response), HashSet::from(["PLa".to_owned()]));
     }
 
     #[test]
