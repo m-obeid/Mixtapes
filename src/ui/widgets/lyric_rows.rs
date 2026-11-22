@@ -275,30 +275,70 @@ struct Sweep {
     wave_amp: f64,
 }
 
-fn sweep_state(cursor_ms: f64, parts: &[Part], layout: &pango::Layout) -> Sweep {
+/// Whether a line reads right to left, as Arabic and Hebrew do. The first strong character decides, as Pango does.
+pub fn is_rtl(text: &str) -> bool {
+    pango::find_base_dir(text) == pango::Direction::Rtl
+}
+
+/// A glyph box as (left, width). Pango gives right-to-left glyphs a negative width from their right edge.
+fn normalized(x: f64, width: f64) -> (f64, f64) {
+    if width < 0.0 { (x + width, -width) } else { (x, width) }
+}
+
+/// Where the sweep stands inside a word spanning `left..right`, `progress` of the way through it.
+/// A right-to-left word is sung from its right edge.
+fn sweep_x(left: f64, right: f64, progress: f64, rtl: bool) -> f64 {
+    if rtl { right - (right - left) * progress } else { left + (right - left) * progress }
+}
+
+/// The part of a glyph box on the sung side of the sweep (`sung`) or the side still to come, as (x, width).
+fn clip_at_sweep(x: f64, width: f64, sweep: f64, rtl: bool, sung: bool) -> Option<(f64, f64)> {
+    // Sung text sits left of the sweep in a left-to-right line and right of it otherwise.
+    let left_side = sung != rtl;
+    let (from, to) = if left_side { (x, (x + width).min(sweep)) } else { (x.max(sweep), x + width) };
+    (to > from).then_some((from, to - from))
+}
+
+/// A word's box in the layout, (left, right, y, height), from the union of its glyphs so either direction works.
+fn word_box(layout: &pango::Layout, p: &Part) -> (f64, f64, f64, f64) {
     let scale = f64::from(pango::SCALE);
+    let first = layout.index_to_pos(p.byte_start);
+    let (y, height) = (f64::from(first.y()) / scale, f64::from(first.height()) / scale);
+    let (mut left, mut right) = (f64::MAX, f64::MIN);
+    let mut at = p.byte_start;
+    for ch in p.text.chars() {
+        let pos = layout.index_to_pos(at);
+        at += ch.len_utf8() as i32;
+        // A word broken over two lines keeps to the line it starts on.
+        if pos.y() != first.y() {
+            break;
+        }
+        let (x, w) = normalized(f64::from(pos.x()) / scale, f64::from(pos.width()) / scale);
+        left = left.min(x);
+        right = right.max(x + w);
+    }
+    if right < left {
+        let x = f64::from(first.x()) / scale;
+        (left, right) = (x, x);
+    }
+    (left, right, y, height)
+}
+
+fn sweep_state(cursor_ms: f64, parts: &[Part], layout: &pango::Layout, rtl: bool) -> Sweep {
     let mut sweep = Sweep { active: None, x: 0.0, sung: (0.0, 0.0, 0.0), active_rect: None, glow: 0.0, is_long: false, wave_amp: 0.0 };
     for (i, p) in parts.iter().enumerate() {
         if p.byte_start < 0 {
             continue;
         }
-        let pos_start = layout.index_to_pos(p.byte_start);
-        let pos_end = layout.index_to_pos(p.byte_end);
-        let x_start = f64::from(pos_start.x()) / scale;
-        let y_start = f64::from(pos_start.y()) / scale;
-        let height = f64::from(pos_start.height()) / scale;
-        let mut x_end = f64::from(pos_end.x()) / scale;
-        if x_end <= x_start {
-            x_end = x_start + f64::from(pos_start.width()) / scale * p.text.chars().count() as f64;
-        }
+        let (left, right, y_start, height) = word_box(layout, p);
         if cursor_ms >= p.end_ms as f64 {
-            sweep.sung = (x_end, y_start, height);
+            sweep.sung = (if rtl { left } else { right }, y_start, height);
         } else if cursor_ms >= p.start_ms as f64 {
             let duration = ((p.end_ms - p.start_ms) as f64).max(1.0);
             let progress = (cursor_ms - p.start_ms as f64) / duration;
             sweep.active = Some(i);
-            sweep.x = x_start + (x_end - x_start) * progress;
-            sweep.active_rect = Some((x_start, y_start, x_end - x_start, height));
+            sweep.x = sweep_x(left, right, progress, rtl);
+            sweep.active_rect = Some((left, y_start, right - left, height));
             if duration >= MIN_GLOW_MS {
                 let weight = ((duration - MIN_GLOW_MS) / (MAX_GLOW_MS - MIN_GLOW_MS)).min(1.0);
                 sweep.is_long = true;
@@ -362,7 +402,8 @@ struct RowState {
     label: gtk::Label,
     sub_label: Option<gtk::Label>,
     effects: Effects,
-    opposite_voice: bool,
+    /// The row sits at the right edge: an opposite voice or a right-to-left line.
+    at_end: bool,
     can_scale: bool,
     can_glow: bool,
     can_blur: bool,
@@ -537,7 +578,7 @@ mod imp {
             if scaling {
                 let row = self.obj();
                 let height = row.height() as f32;
-                let anchor_x = if s.opposite_voice { row.width() as f32 } else { 0.0 };
+                let anchor_x = if s.at_end { row.width() as f32 } else { 0.0 };
                 snapshot.save();
                 snapshot.translate(&graphene::Point::new(anchor_x, height / 2.0));
                 snapshot.scale(s.scale as f32, s.scale as f32);
@@ -575,7 +616,8 @@ mod imp {
             let y_offset = base_y + f64::from(ly);
 
             let (c_in, c_act, c_glow) = css_colors(label);
-            let sweep = sweep_state(s.internal_cursor_ms, parts, &layout);
+            let rtl = is_rtl(text);
+            let sweep = sweep_state(s.internal_cursor_ms, parts, &layout, rtl);
             let context = label.pango_context();
             let new_layout = || {
                 let l = pango::Layout::new(&context);
@@ -611,9 +653,10 @@ mod imp {
                     let sx = x_offset + sweep.sung.0;
                     let sy = y_offset + sweep.sung.1;
                     let sh = sweep.sung.2;
+                    let (before, after) = if rtl { (&c_in, &c_act) } else { (&c_act, &c_in) };
                     draw_base(0.0, clip_top, row_w, sy - clip_top, &c_act);
-                    draw_base(0.0, sy, sx, sh, &c_act);
-                    draw_base(sx, sy, row_w - sx, sh, &c_in);
+                    draw_base(0.0, sy, sx, sh, before);
+                    draw_base(sx, sy, row_w - sx, sh, after);
                     draw_base(0.0, sy + sh, row_w, clip_bottom - (sy + sh), &c_in);
                 }
                 return;
@@ -622,10 +665,12 @@ mod imp {
             let ax = x_offset + rx;
             let ay = y_offset + ry;
             let sweep_abs_x = x_offset + sweep.x;
+            // Left and right of the active word: sung and to come, swapped in a right-to-left line.
+            let (left_color, right_color) = if rtl { (&c_in, &c_act) } else { (&c_act, &c_in) };
             draw_base(0.0, clip_top, row_w, ay - clip_top, &c_act);
             draw_base(0.0, ay + ah, row_w, clip_bottom - (ay + ah), &c_in);
-            draw_base(0.0, ay, ax, ah, &c_act);
-            draw_base(ax + aw, ay, row_w - (ax + aw), ah, &c_in);
+            draw_base(0.0, ay, ax, ah, left_color);
+            draw_base(ax + aw, ay, row_w - (ax + aw), ah, right_color);
 
             let part = &parts[active_idx];
             let full_len = text.len() as u32;
@@ -670,8 +715,7 @@ mod imp {
                     let char_len = ch.len_utf8() as i32;
                     let pos = layout.index_to_pos(cb);
                     cb += char_len;
-                    let cx = f64::from(pos.x()) / scale;
-                    let cw = f64::from(pos.width()) / scale;
+                    let (cx, cw) = normalized(f64::from(pos.x()) / scale, f64::from(pos.width()) / scale);
                     if cw <= 0.0 {
                         continue;
                     }
@@ -682,21 +726,7 @@ mod imp {
                         0.0
                     };
                     let char_x = x_offset + cx;
-                    let (clip_x, clip_w) = if sung {
-                        if char_x >= sweep_abs_x {
-                            continue;
-                        }
-                        (char_x, cw.min(sweep_abs_x - char_x))
-                    } else {
-                        if char_x + cw <= sweep_abs_x {
-                            continue;
-                        }
-                        let cut = (sweep_abs_x - char_x).max(0.0);
-                        (char_x + cut, cw - cut)
-                    };
-                    if clip_w <= 0.0 {
-                        continue;
-                    }
+                    let Some((clip_x, clip_w)) = clip_at_sweep(char_x, cw, sweep_abs_x, rtl, sung) else { continue };
                     snapshot.push_clip(&graphene::Rect::new(clip_x as f32, clip_top as f32, clip_w as f32, (clip_bottom - clip_top) as f32));
                     snapshot.save();
                     snapshot.translate(&graphene::Point::new(x_offset as f32, (y_offset - wave) as f32));
@@ -756,12 +786,18 @@ impl LyricRow {
         assign_byte_offsets(&line.text, &mut parts);
 
         let opposite_voice = line.opposite_voice();
-        let (align, justify, xalign) = if opposite_voice { (gtk::Align::End, gtk::Justification::Right, 1.0) } else { (gtk::Align::Start, gtk::Justification::Left, 0.0) };
-        let make_label = |class: &str| gtk::Label::builder().wrap(true).wrap_mode(pango::WrapMode::WordChar).justify(justify).halign(align).valign(gtk::Align::Center).xalign(xalign).css_classes([class]).build();
+        // A right-to-left line starts at the right edge, where the opposite voice usually goes, and the opposite voice at the left.
+        let at_end = opposite_voice != is_rtl(&line.text);
+        let (align, xalign) = if at_end { (gtk::Align::End, 1.0) } else { (gtk::Align::Start, 0.0) };
+        let make_label = |class: &str, text: &str| {
+            // Pango swaps left and right justification for a right-to-left paragraph, so its wrapped lines need the other one.
+            let justify = if at_end != is_rtl(text) { gtk::Justification::Right } else { gtk::Justification::Left };
+            gtk::Label::builder().wrap(true).wrap_mode(pango::WrapMode::WordChar).justify(justify).halign(align).valign(gtk::Align::Center).xalign(xalign).css_classes([class]).build()
+        };
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 2);
         row.set_child(Some(&content));
-        let label = make_label("lyrics-line-label");
+        let label = make_label("lyrics-line-label", &line.text);
         content.append(&label);
 
         let mode = options.second_line_mode.as_str();
@@ -775,7 +811,7 @@ impl LyricRow {
         }
         assign_byte_offsets(&sub_text, &mut sub_parts);
         let sub_label = (!sub_text.is_empty()).then(|| {
-            let sub = make_label("lyrics-line-sub");
+            let sub = make_label("lyrics-line-sub", &sub_text);
             content.append(&sub);
             sub
         });
@@ -800,7 +836,7 @@ impl LyricRow {
             label,
             sub_label,
             effects,
-            opposite_voice,
+            at_end,
             can_scale: timed_effect(effects != Effects::Off),
             can_glow: timed_effect(effects == Effects::Full),
             can_blur: timed_effect(effects == Effects::Full),
@@ -1261,5 +1297,32 @@ mod tests {
         assert!((word_alpha_for(1210, &part, Effects::Subtle, false) - 0.5).abs() < 1e-9);
         // Swept: 300 ms ramp.
         assert!((word_alpha_for(1150, &part, Effects::Subtle, true) - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn arabic_and_hebrew_read_right_to_left() {
+        assert!(is_rtl("قلبي معك"));
+        assert!(is_rtl("שלום world"));
+        assert!(!is_rtl("Hello قلبي"));
+        assert!(!is_rtl("你好"));
+        assert!(!is_rtl(""));
+    }
+
+    #[test]
+    fn a_right_to_left_word_is_sung_from_its_right_edge() {
+        assert_eq!(normalized(50.0, -20.0), (30.0, 20.0));
+        assert_eq!(normalized(30.0, 20.0), (30.0, 20.0));
+        assert_eq!(sweep_x(10.0, 50.0, 0.25, false), 20.0);
+        assert_eq!(sweep_x(10.0, 50.0, 0.25, true), 40.0);
+    }
+
+    #[test]
+    fn the_sung_side_of_a_glyph_flips_with_the_direction() {
+        // A glyph from 10 to 30, the sweep at 25.
+        assert_eq!(clip_at_sweep(10.0, 20.0, 25.0, false, true), Some((10.0, 15.0)));
+        assert_eq!(clip_at_sweep(10.0, 20.0, 25.0, false, false), Some((25.0, 5.0)));
+        assert_eq!(clip_at_sweep(10.0, 20.0, 25.0, true, true), Some((25.0, 5.0)));
+        assert_eq!(clip_at_sweep(10.0, 20.0, 25.0, true, false), Some((10.0, 15.0)));
+        assert_eq!(clip_at_sweep(10.0, 20.0, 5.0, true, false), None);
     }
 }
