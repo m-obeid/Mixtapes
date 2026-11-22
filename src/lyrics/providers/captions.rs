@@ -10,6 +10,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::{Request, get_json};
+use crate::lyrics::lrc::{Secondary, attach_secondary};
 use crate::lyrics::model::{LyricLine, LyricsResult};
 
 const SOURCE: &str = "YouTube Captions";
@@ -17,14 +18,51 @@ const PLAYER_URL: &str = "https://www.youtube.com/youtubei/v1/player?prettyPrint
 const USER_AGENT: &str = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X)";
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-/// The address of the hand-written track to use, the first one YouTube lists.
-fn track_url(player: &Value) -> Option<String> {
-    let tracks = player.pointer("/captions/playerCaptionsTracklistRenderer/captionTracks")?.as_array()?;
-    let track = tracks.iter().find(|t| t.get("kind").and_then(Value::as_str) != Some("asr"))?;
-    let url = track.get("baseUrl")?.as_str()?;
-    // The address usually asks for XML already. json3 replaces that.
+/// A caption track YouTube lists: its language ("ko", "pt-BR"), its address, and whether speech recognition wrote it.
+struct Track<'a> {
+    lang: &'a str,
+    url: &'a str,
+    auto: bool,
+}
+
+fn tracks(player: &Value) -> Vec<Track<'_>> {
+    let Some(list) = player.pointer("/captions/playerCaptionsTracklistRenderer/captionTracks").and_then(Value::as_array) else { return Vec::new() };
+    list.iter()
+        .filter_map(|t| {
+            Some(Track {
+                lang: t.get("languageCode").and_then(Value::as_str).unwrap_or_default(),
+                url: t.get("baseUrl")?.as_str()?,
+                auto: t.get("kind").and_then(Value::as_str) == Some("asr"),
+            })
+        })
+        .collect()
+}
+
+/// "pt-BR" and "pt" name the same language here.
+fn same_language(a: &str, b: &str) -> bool {
+    let primary = |code: &str| code.split(['-', '_']).next().unwrap_or_default().to_ascii_lowercase();
+    !a.is_empty() && primary(a) == primary(b)
+}
+
+/// The hand-written track holding the words as sung, and one in the listener's language to show under them.
+///
+/// YouTube lists tracks by language name, so the first one is often a translation ("Chinese" ahead of "Korean").
+/// The auto-generated track tells the sung language: speech recognition runs on the audio's own language.
+/// Without one, the listener's language goes first.
+fn pick<'a>(player: &'a Value, viewer: &str) -> Option<(&'a str, Option<&'a str>)> {
+    let all = tracks(player);
+    let manual: Vec<&Track> = all.iter().filter(|t| !t.auto).collect();
+    let sung = all.iter().find(|t| t.auto).map(|t| t.lang);
+    let in_viewer = manual.iter().find(|t| same_language(t.lang, viewer)).copied();
+    let main = sung.and_then(|lang| manual.iter().find(|t| same_language(t.lang, lang)).copied()).or(in_viewer).or(manual.first().copied())?;
+    let under = in_viewer.filter(|t| !same_language(t.lang, main.lang)).map(|t| t.url);
+    Some((main.url, under))
+}
+
+/// A track's address asking for json3. The address usually asks for XML already.
+fn json3(url: &str) -> String {
     let base = url.split('&').filter(|part| !part.starts_with("fmt=")).collect::<Vec<_>>().join("&");
-    Some(format!("{base}&fmt=json3"))
+    format!("{base}&fmt=json3")
 }
 
 /// One caption's text, without the music notes, the bracketed cues and the line break a caption wraps at.
@@ -63,9 +101,20 @@ async fn captions_of(http: &reqwest::Client, video_id: &str) -> Option<LyricsRes
     });
     let answer = http.post(PLAYER_URL).header("User-Agent", USER_AGENT).timeout(TIMEOUT).json(&body).send().await.ok()?;
     let player: Value = answer.json().await.ok()?;
-    let url = track_url(&player)?;
-    match get_json(http, &url, &[], &[("User-Agent", "Mozilla/5.0")], TIMEOUT).await {
-        Ok(data) => parse(&data),
+    let viewer = crate::i18n::youtube_language().unwrap_or_else(|| "en".to_owned());
+    let (main, under) = pick(&player, &viewer)?;
+    let mut result = parse(&caption_file(http, main).await?)?;
+    if let Some(under) = under
+        && let Some(translation) = caption_file(http, under).await.as_ref().and_then(parse)
+    {
+        attach_secondary(&mut result.lines, translation.lines, Secondary::Translation);
+    }
+    Some(result)
+}
+
+async fn caption_file(http: &reqwest::Client, url: &str) -> Option<Value> {
+    match get_json(http, &json3(url), &[], &[("User-Agent", "Mozilla/5.0")], TIMEOUT).await {
+        Ok(data) => Some(data),
         Err(err) => {
             tracing::debug!(%err, "caption fetch failed");
             None
@@ -97,23 +146,51 @@ mod tests {
     #[ignore]
     async fn live_captions() {
         let http = reqwest::Client::new();
-        for id in ["4NRXx6U8ABQ", "kJQP7kiw5Fk"] {
+        for id in ["4NRXx6U8ABQ", "kJQP7kiw5Fk", "M9G4guYg-i8"] {
             let request = Request { video_id: id, title: "", artist: "", duration: 0, strict: true };
             let found = fetch(&http, request).await.expect("captions");
-            println!("{id}: {} lines, first {:?}", found.lines.len(), found.lines.first().map(|l| (&l.text, l.start)));
+            println!("{id}: {} lines, first {:?}", found.lines.len(), found.lines.first().map(|l| (&l.text, &l.translation, l.start)));
             assert!(found.lines.len() > 10);
         }
     }
 
+    fn track(lang: &str, auto: bool) -> Value {
+        let mut t = json!({"languageCode": lang, "baseUrl": format!("https://y/{lang}{}?a=1&fmt=srv3", if auto { "-asr" } else { "" })});
+        if auto {
+            t["kind"] = json!("asr");
+        }
+        t
+    }
+
+    fn player(tracks: &[Value]) -> Value {
+        json!({"captions": {"playerCaptionsTracklistRenderer": {"captionTracks": tracks}}})
+    }
+
     #[test]
     fn auto_generated_tracks_are_passed_over() {
-        let player = json!({"captions": {"playerCaptionsTracklistRenderer": {"captionTracks": [
-            {"kind": "asr", "baseUrl": "https://y/asr?a=1"},
-            {"baseUrl": "https://y/en?a=1&fmt=srv3&b=2"},
-        ]}}});
-        assert_eq!(track_url(&player).unwrap(), "https://y/en?a=1&b=2&fmt=json3");
-        let only_auto = json!({"captions": {"playerCaptionsTracklistRenderer": {"captionTracks": [{"kind": "asr", "baseUrl": "x"}]}}});
-        assert!(track_url(&only_auto).is_none());
+        let both = player(&[track("en", true), track("en", false)]);
+        assert_eq!(pick(&both, "en").unwrap(), ("https://y/en?a=1&fmt=srv3", None));
+        assert!(pick(&player(&[track("en", true)]), "en").is_none());
+        assert_eq!(json3("https://y/en?a=1&fmt=srv3&b=2"), "https://y/en?a=1&b=2&fmt=json3");
+    }
+
+    /// TXT's "Angel Bite" MV (#188) in YouTube's order: Chinese first, speech recognition in Korean.
+    fn angel_bite() -> Value {
+        player(&[track("zh", false), track("en", false), track("ja", false), track("ko", false), track("ko", true), track("es", false)])
+    }
+
+    #[test]
+    fn the_sung_language_wins_over_the_first_listed() {
+        assert_eq!(pick(&angel_bite(), "en").unwrap(), ("https://y/ko?a=1&fmt=srv3", Some("https://y/en?a=1&fmt=srv3")));
+        assert_eq!(pick(&angel_bite(), "pt-BR").unwrap(), ("https://y/ko?a=1&fmt=srv3", None));
+        assert_eq!(pick(&angel_bite(), "ko").unwrap(), ("https://y/ko?a=1&fmt=srv3", None));
+    }
+
+    #[test]
+    fn without_a_sung_language_the_listeners_goes_first() {
+        let tracks = player(&[track("zh", false), track("pt-BR", false), track("en", false)]);
+        assert_eq!(pick(&tracks, "pt").unwrap(), ("https://y/pt-BR?a=1&fmt=srv3", None));
+        assert_eq!(pick(&tracks, "de").unwrap(), ("https://y/zh?a=1&fmt=srv3", None));
     }
 
     #[test]

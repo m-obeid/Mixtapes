@@ -121,7 +121,12 @@ pub fn plain_lines(text: &str) -> Vec<LyricLine> {
 ///
 /// NetEase stamps a track's translation and romanization against the same clock as the main lyric, but with their own line counts: credits and empty interludes are often in one and not the other. Index position is useless, so the match is the nearest secondary line within the tolerance.
 pub fn attach_secondary_lrc(lines: &mut [LyricLine], lrc: &str, key: Secondary) -> usize {
-    let secondary: Vec<LyricLine> = parse_lrc_text(lrc).into_iter().filter(|l| !l.text.trim().is_empty()).collect();
+    attach_secondary(lines, parse_lrc_text(lrc), key)
+}
+
+/// Merge parallel timed lines into `lines` the way `attach_secondary_lrc` does, for a source that is not LRC.
+pub fn attach_secondary(lines: &mut [LyricLine], secondary: Vec<LyricLine>, key: Secondary) -> usize {
+    let secondary: Vec<LyricLine> = secondary.into_iter().filter(|l| l.start.is_some() && !l.text.trim().is_empty()).collect();
     if lines.is_empty() || secondary.is_empty() {
         return 0;
     }
