@@ -818,13 +818,12 @@ window > windowhandle,
   opacity: 0.9;
 }
 
-/* Liked button. Only the icon takes the color: a button's background is
-   tinted from its own color, which turned the circle purple (#158). */
-.liked-button > image {
+/* Liked button */
+.liked-button {
   color: @accent_color;
 }
 
-.disliked-button > image {
+.disliked-button {
     color: @destructive_color;
 }
 
