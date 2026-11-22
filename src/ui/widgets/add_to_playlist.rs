@@ -1,7 +1,8 @@
 //! Port of ui/widgets/add_to_playlist.py: the popover for picking a playlist
 //! to add tracks to. Cover thumbnails, type-to-search, recently-used first,
 //! and a capped height so a user with two hundred playlists scrolls the
-//! list, not the window.
+//! list, not the window. A click adds and closes. Ticking rows instead adds
+//! to all of them at once with the button below the list (#183).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -93,6 +94,10 @@ pub struct AddToPlaylistPopover {
     popover: gtk::Popover,
     listbox: gtk::ListBox,
     empty_label: gtk::Label,
+    /// Shown once a row is ticked, adds to every ticked playlist.
+    add_button: gtk::Button,
+    /// Ticked playlist ids, in the order they were ticked.
+    checked: RefCell<Vec<String>>,
     filter_text: Rc<RefCell<String>>,
     covers: RefCell<Vec<Rc<CoverImage>>>,
     on_select: Rc<dyn Fn(String)>,
@@ -145,6 +150,11 @@ impl AddToPlaylistPopover {
             .visible(false)
             .build();
         outer.append(&empty_label);
+        let add_button = gtk::Button::builder()
+            .css_classes(["suggested-action"])
+            .visible(false)
+            .build();
+        outer.append(&add_button);
         // Always there, so a listener with no playlist yet, or signed out, can still add.
         let new_button = gtk::Button::builder()
             .child(&adw::ButtonContent::builder().icon_name("list-add-symbolic").label(tr!("New Playlist…")).build())
@@ -180,6 +190,8 @@ impl AddToPlaylistPopover {
             popover: popover.clone(),
             listbox,
             empty_label,
+            add_button,
+            checked: RefCell::new(Vec::new()),
             filter_text,
             covers: RefCell::new(Vec::new()),
             on_select: Rc::new(on_select),
@@ -189,6 +201,14 @@ impl AddToPlaylistPopover {
             let weak = Rc::downgrade(&this);
             this.listbox.connect_row_activated(move |_, row| {
                 let Some(this) = weak.upgrade() else { return };
+                // While rows are ticked, a click ticks one more instead of adding.
+                if !this.checked.borrow().is_empty() {
+                    if let Some(check) = unsafe { row.data::<gtk::CheckButton>("check") } {
+                        let check = unsafe { check.as_ref() };
+                        check.set_active(!check.is_active());
+                    }
+                    return;
+                }
                 let pid = unsafe { row.data::<String>("playlist-id") }
                     .map(|p| unsafe { p.as_ref() }.clone());
                 if let Some(pid) = pid {
@@ -199,12 +219,30 @@ impl AddToPlaylistPopover {
         }
         {
             let weak = Rc::downgrade(&this);
+            this.add_button.connect_clicked(move |_| {
+                let Some(this) = weak.upgrade() else { return };
+                let ids = this.checked.take();
+                this.popover.popdown();
+                for pid in ids {
+                    (this.on_select)(pid);
+                }
+            });
+        }
+        {
+            let weak = Rc::downgrade(&this);
             let parent: gtk::Widget = parent.clone().upcast();
             new_button.connect_clicked(move |_| {
                 let Some(this) = weak.upgrade() else { return };
+                // Ticked playlists get the tracks too, along with the new one.
+                let ticked = this.checked.take();
                 this.popover.popdown();
                 let on_select = this.on_select.clone();
-                crate::ui::playlist_ops::ask_new_playlist(&this.ctx, &parent, move |id, _title| on_select(id));
+                crate::ui::playlist_ops::ask_new_playlist(&this.ctx, &parent, move |id, _title| {
+                    for pid in &ticked {
+                        on_select(pid.clone());
+                    }
+                    on_select(id);
+                });
             });
         }
         // The popover owns the struct until it closes.
@@ -308,9 +346,38 @@ impl AddToPlaylistPopover {
                     .xalign(0.0)
                     .build(),
             );
+            let check = gtk::CheckButton::builder()
+                .valign(gtk::Align::Center)
+                .tooltip_text(tr!("Select to add to several playlists"))
+                .build();
+            {
+                let (weak, id) = (Rc::downgrade(self), p.id.clone());
+                check.connect_toggled(move |check| {
+                    if let Some(this) = weak.upgrade() {
+                        this.set_checked(&id, check.is_active());
+                    }
+                });
+            }
+            hbox.append(&check);
+            unsafe { row.set_data("check", check) };
             row.set_child(Some(&hbox));
             self.listbox.append(&row);
         }
         let _ = &self.filter_text;
+    }
+
+    fn set_checked(&self, playlist_id: &str, active: bool) {
+        let count = {
+            let mut checked = self.checked.borrow_mut();
+            checked.retain(|id| id != playlist_id);
+            if active {
+                checked.push(playlist_id.to_owned());
+            }
+            checked.len()
+        };
+        self.add_button.set_visible(count > 0);
+        if count > 0 {
+            self.add_button.set_label(&trn!("Add to {n} Playlist", "Add to {n} Playlists", count));
+        }
     }
 }
