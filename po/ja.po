@@ -7,9 +7,10 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mixtapes\n"
 "Report-Msgid-Bugs-To: https://github.com/m-obeid/Mixtapes/issues\n"
-"POT-Creation-Date: 2026-10-31 21:56+0100\n"
+"POT-Creation-Date: 2026-11-22 13:40+0100\n"
 "PO-Revision-Date: 2026-11-05 15:40+0900\n"
-"Last-Translator: Lesstep <275432938+rogervokma-stack@users.noreply.github.com>\n"
+"Last-Translator: Lesstep <275432938+rogervokma-"
+"stack@users.noreply.github.com>\n"
 "Language-Team: Japanese\n"
 "Language: ja\n"
 "MIME-Version: 1.0\n"
@@ -21,7 +22,7 @@ msgstr ""
 #. Translators: a lyrics search result whose catalog entry has no title.
 #. Translators: stands in for a missing artist name
 #: src/discord.rs:92 src/lyrics/providers/mod.rs:216
-#: src/ui/pages/playlist.rs:2987
+#: src/ui/pages/playlist.rs:3024
 msgid "Unknown"
 msgstr "不明"
 
@@ -37,15 +38,15 @@ msgstr "再生中"
 msgid "Paused"
 msgstr "一時停止中"
 
-#: src/discord.rs:222 src/discord.rs:259
+#: src/discord.rs:224 src/discord.rs:261
 msgid "Disabled"
 msgstr "無効"
 
-#: src/discord.rs:244 src/discord.rs:375 src/discord.rs:441
+#: src/discord.rs:246 src/discord.rs:377 src/discord.rs:443
 msgid "Disconnected"
 msgstr "切断済み"
 
-#: src/discord.rs:367 src/ui/preferences.rs:877
+#: src/discord.rs:369 src/ui/preferences.rs:877
 msgid "Connected"
 msgstr "接続済み"
 
@@ -220,6 +221,11 @@ msgid "{count} monthly listener"
 msgid_plural "{count} monthly listeners"
 msgstr[0] "月間リスナー {count} 人"
 
+#: src/inhibit.rs:29
+#, fuzzy
+msgid "Playing music"
+msgstr "再生中"
+
 #: src/local_library.rs:22
 msgid "Liked Songs"
 msgstr "高く評価した曲"
@@ -229,7 +235,7 @@ msgid "On this device"
 msgstr "このデバイス内"
 
 #: src/local_library.rs:521 src/ui/pages/library.rs:846
-#: src/ui/pages/playlist.rs:3010
+#: src/ui/pages/playlist.rs:3047
 #, rust-format
 msgid "{n} song"
 msgid_plural "{n} songs"
@@ -251,7 +257,7 @@ msgstr "ログアウト"
 msgid "Upload Songs…"
 msgstr "曲をアップロード…"
 
-#: src/macos.rs:141 src/ui/window.rs:2978
+#: src/macos.rs:141 src/ui/window.rs:2985
 msgid "Close Window"
 msgstr "ウィンドウを閉じる"
 
@@ -280,11 +286,11 @@ msgid "Paste"
 msgstr "貼り付け"
 
 #: src/macos.rs:155 src/ui/pages/library.rs:1064 src/ui/pages/library.rs:1102
-#: src/ui/pages/playlist.rs:2411 src/ui/pages/playlist.rs:2587
+#: src/ui/pages/playlist.rs:2448 src/ui/pages/playlist.rs:2624
 msgid "Delete"
 msgstr "削除"
 
-#: src/macos.rs:156 src/ui/pages/playlist.rs:237 src/ui/pages/playlist.rs:2387
+#: src/macos.rs:156 src/ui/pages/playlist.rs:239 src/ui/pages/playlist.rs:2416
 msgid "Select All"
 msgstr "すべて選択"
 
@@ -300,24 +306,24 @@ msgstr "編集"
 msgid "Show or Hide Player"
 msgstr "プレーヤーを表示/非表示"
 
-#: src/macos.rs:166 src/ui/window.rs:2285 src/ui/window.rs:2974
+#: src/macos.rs:166 src/ui/window.rs:2292 src/ui/window.rs:2981
 msgid "Refresh"
 msgstr "更新"
 
-#: src/macos.rs:169 src/ui/pages/history.rs:358 src/ui/pages/home.rs:366
+#: src/macos.rs:169 src/ui/pages/history.rs:358 src/ui/pages/home.rs:367
 msgid "History"
 msgstr "履歴"
 
-#: src/macos.rs:170 src/ui/pages/playlist.rs:2513 src/ui/window.rs:1138
-#: src/ui/window.rs:2374
+#: src/macos.rs:170 src/ui/pages/playlist.rs:2550 src/ui/window.rs:1143
+#: src/ui/window.rs:2381
 msgid "Downloaded Songs"
 msgstr "ダウンロード済みの曲"
 
-#: src/macos.rs:171 src/ui/window.rs:1163 src/ui/window.rs:1186
+#: src/macos.rs:171 src/ui/window.rs:1168 src/ui/window.rs:1191
 msgid "Uploaded Songs"
 msgstr "アップロードした曲"
 
-#: src/macos.rs:172 src/ui/window.rs:2562
+#: src/macos.rs:172 src/ui/window.rs:2569
 msgid "Your Channel"
 msgstr "あなたのチャンネル"
 
@@ -343,7 +349,7 @@ msgstr "シャッフル"
 
 #. Translators: the choices for the second lyric line. "Background" is the background vocals of a song.
 #: src/macos.rs:185 src/ui/preferences_lyrics.rs:34
-#: src/ui/preferences_lyrics.rs:35 src/ui/widgets/lyrics_view.rs:38
+#: src/ui/preferences_lyrics.rs:35 src/ui/widgets/lyrics_view.rs:39
 msgid "Off"
 msgstr "オフ"
 
@@ -367,11 +373,11 @@ msgstr "コントロール"
 msgid "Window"
 msgstr "ウィンドウ"
 
-#: src/macos.rs:198 src/ui/window.rs:2375 src/ui/window.rs:2973
+#: src/macos.rs:198 src/ui/window.rs:2382 src/ui/window.rs:2980
 msgid "Keyboard Shortcuts"
 msgstr "キーボードショートカット"
 
-#: src/macos.rs:199 src/ui/release_notes.rs:146 src/ui/window.rs:2377
+#: src/macos.rs:199 src/ui/release_notes.rs:150 src/ui/window.rs:2384
 msgid "What's New"
 msgstr "新機能"
 
@@ -380,11 +386,11 @@ msgid "Help"
 msgstr "ヘルプ"
 
 #. Translators: the kind word of a live stream, beside "Song" and "Video".
-#: src/model.rs:282 src/ui/widgets/media_card.rs:97
+#: src/model.rs:282 src/ui/widgets/media_card.rs:98
 msgid "Live"
 msgstr "ライブ"
 
-#: src/model.rs:286 src/net/cache.rs:87 src/ui/pages/playlist.rs:1179
+#: src/model.rs:286 src/net/cache.rs:87 src/ui/pages/playlist.rs:1184
 msgid "Album"
 msgstr "アルバム"
 
@@ -400,14 +406,14 @@ msgstr "エピソード"
 msgid "Video"
 msgstr "動画"
 
-#: src/model.rs:290 src/ui/pages/playlist.rs:1189
+#: src/model.rs:290 src/ui/pages/playlist.rs:1194
 msgid "Podcast"
 msgstr "ポッドキャスト"
 
-#: src/model.rs:291 src/ui/pages/playlist.rs:809 src/ui/pages/playlist.rs:866
-#: src/ui/pages/playlist.rs:1007 src/ui/pages/playlist.rs:1026
-#: src/ui/pages/playlist.rs:1094 src/ui/pages/playlist.rs:1116
-#: src/ui/pages/playlist.rs:1184 src/ui/pages/playlist.rs:1192
+#: src/model.rs:291 src/ui/pages/playlist.rs:813 src/ui/pages/playlist.rs:870
+#: src/ui/pages/playlist.rs:1012 src/ui/pages/playlist.rs:1031
+#: src/ui/pages/playlist.rs:1099 src/ui/pages/playlist.rs:1121
+#: src/ui/pages/playlist.rs:1189 src/ui/pages/playlist.rs:1197
 msgid "Playlist"
 msgstr "プレイリスト"
 
@@ -416,7 +422,7 @@ msgstr "プレイリスト"
 msgid "Profile"
 msgstr "プロフィール"
 
-#: src/model.rs:294 src/net/artist.rs:303 src/ui/pages/playlist.rs:607
+#: src/model.rs:294 src/net/artist.rs:303 src/ui/pages/playlist.rs:610
 #: src/ui/preferences.rs:30
 msgid "Artist"
 msgstr "アーティスト"
@@ -728,11 +734,11 @@ msgstr "お気に入りのアーティストの新着"
 msgid "Similar to"
 msgstr "似ているアーティスト"
 
-#: src/net/playlists.rs:646
+#: src/net/playlists.rs:694
 msgid "Your Likes"
 msgstr "あなたの高評価"
 
-#: src/net/playlists.rs:647
+#: src/net/playlists.rs:695
 msgid "Your liked songs from YouTube Music."
 msgstr "YouTube Music で高く評価した曲です。"
 
@@ -740,7 +746,9 @@ msgstr "YouTube Music で高く評価した曲です。"
 #: src/net/uploads.rs:34
 #, rust-format
 msgid "YouTube Music does not take {extension} files. It takes {formats}."
-msgstr "YouTube Music は {extension} ファイルに対応していません。対応している形式は {formats} です。"
+msgstr ""
+"YouTube Music は {extension} ファイルに対応していません。対応している形式は "
+"{formats} です。"
 
 #: src/player.rs:95
 msgid "Could not load this track"
@@ -754,11 +762,11 @@ msgstr "評価を更新できませんでした"
 msgid "Offline mode is on, and this song is not downloaded"
 msgstr "オフラインモードがオンで、この曲はダウンロードされていません"
 
-#: src/player.rs:1792
+#: src/player.rs:1794
 msgid "Radio"
 msgstr "ラジオ"
 
-#: src/player.rs:1792
+#: src/player.rs:1794
 #, rust-format
 msgid "Radio of {seed_name}"
 msgstr "{seed_name} のラジオ"
@@ -795,7 +803,7 @@ msgid "Pause"
 msgstr "一時停止"
 
 #: src/tray.rs:191 src/ui/context_menu.rs:308 src/ui/pages/artist.rs:189
-#: src/ui/pages/history.rs:367 src/ui/pages/playlist.rs:187
+#: src/ui/pages/history.rs:367 src/ui/pages/playlist.rs:189
 #: src/ui/player_bar.rs:165 src/ui/player_bar.rs:555
 msgid "Play"
 msgstr "再生"
@@ -804,7 +812,7 @@ msgstr "再生"
 msgid "Show Mixtapes"
 msgstr "Mixtapes を表示"
 
-#: src/tray.rs:196 src/ui/window.rs:2379 src/ui/window.rs:2976
+#: src/tray.rs:196 src/ui/window.rs:2386 src/ui/window.rs:2983
 msgid "Quit"
 msgstr "終了"
 
@@ -815,12 +823,12 @@ msgid_plural "Play {n} Next"
 msgstr[0] "{n} 曲を次に再生"
 
 #: src/ui/context_menu.rs:118 src/ui/context_menu.rs:308
-#: src/ui/pages/playlist.rs:1822
+#: src/ui/pages/playlist.rs:1827
 msgid "Play Next"
 msgstr "次に再生"
 
 #: src/ui/context_menu.rs:121 src/ui/context_menu.rs:468
-#: src/ui/pages/playlist.rs:1850
+#: src/ui/pages/playlist.rs:1855
 #, rust-format
 msgid "Playing {n} track next"
 msgid_plural "Playing {n} tracks next"
@@ -837,12 +845,12 @@ msgid_plural "Add {n} to Queue"
 msgstr[0] "{n} 曲をキューに追加"
 
 #: src/ui/context_menu.rs:127 src/ui/context_menu.rs:308
-#: src/ui/pages/playlist.rs:1823
+#: src/ui/pages/playlist.rs:1828
 msgid "Add to Queue"
 msgstr "キューに追加"
 
 #: src/ui/context_menu.rs:130 src/ui/context_menu.rs:472
-#: src/ui/pages/playlist.rs:1859
+#: src/ui/pages/playlist.rs:1864
 #, rust-format
 msgid "Added {n} track to queue"
 msgid_plural "Added {n} tracks to queue"
@@ -872,12 +880,12 @@ msgid "Album pages not ported yet ({name})"
 msgstr "アルバムページにはまだ対応していません（{name}）"
 
 #: src/ui/context_menu.rs:161 src/ui/context_menu.rs:339
-#: src/ui/pages/artist.rs:205 src/ui/pages/playlist.rs:1828
+#: src/ui/pages/artist.rs:205 src/ui/pages/playlist.rs:1833
 msgid "Start Radio"
 msgstr "ラジオを開始"
 
 #: src/ui/context_menu.rs:163 src/ui/context_menu.rs:490
-#: src/ui/context_menu.rs:511 src/ui/pages/playlist.rs:1868
+#: src/ui/context_menu.rs:511 src/ui/pages/playlist.rs:1873
 msgid "Starting radio..."
 msgstr "ラジオを開始しています…"
 
@@ -920,7 +928,7 @@ msgid "Refresh Metadata"
 msgstr "メタデータを更新"
 
 #: src/ui/context_menu.rs:223 src/ui/context_menu.rs:352
-#: src/ui/pages/playlist.rs:1831
+#: src/ui/pages/playlist.rs:1836
 msgid "Copy Link"
 msgstr "リンクをコピー"
 
@@ -938,15 +946,17 @@ msgstr[0] "{n} 曲のダウンロードを削除しますか？"
 msgid ""
 "The files are deleted from this device. The songs stay in your library and "
 "playlists."
-msgstr "ファイルはこのデバイスから削除されます。曲はライブラリとプレイリストに残ります。"
+msgstr ""
+"ファイルはこのデバイスから削除されます。曲はライブラリとプレイリストに残りま"
+"す。"
 
 #: src/ui/context_menu.rs:239 src/ui/crop_dialog.rs:146
 #: src/ui/download_queue.rs:88 src/ui/pages/library.rs:1063
-#: src/ui/pages/library.rs:1101 src/ui/pages/playlist.rs:2410
-#: src/ui/pages/playlist.rs:2586 src/ui/playlist_ops.rs:50
+#: src/ui/pages/library.rs:1101 src/ui/pages/playlist.rs:2447
+#: src/ui/pages/playlist.rs:2623 src/ui/playlist_ops.rs:50
 #: src/ui/preferences.rs:587 src/ui/preferences.rs:949
 #: src/ui/preferences.rs:1007 src/ui/preferences.rs:1101
-#: src/ui/widgets/lyrics_view.rs:764
+#: src/ui/widgets/lyrics_view.rs:765
 msgid "Cancel"
 msgstr "キャンセル"
 
@@ -960,7 +970,7 @@ msgid "Removed {n} download"
 msgid_plural "Removed {n} downloads"
 msgstr[0] "{n} 曲のダウンロードを削除しました"
 
-#: src/ui/context_menu.rs:316 src/ui/pages/playlist.rs:1834
+#: src/ui/context_menu.rs:316 src/ui/pages/playlist.rs:1839
 msgid "Remove All Downloads"
 msgstr "すべてのダウンロードを削除"
 
@@ -973,11 +983,11 @@ msgid "Open Playlist"
 msgstr "プレイリストを開く"
 
 #: src/ui/context_menu.rs:418 src/ui/context_menu.rs:433
-#: src/ui/pages/playlist.rs:1890
+#: src/ui/pages/playlist.rs:1895
 msgid "Nothing here is downloaded"
 msgstr "ダウンロード済みの曲はありません"
 
-#: src/ui/context_menu.rs:446 src/ui/pages/playlist.rs:795
+#: src/ui/context_menu.rs:446 src/ui/pages/playlist.rs:799
 msgid "Loading..."
 msgstr "読み込み中…"
 
@@ -1148,7 +1158,9 @@ msgstr "ログインページを表示できませんでした。"
 
 #: src/ui/login.rs:404
 msgid "The sign-in page could not be shown. Is the WebView2 runtime installed?"
-msgstr "ログインページを表示できませんでした。WebView2 ランタイムはインストールされていますか？"
+msgstr ""
+"ログインページを表示できませんでした。WebView2 ランタイムはインストールされて"
+"いますか？"
 
 #: src/ui/onboarding.rs:56 src/ui/onboarding.rs:127
 msgid "Welcome"
@@ -1175,7 +1187,10 @@ msgid ""
 "Sign in for your library, likes, playlists and uploads. Without an account "
 "you still get search, radio, downloads, and playlists and likes kept on this "
 "device."
-msgstr "ログインすると、ライブラリ、高評価、プレイリスト、アップロードを利用できます。アカウントがなくても、検索、ラジオ、ダウンロード、このデバイスに保存するプレイリストと高評価は使えます。"
+msgstr ""
+"ログインすると、ライブラリ、高評価、プレイリスト、アップロードを利用できま"
+"す。アカウントがなくても、検索、ラジオ、ダウンロード、このデバイスに保存する"
+"プレイリストと高評価は使えます。"
 
 #: src/ui/onboarding.rs:134
 msgid "Sign in with Google"
@@ -1185,12 +1200,12 @@ msgstr "Google でログイン"
 msgid "Continue Without an Account"
 msgstr "アカウントなしで続ける"
 
-#: src/ui/onboarding.rs:152 src/ui/preferences.rs:165 src/ui/window.rs:2549
+#: src/ui/onboarding.rs:152 src/ui/preferences.rs:165 src/ui/window.rs:2556
 msgid "Account"
 msgstr "アカウント"
 
 #: src/ui/onboarding.rs:163 src/ui/preferences.rs:200 src/ui/preferences.rs:232
-#: src/ui/window.rs:572
+#: src/ui/window.rs:577
 msgid "Signed in"
 msgstr "ログイン済み"
 
@@ -1202,7 +1217,9 @@ msgstr "どのチャンネルを使いますか？"
 msgid ""
 "Your Google account has more than one channel. Pick the one whose library "
 "Mixtapes should show. You can change this under Preferences."
-msgstr "お使いの Google アカウントには複数のチャンネルがあります。Mixtapes に表示するライブラリのチャンネルを選んでください。あとから設定で変更できます。"
+msgstr ""
+"お使いの Google アカウントには複数のチャンネルがあります。Mixtapes に表示する"
+"ライブラリのチャンネルを選んでください。あとから設定で変更できます。"
 
 #: src/ui/onboarding.rs:226 src/ui/preferences.rs:255
 msgid "Channel"
@@ -1236,7 +1253,9 @@ msgstr "スクロブル"
 msgid ""
 "Submit your plays to Last.fm or ListenBrainz. Connect an account under "
 "Preferences."
-msgstr "再生した曲を Last.fm または ListenBrainz に送信します。アカウントは設定から接続できます。"
+msgstr ""
+"再生した曲を Last.fm または ListenBrainz に送信します。アカウントは設定から接"
+"続できます。"
 
 #: src/ui/onboarding.rs:289 src/ui/preferences.rs:655
 msgid "Dynamic Cover Color"
@@ -1277,7 +1296,8 @@ msgstr "準備完了"
 #: src/ui/onboarding.rs:338
 msgid ""
 "Preferences, keyboard shortcuts and the release notes are in the main menu."
-msgstr "設定、キーボードショートカット、リリースノートはメインメニューにあります。"
+msgstr ""
+"設定、キーボードショートカット、リリースノートはメインメニューにあります。"
 
 #: src/ui/onboarding.rs:340
 msgid "Start Listening"
@@ -1285,7 +1305,8 @@ msgstr "聴きはじめる"
 
 #: src/ui/onboarding.rs:347
 msgid "Mixtapes is free. If you like it, you can support my work."
-msgstr "Mixtapes は無料です。気に入ったら、私の活動を応援してもらえると嬉しいです。"
+msgstr ""
+"Mixtapes は無料です。気に入ったら、私の活動を応援してもらえると嬉しいです。"
 
 #. Translators: {title} is the name of a row of categories, like Genres
 #: src/ui/pages/all_moods.rs:68
@@ -1302,8 +1323,8 @@ msgid "Subscribe"
 msgstr "登録"
 
 #: src/ui/pages/artist.rs:228 src/ui/pages/artist.rs:473
-#: src/ui/pages/artist.rs:1190 src/ui/pages/playlist.rs:175
-#: src/ui/pages/playlist.rs:1341 src/ui/pages/playlist.rs:1362
+#: src/ui/pages/artist.rs:1190 src/ui/pages/playlist.rs:177
+#: src/ui/pages/playlist.rs:1347 src/ui/pages/playlist.rs:1368
 msgid "Read more"
 msgstr "もっと見る"
 
@@ -1361,7 +1382,7 @@ msgstr "JSON をコピー（デバッグ）"
 msgid "Unsubscribe"
 msgstr "登録解除"
 
-#: src/ui/pages/artist.rs:1186 src/ui/pages/playlist.rs:1359
+#: src/ui/pages/artist.rs:1186 src/ui/pages/playlist.rs:1365
 msgid "Show less"
 msgstr "一部を表示"
 
@@ -1526,10 +1547,12 @@ msgstr "何か再生すると、ここに再生履歴が表示されます。"
 #: src/ui/pages/history.rs:21
 msgid ""
 "Songs you play without signing in appear here. They stay on this device."
-msgstr "ログインせずに再生した曲がここに表示されます。このデバイスにのみ保存されます。"
+msgstr ""
+"ログインせずに再生した曲がここに表示されます。このデバイスにのみ保存されま"
+"す。"
 
-#: src/ui/pages/history.rs:73 src/ui/pages/history.rs:113 src/ui/window.rs:1332
-#: src/ui/window.rs:2564
+#: src/ui/pages/history.rs:73 src/ui/pages/history.rs:113 src/ui/window.rs:1337
+#: src/ui/window.rs:2571
 msgid "Listening History"
 msgstr "再生履歴"
 
@@ -1542,7 +1565,7 @@ msgid "History requires an internet connection."
 msgstr "履歴の表示にはインターネット接続が必要です。"
 
 #. Translators: moves the lyrics earlier against the song.
-#: src/ui/pages/history.rs:225 src/ui/widgets/lyrics_view.rs:332
+#: src/ui/pages/history.rs:225 src/ui/widgets/lyrics_view.rs:333
 msgid "Earlier"
 msgstr "以前"
 
@@ -1566,7 +1589,7 @@ msgstr "今週"
 msgid "Last week"
 msgstr "先週"
 
-#: src/ui/pages/home.rs:90 src/ui/pages/home.rs:293 src/ui/window.rs:167
+#: src/ui/pages/home.rs:90 src/ui/pages/home.rs:293 src/ui/window.rs:172
 msgid "Home"
 msgstr "ホーム"
 
@@ -1590,7 +1613,7 @@ msgstr "ホームを読み込めませんでした"
 msgid "Try refreshing in a moment."
 msgstr "しばらくしてから更新してみてください。"
 
-#: src/ui/pages/library.rs:76 src/ui/pages/library.rs:113 src/ui/window.rs:173
+#: src/ui/pages/library.rs:76 src/ui/pages/library.rs:113 src/ui/window.rs:178
 msgid "Library"
 msgstr "ライブラリ"
 
@@ -1602,7 +1625,7 @@ msgstr "アップロード"
 msgid "All Uploaded Songs"
 msgstr "アップロードした曲すべて"
 
-#: src/ui/pages/library.rs:93 src/ui/upload_queue.rs:74 src/ui/window.rs:2563
+#: src/ui/pages/library.rs:93 src/ui/upload_queue.rs:74 src/ui/window.rs:2570
 msgid "Upload Songs"
 msgstr "曲をアップロード"
 
@@ -1659,17 +1682,17 @@ msgid "Automatic Playlist"
 msgstr "自動プレイリスト"
 
 #: src/ui/pages/library.rs:982 src/ui/pages/library.rs:1008
-#: src/ui/pages/playlist.rs:1837
+#: src/ui/pages/playlist.rs:1842
 msgid "Delete Playlist"
 msgstr "プレイリストを削除"
 
 #: src/ui/pages/library.rs:987 src/ui/pages/library.rs:1011
-#: src/ui/pages/playlist.rs:1810
+#: src/ui/pages/playlist.rs:1815
 msgid "Remove from Library"
 msgstr "ライブラリから削除"
 
 #: src/ui/pages/library.rs:989 src/ui/pages/library.rs:1020
-#: src/ui/pages/playlist.rs:1984 src/ui/pages/playlist.rs:2005
+#: src/ui/pages/playlist.rs:1999 src/ui/pages/playlist.rs:2020
 msgid "Removed from library"
 msgstr "ライブラリから削除しました"
 
@@ -1677,15 +1700,15 @@ msgstr "ライブラリから削除しました"
 msgid "Delete Album"
 msgstr "アルバムを削除"
 
-#: src/ui/pages/library.rs:1025 src/ui/pages/playlist.rs:2015
+#: src/ui/pages/library.rs:1025 src/ui/pages/playlist.rs:2030
 msgid "Failed to remove"
 msgstr "削除できませんでした"
 
-#: src/ui/pages/library.rs:1060 src/ui/pages/playlist.rs:2409
+#: src/ui/pages/library.rs:1060 src/ui/pages/playlist.rs:2446
 msgid "Delete Upload?"
 msgstr "アップロードを削除しますか？"
 
-#: src/ui/pages/library.rs:1061 src/ui/pages/playlist.rs:2409
+#: src/ui/pages/library.rs:1061 src/ui/pages/playlist.rs:2446
 #, rust-format
 msgid ""
 "Are you sure you want to delete \"{title}\"?\n"
@@ -1702,11 +1725,11 @@ msgstr "アップロードを削除しました"
 msgid "Failed to delete the upload"
 msgstr "アップロードを削除できませんでした"
 
-#: src/ui/pages/library.rs:1098 src/ui/pages/playlist.rs:2585
+#: src/ui/pages/library.rs:1098 src/ui/pages/playlist.rs:2622
 msgid "Delete Playlist?"
 msgstr "プレイリストを削除しますか？"
 
-#: src/ui/pages/library.rs:1099 src/ui/pages/playlist.rs:2585
+#: src/ui/pages/library.rs:1099 src/ui/pages/playlist.rs:2622
 #, rust-format
 msgid ""
 "Are you sure you want to delete \"{title}\"?\n"
@@ -1756,345 +1779,352 @@ msgstr "視聴回数順"
 msgid "Recently added"
 msgstr "追加が新しい順"
 
-#: src/ui/pages/playlist.rs:172
+#: src/ui/pages/playlist.rs:174
 msgid "Playlist Title"
 msgstr "プレイリストのタイトル"
 
-#: src/ui/pages/playlist.rs:193 src/ui/pages/playlist.rs:1810
+#: src/ui/pages/playlist.rs:195 src/ui/pages/playlist.rs:1815
 msgid "Add to Library"
 msgstr "ライブラリに追加"
 
-#: src/ui/pages/playlist.rs:196
+#: src/ui/pages/playlist.rs:198
 msgid "More Options"
 msgstr "その他のオプション"
 
-#: src/ui/pages/playlist.rs:211
+#: src/ui/pages/playlist.rs:213
 msgid "Toggle sort direction"
 msgstr "並べ替えの向きを切り替え"
 
-#: src/ui/pages/playlist.rs:215
+#: src/ui/pages/playlist.rs:217
 msgid "Select multiple songs"
 msgstr "複数の曲を選択"
 
-#: src/ui/pages/playlist.rs:227
+#: src/ui/pages/playlist.rs:229
 #, rust-format
 msgid "{n} selected"
 msgid_plural "{n} selected"
 msgstr[0] "{n} 曲を選択中"
 
-#: src/ui/pages/playlist.rs:229
+#: src/ui/pages/playlist.rs:231
 msgid "Play selected"
 msgstr "選択した曲を再生"
 
-#: src/ui/pages/playlist.rs:231
+#: src/ui/pages/playlist.rs:233
 msgid "Add selected to playlist"
 msgstr "選択した曲をプレイリストに追加"
 
-#: src/ui/pages/playlist.rs:233
+#: src/ui/pages/playlist.rs:235
 msgid "Remove selected from playlist"
 msgstr "選択した曲をプレイリストから削除"
 
-#: src/ui/pages/playlist.rs:235 src/ui/player_bar.rs:233
+#: src/ui/pages/playlist.rs:237 src/ui/player_bar.rs:233
 msgid "More"
 msgstr "その他"
 
-#: src/ui/pages/playlist.rs:238 src/ui/pages/playlist.rs:2389
+#: src/ui/pages/playlist.rs:240 src/ui/pages/playlist.rs:2418
 msgid "Deselect All"
 msgstr "すべての選択を解除"
 
-#: src/ui/pages/playlist.rs:242
+#: src/ui/pages/playlist.rs:244
 msgid "Cancel selection"
 msgstr "選択をキャンセル"
 
-#: src/ui/pages/playlist.rs:246
+#: src/ui/pages/playlist.rs:248
 msgid "This playlist has no songs"
 msgstr "このプレイリストには曲がありません"
 
-#: src/ui/pages/playlist.rs:755 src/ui/pages/playlist.rs:756
+#: src/ui/pages/playlist.rs:759 src/ui/pages/playlist.rs:760
 msgid "Loading tracks..."
 msgstr "曲を読み込み中…"
 
-#: src/ui/pages/playlist.rs:809
+#: src/ui/pages/playlist.rs:813
 msgid "Playlist Not Found"
 msgstr "プレイリストが見つかりません"
 
-#: src/ui/pages/playlist.rs:1016
+#: src/ui/pages/playlist.rs:1021
 msgid "Offline"
 msgstr "オフライン"
 
-#: src/ui/pages/playlist.rs:1029 src/ui/pages/playlist.rs:1037
+#: src/ui/pages/playlist.rs:1034 src/ui/pages/playlist.rs:1042
 msgid "Offline - no cached data"
 msgstr "オフライン: キャッシュされたデータがありません"
 
-#: src/ui/pages/playlist.rs:1031
+#: src/ui/pages/playlist.rs:1036
 msgid "This playlist hasn't been cached for offline use"
 msgstr "このプレイリストはオフライン用にキャッシュされていません"
 
-#: src/ui/pages/playlist.rs:1094
+#: src/ui/pages/playlist.rs:1099
 msgid "Error Loading Playlist"
 msgstr "プレイリストの読み込みエラー"
 
-#: src/ui/pages/playlist.rs:1094
+#: src/ui/pages/playlist.rs:1099
 msgid "Error"
 msgstr "エラー"
 
-#: src/ui/pages/playlist.rs:1109
+#: src/ui/pages/playlist.rs:1114
 msgid "Chart Playlist"
 msgstr "チャートプレイリスト"
 
 #. Translators: the owner shown on the Liked Music list, meaning the listener
-#: src/ui/pages/playlist.rs:1146
+#: src/ui/pages/playlist.rs:1151
 msgid "You"
 msgstr "あなた"
 
 #. Translators: shown in place of the song count on an endless radio list
-#: src/ui/pages/playlist.rs:1158
+#: src/ui/pages/playlist.rs:1163
 msgid "Infinite"
 msgstr "無限"
 
 #. Translators: noun, an album the listener uploaded to YouTube Music
-#: src/ui/pages/playlist.rs:1182
+#: src/ui/pages/playlist.rs:1187
 msgid "Upload"
 msgstr "アップロード"
 
-#: src/ui/pages/playlist.rs:1205
+#: src/ui/pages/playlist.rs:1210
 msgid "Unknown Playlist"
 msgstr "不明なプレイリスト"
 
-#: src/ui/pages/playlist.rs:1706
+#: src/ui/pages/playlist.rs:1712
 msgid "This song isn't downloaded"
 msgstr "この曲はダウンロードされていません"
 
-#: src/ui/pages/playlist.rs:1761
+#: src/ui/pages/playlist.rs:1767
 msgid "No downloaded songs to play"
 msgstr "再生できるダウンロード済みの曲がありません"
 
-#: src/ui/pages/playlist.rs:1776
+#: src/ui/pages/playlist.rs:1782
 msgid "No downloaded songs to shuffle"
 msgstr "シャッフルできるダウンロード済みの曲がありません"
 
-#: src/ui/pages/playlist.rs:1826
+#: src/ui/pages/playlist.rs:1831
 msgid "Add all to Playlist…"
 msgstr "すべてをプレイリストに追加…"
 
-#: src/ui/pages/playlist.rs:1833
+#: src/ui/pages/playlist.rs:1838
 msgid "Download All"
 msgstr "すべてダウンロード"
 
-#: src/ui/pages/playlist.rs:1836 src/ui/pages/playlist.rs:2562
-#: src/ui/pages/playlist.rs:2643
+#: src/ui/pages/playlist.rs:1841 src/ui/pages/playlist.rs:2599
+#: src/ui/pages/playlist.rs:2680
 msgid "Edit Playlist"
 msgstr "プレイリストを編集"
 
-#: src/ui/pages/playlist.rs:1879
+#: src/ui/pages/playlist.rs:1884
 msgid "Downloads need an internet connection"
 msgstr "ダウンロードにはインターネット接続が必要です"
 
-#: src/ui/pages/playlist.rs:1916
+#: src/ui/pages/playlist.rs:1921
 msgid "Link copied to clipboard"
 msgstr "リンクをクリップボードにコピーしました"
 
-#: src/ui/pages/playlist.rs:1984 src/ui/pages/playlist.rs:2005
+#: src/ui/pages/playlist.rs:1999 src/ui/pages/playlist.rs:2020
 msgid "Saved to library"
 msgstr "ライブラリに保存しました"
 
-#: src/ui/pages/playlist.rs:2015
+#: src/ui/pages/playlist.rs:2030
 msgid "Failed to save"
 msgstr "保存できませんでした"
 
-#: src/ui/pages/playlist.rs:2100
+#: src/ui/pages/playlist.rs:2129
 #, rust-format
 msgid "{n} of {total} selected"
 msgid_plural "{n} of {total} selected"
 msgstr[0] "{total} 曲中 {n} 曲を選択中"
 
-#: src/ui/pages/playlist.rs:2129 src/ui/pages/playlist.rs:2143
+#: src/ui/pages/playlist.rs:2158 src/ui/pages/playlist.rs:2172
 msgid "Could not move the song"
 msgstr "曲を移動できませんでした"
 
-#: src/ui/pages/playlist.rs:2175 src/ui/pages/playlist.rs:2192
+#: src/ui/pages/playlist.rs:2204 src/ui/pages/playlist.rs:2221
 #, rust-format
 msgid "Removed {n} track"
 msgid_plural "Removed {n} tracks"
 msgstr[0] "{n} 曲を削除しました"
 
-#: src/ui/pages/playlist.rs:2199
+#: src/ui/pages/playlist.rs:2228
 msgid "Failed to remove tracks"
 msgstr "曲を削除できませんでした"
 
-#: src/ui/pages/playlist.rs:2221
+#: src/ui/pages/playlist.rs:2250
 #, rust-format
 msgid "Copied debug data for {n} track"
 msgid_plural "Copied debug data for {n} tracks"
 msgstr[0] "{n} 曲のデバッグデータをコピーしました"
 
-#: src/ui/pages/playlist.rs:2310
+#: src/ui/pages/playlist.rs:2339
 #, rust-format
 msgid "Only {ranked} of {n} song has view counts — the rest stay at the end"
 msgid_plural ""
 "Only {ranked} of {n} songs have view counts — the rest stay at the end"
-msgstr[0] "{n} 曲のうち、視聴回数があるのは {ranked} 曲だけです。残りは最後に並びます"
+msgstr[0] ""
+"{n} 曲のうち、視聴回数があるのは {ranked} 曲だけです。残りは最後に並びます"
 
-#: src/ui/pages/playlist.rs:2312
+#: src/ui/pages/playlist.rs:2341
 #, rust-format
 msgid "Only {ranked} of {n} song has add dates — the rest stay at the end"
 msgid_plural ""
 "Only {ranked} of {n} songs have add dates — the rest stay at the end"
-msgstr[0] "{n} 曲のうち、追加日があるのは {ranked} 曲だけです。残りは最後に並びます"
+msgstr[0] ""
+"{n} 曲のうち、追加日があるのは {ranked} 曲だけです。残りは最後に並びます"
 
-#: src/ui/pages/playlist.rs:2319
+#: src/ui/pages/playlist.rs:2348
 msgid "View counts need an internet connection"
 msgstr "視聴回数の取得にはインターネット接続が必要です"
 
-#: src/ui/pages/playlist.rs:2320
+#: src/ui/pages/playlist.rs:2349
 msgid "View counts aren't available for this list"
 msgstr "このリストでは視聴回数を利用できません"
 
-#: src/ui/pages/playlist.rs:2321
+#: src/ui/pages/playlist.rs:2350
 msgid "Add dates need an internet connection"
 msgstr "追加日の取得にはインターネット接続が必要です"
 
-#: src/ui/pages/playlist.rs:2322
+#: src/ui/pages/playlist.rs:2351
 msgid "Add dates aren't available for this list"
 msgstr "このリストでは追加日を利用できません"
 
 #. Translators: {n} is the number of selected songs
-#: src/ui/pages/playlist.rs:2366
+#: src/ui/pages/playlist.rs:2395
 #, rust-format
 msgid "Remove {n} from Playlist"
 msgid_plural "Remove {n} from Playlist"
 msgstr[0] "{n} 曲をプレイリストから削除"
 
-#: src/ui/pages/playlist.rs:2370
+#: src/ui/pages/playlist.rs:2399
 msgid "Remove from Playlist"
 msgstr "プレイリストから削除"
 
 #. Translators: stands in for a missing song title in "Are you sure you want to delete "{title}"?" and "Deleted {title}"
-#: src/ui/pages/playlist.rs:2377
+#: src/ui/pages/playlist.rs:2406
 msgid "this song"
 msgstr "この曲"
 
-#: src/ui/pages/playlist.rs:2378
+#: src/ui/pages/playlist.rs:2407
 msgid "Delete Upload"
 msgstr "アップロードを削除"
 
-#: src/ui/pages/playlist.rs:2385
+#: src/ui/pages/playlist.rs:2414
 msgid "Deselect This"
 msgstr "この曲の選択を解除"
 
-#: src/ui/pages/playlist.rs:2385
+#: src/ui/pages/playlist.rs:2414
 msgid "Select This"
 msgstr "この曲を選択"
 
-#: src/ui/pages/playlist.rs:2392
+#: src/ui/pages/playlist.rs:2421
 msgid "Copy Selection Data (Debug)"
 msgstr "選択データをコピー（デバッグ）"
 
-#: src/ui/pages/playlist.rs:2432
+#: src/ui/pages/playlist.rs:2427
+#, fuzzy
+msgid "Select"
+msgstr "すべて選択"
+
+#: src/ui/pages/playlist.rs:2469
 #, rust-format
 msgid "Deleted {title}"
 msgstr "「{title}」を削除しました"
 
-#: src/ui/pages/playlist.rs:2484 src/ui/window.rs:1319
+#: src/ui/pages/playlist.rs:2521 src/ui/window.rs:1324
 msgid "History requires an internet connection"
 msgstr "履歴の表示にはインターネット接続が必要です"
 
-#: src/ui/pages/playlist.rs:2488
+#: src/ui/pages/playlist.rs:2525
 msgid "Refresh requires an internet connection"
 msgstr "更新にはインターネット接続が必要です"
 
-#: src/ui/pages/playlist.rs:2512
+#: src/ui/pages/playlist.rs:2549
 #, rust-format
 msgid "{n} song available offline"
 msgid_plural "{n} songs available offline"
 msgstr[0] "オフラインで利用できる曲: {n} 曲"
 
-#: src/ui/pages/playlist.rs:2556
+#: src/ui/pages/playlist.rs:2593
 msgid "Copy Cover URL"
 msgstr "カバー URL をコピー"
 
-#: src/ui/pages/playlist.rs:2648 src/ui/widgets/lyrics_view.rs:765
+#: src/ui/pages/playlist.rs:2685 src/ui/widgets/lyrics_view.rs:766
 msgid "Save"
 msgstr "保存"
 
-#: src/ui/pages/playlist.rs:2652 src/ui/playlist_ops.rs:97
+#: src/ui/pages/playlist.rs:2689 src/ui/playlist_ops.rs:97
 msgid "Playlist Details"
 msgstr "プレイリストの詳細"
 
-#: src/ui/pages/playlist.rs:2654 src/ui/playlist_ops.rs:98
+#: src/ui/pages/playlist.rs:2691 src/ui/playlist_ops.rs:98
 msgid "Title"
 msgstr "タイトル"
 
-#: src/ui/pages/playlist.rs:2656 src/ui/playlist_ops.rs:99
+#: src/ui/pages/playlist.rs:2693 src/ui/playlist_ops.rs:99
 msgid "Description"
 msgstr "説明"
 
-#: src/ui/pages/playlist.rs:2658 src/ui/playlist_ops.rs:100
+#: src/ui/pages/playlist.rs:2695 src/ui/playlist_ops.rs:100
 msgid "Visibility"
 msgstr "公開設定"
 
-#: src/ui/pages/playlist.rs:2659 src/ui/pages/playlist.rs:2977
+#: src/ui/pages/playlist.rs:2696 src/ui/pages/playlist.rs:3014
 #: src/ui/playlist_ops.rs:100
 msgid "Public"
 msgstr "公開"
 
-#: src/ui/pages/playlist.rs:2659 src/ui/pages/playlist.rs:2978
+#: src/ui/pages/playlist.rs:2696 src/ui/pages/playlist.rs:3015
 #: src/ui/playlist_ops.rs:100
 msgid "Private"
 msgstr "非公開"
 
-#: src/ui/pages/playlist.rs:2659 src/ui/pages/playlist.rs:2979
+#: src/ui/pages/playlist.rs:2696 src/ui/pages/playlist.rs:3016
 #: src/ui/playlist_ops.rs:100
 msgid "Unlisted"
 msgstr "限定公開"
 
-#: src/ui/pages/playlist.rs:2663
+#: src/ui/pages/playlist.rs:2700
 msgid "Playlist Cover"
 msgstr "プレイリストのカバー"
 
-#: src/ui/pages/playlist.rs:2663
+#: src/ui/pages/playlist.rs:2700
 msgid "No file selected"
 msgstr "ファイルが選択されていません"
 
-#: src/ui/pages/playlist.rs:2667
+#: src/ui/pages/playlist.rs:2704
 msgid "Choose File..."
 msgstr "ファイルを選択…"
 
-#: src/ui/pages/playlist.rs:2674
+#: src/ui/pages/playlist.rs:2711
 msgid "Images"
 msgstr "画像"
 
-#: src/ui/pages/playlist.rs:2679
+#: src/ui/pages/playlist.rs:2716
 msgid "Select Cover Image"
 msgstr "カバー画像を選択"
 
-#: src/ui/pages/playlist.rs:2705
+#: src/ui/pages/playlist.rs:2742
 #, rust-format
 msgid "Cropped PNG: {basename}"
 msgstr "切り抜いた PNG: {basename}"
 
-#: src/ui/pages/playlist.rs:3003 src/ui/pages/playlist.rs:3018
+#: src/ui/pages/playlist.rs:3040 src/ui/pages/playlist.rs:3055
 #, rust-format
 msgid "{hours} hr {minutes} min"
 msgstr "{hours} 時間 {minutes} 分"
 
-#: src/ui/pages/playlist.rs:3003
+#: src/ui/pages/playlist.rs:3040
 #, rust-format
 msgid "{minutes} min {seconds} sec"
 msgstr "{minutes} 分 {seconds} 秒"
 
-#: src/ui/pages/playlist.rs:3009
+#: src/ui/pages/playlist.rs:3046
 #, rust-format
 msgid "{n} episode"
 msgid_plural "{n} episodes"
 msgstr[0] "{n} エピソード"
 
-#: src/ui/pages/playlist.rs:3018
+#: src/ui/pages/playlist.rs:3055
 #, rust-format
 msgid "{minutes} min"
 msgstr "{minutes} 分"
 
-#: src/ui/pages/playlist.rs:3143
+#: src/ui/pages/playlist.rs:3180
 msgid "Failed to fetch playlist after retries"
 msgstr "再試行してもプレイリストを取得できませんでした"
 
@@ -2231,7 +2261,7 @@ msgstr "アプリ名（Mixtapes）"
 msgid "Song Title"
 msgstr "曲名"
 
-#: src/ui/preferences.rs:38 src/ui/window.rs:2970
+#: src/ui/preferences.rs:38 src/ui/window.rs:2977
 msgid "General"
 msgstr "一般"
 
@@ -2247,11 +2277,11 @@ msgstr "サービス"
 msgid "Advanced"
 msgstr "詳細設定"
 
-#: src/ui/preferences.rs:172 src/ui/window.rs:2573
+#: src/ui/preferences.rs:172 src/ui/window.rs:2580
 msgid "Sign In"
 msgstr "ログイン"
 
-#: src/ui/preferences.rs:193 src/ui/window.rs:2489 src/ui/window.rs:2602
+#: src/ui/preferences.rs:193 src/ui/window.rs:2496 src/ui/window.rs:2609
 msgid "Not signed in"
 msgstr "ログインしていません"
 
@@ -2259,7 +2289,9 @@ msgstr "ログインしていません"
 msgid ""
 "Sign in to YouTube Music to access your library. Playlists and likes stay on "
 "this device until then."
-msgstr "YouTube Music にログインするとライブラリを利用できます。それまでは、プレイリストと高評価はこのデバイスに保存されます。"
+msgstr ""
+"YouTube Music にログインするとライブラリを利用できます。それまでは、プレイリ"
+"ストと高評価はこのデバイスに保存されます。"
 
 #: src/ui/preferences.rs:202 src/ui/preferences.rs:234
 msgid "YouTube Music account"
@@ -2286,7 +2318,7 @@ msgstr "Google アカウント"
 msgid "Now using {name}"
 msgstr "{name} を使用中"
 
-#: src/ui/preferences.rs:351 src/ui/window.rs:2984
+#: src/ui/preferences.rs:351 src/ui/window.rs:2991
 msgid "Playback"
 msgstr "再生"
 
@@ -2320,7 +2352,9 @@ msgstr "再生開始時にキューを開く"
 
 #: src/ui/preferences.rs:385
 msgid "Show the queue sidebar when you start a song, an album or a playlist"
-msgstr "曲、アルバム、プレイリストの再生を始めたときに、キューのサイドバーを表示します"
+msgstr ""
+"曲、アルバム、プレイリストの再生を始めたときに、キューのサイドバーを表示しま"
+"す"
 
 #: src/ui/preferences.rs:392
 msgid "Prefer Song Versions"
@@ -2330,7 +2364,9 @@ msgstr "曲バージョンを優先"
 msgid ""
 "Play, queue and download the song in place of its music video when one is "
 "found by title and artist"
-msgstr "タイトルとアーティストで曲が見つかった場合は、ミュージックビデオの代わりにその曲を再生、キュー追加、ダウンロードします"
+msgstr ""
+"タイトルとアーティストで曲が見つかった場合は、ミュージックビデオの代わりにそ"
+"の曲を再生、キュー追加、ダウンロードします"
 
 #: src/ui/preferences.rs:405
 msgid "Start a Radio from Songs"
@@ -2350,7 +2386,9 @@ msgstr "他のプレーヤーの再生中は音量を下げる"
 msgid ""
 "Turn the music down while another app plays media, like a voice message in a "
 "browser"
-msgstr "ブラウザでボイスメッセージを聞くときなど、他のアプリがメディアを再生している間は音量を下げます"
+msgstr ""
+"ブラウザでボイスメッセージを聞くときなど、他のアプリがメディアを再生している"
+"間は音量を下げます"
 
 #: src/ui/preferences.rs:420
 msgid "Normalize Volume"
@@ -2359,7 +2397,8 @@ msgstr "音量を正規化"
 #: src/ui/preferences.rs:420
 msgid ""
 "Turn loud songs down to match the rest, using YouTube's loudness measurements"
-msgstr "YouTube のラウドネス測定値をもとに、大きな音の曲を他の曲に合わせて下げます"
+msgstr ""
+"YouTube のラウドネス測定値をもとに、大きな音の曲を他の曲に合わせて下げます"
 
 #: src/ui/preferences.rs:430
 msgid "Record Plays to History"
@@ -2369,7 +2408,9 @@ msgstr "再生を履歴に記録"
 msgid ""
 "When a song counts as played, for YouTube Music or, signed out, for Home on "
 "this device"
-msgstr "曲が再生されたとみなされたときに、YouTube Music に記録します。ログインしていない場合は、このデバイスのホーム用に記録します"
+msgstr ""
+"曲が再生されたとみなされたときに、YouTube Music に記録します。ログインしてい"
+"ない場合は、このデバイスのホーム用に記録します"
 
 #: src/ui/preferences.rs:443
 msgid "Force Offline Mode"
@@ -2377,7 +2418,9 @@ msgstr "オフラインモードを強制"
 
 #: src/ui/preferences.rs:443
 msgid "Disable all network requests and use only downloaded content"
-msgstr "すべてのネットワーク通信を無効にして、ダウンロード済みのコンテンツだけを使います"
+msgstr ""
+"すべてのネットワーク通信を無効にして、ダウンロード済みのコンテンツだけを使い"
+"ます"
 
 #: src/ui/preferences.rs:462
 msgid "Updates"
@@ -2412,7 +2455,7 @@ msgid "The language changes after a restart. Playback stops."
 msgstr "再起動すると言語が変わります。再生は停止します。"
 
 #. Translators: moves the lyrics later against the song.
-#: src/ui/preferences.rs:502 src/ui/widgets/lyrics_view.rs:334
+#: src/ui/preferences.rs:502 src/ui/widgets/lyrics_view.rs:335
 msgid "Later"
 msgstr "後で"
 
@@ -2422,7 +2465,9 @@ msgstr "今すぐ再起動"
 
 #: src/ui/preferences.rs:509
 msgid "Could not restart. Start Mixtapes again to apply the language."
-msgstr "再起動できませんでした。言語を反映するには、Mixtapes をもう一度起動してください。"
+msgstr ""
+"再起動できませんでした。言語を反映するには、Mixtapes をもう一度起動してくださ"
+"い。"
 
 #: src/ui/preferences.rs:523
 msgid "Troubleshooting"
@@ -2434,7 +2479,9 @@ msgstr "レンダラー"
 
 #: src/ui/preferences.rs:530
 msgid "Switch if you hit GPU-related crashes. Applies on next launch."
-msgstr "GPU 関連のクラッシュが起きる場合に切り替えてください。次回の起動時に反映されます。"
+msgstr ""
+"GPU 関連のクラッシュが起きる場合に切り替えてください。次回の起動時に反映され"
+"ます。"
 
 #: src/ui/preferences.rs:541
 msgid "Enable Debug Logs"
@@ -2452,7 +2499,9 @@ msgstr "現在のストリームの形式、プロトコル、シーク範囲を
 msgid ""
 "Sign out, clear settings and caches, and run the setup again. Downloads and "
 "playlists kept on this device stay."
-msgstr "ログアウトし、設定とキャッシュを消去して、セットアップをやり直します。ダウンロードと、このデバイスに保存したプレイリストは残ります。"
+msgstr ""
+"ログアウトし、設定とキャッシュを消去して、セットアップをやり直します。ダウン"
+"ロードと、このデバイスに保存したプレイリストは残ります。"
 
 #: src/ui/preferences.rs:566
 msgid "Reset Mixtapes"
@@ -2467,7 +2516,10 @@ msgid ""
 "This signs you out, clears your settings and every cache, and restarts into "
 "the setup. Downloaded songs and the playlists and likes kept on this device "
 "stay."
-msgstr "ログアウトし、設定とすべてのキャッシュを消去して、セットアップから再起動します。ダウンロードした曲と、このデバイスに保存したプレイリストおよび高評価は残ります。"
+msgstr ""
+"ログアウトし、設定とすべてのキャッシュを消去して、セットアップから再起動しま"
+"す。ダウンロードした曲と、このデバイスに保存したプレイリストおよび高評価は残"
+"ります。"
 
 #: src/ui/preferences.rs:588
 msgid "Reset and Restart"
@@ -2475,7 +2527,9 @@ msgstr "リセットして再起動"
 
 #: src/ui/preferences.rs:614
 msgid "Reset done. Start Mixtapes again to run the setup."
-msgstr "リセットが完了しました。セットアップを始めるには、Mixtapes をもう一度起動してください。"
+msgstr ""
+"リセットが完了しました。セットアップを始めるには、Mixtapes をもう一度起動して"
+"ください。"
 
 #: src/ui/preferences.rs:638
 msgid "Theme"
@@ -2515,7 +2569,8 @@ msgstr "ビジュアライザー"
 
 #: src/ui/preferences.rs:710
 msgid "Bar visualizer beneath the cover art in the expanded player"
-msgstr "展開したプレーヤーのカバーアートの下に表示する、バー型のビジュアライザー"
+msgstr ""
+"展開したプレーヤーのカバーアートの下に表示する、バー型のビジュアライザー"
 
 #: src/ui/preferences.rs:716
 msgid "Enable Visualizer"
@@ -2623,7 +2678,9 @@ msgstr "Mixtapes を承認"
 msgid ""
 "Approve access in the browser tab that just opened. This closes on its own "
 "once Last.fm confirms."
-msgstr "開いたブラウザのタブでアクセスを承認してください。Last.fm が確認すると、この画面は自動で閉じます。"
+msgstr ""
+"開いたブラウザのタブでアクセスを承認してください。Last.fm が確認すると、この"
+"画面は自動で閉じます。"
 
 #: src/ui/preferences.rs:973
 msgid "Connected to Last.fm"
@@ -2707,7 +2764,10 @@ msgid ""
 msgid_plural ""
 "Mixtapes restarts to use the new folder, and playback stops. {n} downloaded "
 "songs can move there, or stay where they are and no longer show in the app."
-msgstr[0] "Mixtapes は新しいフォルダーを使うために再起動し、再生は停止します。ダウンロード済みの {n} 曲は、新しいフォルダーに移動するか、今の場所に残すか選べます。残した曲はアプリに表示されなくなります。"
+msgstr[0] ""
+"Mixtapes は新しいフォルダーを使うために再起動し、再生は停止します。ダウンロー"
+"ド済みの {n} 曲は、新しいフォルダーに移動するか、今の場所に残すか選べます。残"
+"した曲はアプリに表示されなくなります。"
 
 #: src/ui/preferences.rs:1101
 msgid "Leave Them"
@@ -2770,7 +2830,9 @@ msgstr "新しいダウンロードをディスク上でどう整理するか"
 #: src/ui/preferences.rs:1192
 msgid ""
 "Structure saved. Existing files will be reorganized after downloads finish."
-msgstr "構成を保存しました。既存のファイルは、ダウンロードが終わったあとで整理されます。"
+msgstr ""
+"構成を保存しました。既存のファイルは、ダウンロードが終わったあとで整理されま"
+"す。"
 
 #: src/ui/preferences.rs:1198
 msgid "Download Folder"
@@ -2786,13 +2848,16 @@ msgstr "Songs サブフォルダーを使う"
 
 #: src/ui/preferences.rs:1210
 msgid "Place downloads inside a Songs/ subfolder within the music directory"
-msgstr "ミュージックフォルダー内の Songs/ サブフォルダーにダウンロードを置きます"
+msgstr ""
+"ミュージックフォルダー内の Songs/ サブフォルダーにダウンロードを置きます"
 
 #: src/ui/preferences.rs:1217
 msgid ""
 "Subfolder setting saved. Existing files will be reorganized after downloads "
 "finish."
-msgstr "サブフォルダーの設定を保存しました。既存のファイルは、ダウンロードが終わったあとで整理されます。"
+msgstr ""
+"サブフォルダーの設定を保存しました。既存のファイルは、ダウンロードが終わった"
+"あとで整理されます。"
 
 #: src/ui/preferences.rs:1223
 msgid "Download Liked Songs"
@@ -2846,15 +2911,15 @@ msgstr "品質重視"
 msgid "Strict"
 msgstr "最初の結果"
 
-#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:38
+#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:39
 msgid "Auto"
 msgstr "自動"
 
-#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:38
+#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:39
 msgid "Romanization"
 msgstr "ローマ字化"
 
-#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:38
+#: src/ui/preferences_lyrics.rs:34 src/ui/widgets/lyrics_view.rs:39
 msgid "Translation"
 msgstr "翻訳"
 
@@ -2898,7 +2963,9 @@ msgstr "マッチング"
 msgid ""
 "Quality-aware keeps looking for synced lyrics before settling for plain "
 "text. Strict takes the first hit of any kind."
-msgstr "「品質重視」は同期歌詞を探し続け、見つからないときだけプレーンテキストにします。「最初の結果」は、種類を問わず最初に見つかったものを使います。"
+msgstr ""
+"「品質重視」は同期歌詞を探し続け、見つからないときだけプレーンテキストにしま"
+"す。「最初の結果」は、種類を問わず最初に見つかったものを使います。"
 
 #: src/ui/preferences_lyrics.rs:149
 msgid "When to Stop Searching"
@@ -2913,7 +2980,10 @@ msgid ""
 "An extra line under each lyric. Auto picks a romanization for non-Latin "
 "scripts and background vocals otherwise. What's available depends on the "
 "provider."
-msgstr "各歌詞の下に追加する行です。「自動」では、ラテン文字以外の言語にはローマ字化を、それ以外にはバックボーカルを選びます。利用できる内容はプロバイダーによって異なります。"
+msgstr ""
+"各歌詞の下に追加する行です。「自動」では、ラテン文字以外の言語にはローマ字化"
+"を、それ以外にはバックボーカルを選びます。利用できる内容はプロバイダーによっ"
+"て異なります。"
 
 #. Translators: row title, followed by what the second lyric line shows: Off, Auto, Romanization, Translation or Background.
 #: src/ui/preferences_lyrics.rs:169
@@ -2929,7 +2999,9 @@ msgid ""
 "Subtle fades each word in over the time it's actually held and grows the "
 "active line. Full adds a glow on the active line and blurs the lines "
 "furthest from it."
-msgstr "「控えめ」は、各単語を実際に伸ばしている時間をかけてフェードインさせ、現在の行を大きくします。「フル」は、さらに現在の行を光らせ、離れた行をぼかします。"
+msgstr ""
+"「控えめ」は、各単語を実際に伸ばしている時間をかけてフェードインさせ、現在の"
+"行を大きくします。「フル」は、さらに現在の行を光らせ、離れた行をぼかします。"
 
 #. Translators: how strong the lyric effects are: Off, Subtle or Full.
 #: src/ui/preferences_lyrics.rs:190
@@ -2944,7 +3016,9 @@ msgstr "単語タイミングを擬似的に再現"
 msgid ""
 "On sources with no word timing, move the highlight across the line instead "
 "of lighting the whole line at once"
-msgstr "単語単位のタイミングがないソースでは、行全体を一度に光らせる代わりに、ハイライトを行に沿って動かします"
+msgstr ""
+"単語単位のタイミングがないソースでは、行全体を一度に光らせる代わりに、ハイラ"
+"イトを行に沿って動かします"
 
 #: src/ui/preferences_lyrics.rs:206
 msgid "Text Size"
@@ -2955,7 +3029,10 @@ msgid ""
 "Resting size of the lyric column, and how much bigger the line being sung is "
 "drawn. The active line is scaled when it is painted, so growing it never "
 "changes the row's height or disturbs the scrolling."
-msgstr "歌詞欄の通常の大きさと、歌っている行をどれだけ大きく表示するかを設定します。現在の行は描画時に拡大されるため、大きくしても行の高さは変わらず、スクロールも乱れません。"
+msgstr ""
+"歌詞欄の通常の大きさと、歌っている行をどれだけ大きく表示するかを設定します。"
+"現在の行は描画時に拡大されるため、大きくしても行の高さは変わらず、スクロール"
+"も乱れません。"
 
 #: src/ui/preferences_lyrics.rs:211
 msgid "Lyrics Size"
@@ -3027,45 +3104,48 @@ msgid "{n} track · {h} h {m} min"
 msgid_plural "{n} tracks · {h} h {m} min"
 msgstr[0] "{n} 曲 · {h} 時間 {m} 分"
 
-#: src/ui/recent_searches.rs:83
+#: src/ui/recent_searches.rs:84
 msgid "Clear Recent Searches"
 msgstr "最近の検索を消去"
 
-#: src/ui/release_notes.rs:106
+#: src/ui/release_notes.rs:110
 #, rust-format
 msgid "What's New in {version}?"
 msgstr "{version} の新機能"
 
-#: src/ui/release_notes.rs:109
+#: src/ui/release_notes.rs:113
 #, rust-format
 msgid "Released on {date}"
 msgstr "{date} リリース"
 
-#: src/ui/release_notes.rs:115
+#: src/ui/release_notes.rs:119
 msgid "Changes"
 msgstr "変更点"
 
-#: src/ui/release_notes.rs:115
+#: src/ui/release_notes.rs:119
 msgid "Fixes"
 msgstr "修正"
 
-#: src/ui/release_notes.rs:129
+#: src/ui/release_notes.rs:133
 msgid "Thanks for reading, and have a great day!"
 msgstr "読んでくれてありがとうございます。すてきな一日を！"
 
-#: src/ui/release_notes.rs:131
+#: src/ui/release_notes.rs:135
 msgid "Full Release Notes"
 msgstr "リリースノート全文"
 
-#: src/ui/release_notes.rs:178
+#: src/ui/release_notes.rs:182
 msgid "This version of Mixtapes was made possible by users like you!"
-msgstr "このバージョンの Mixtapes は、あなたのようなユーザーのおかげで実現しました！"
+msgstr ""
+"このバージョンの Mixtapes は、あなたのようなユーザーのおかげで実現しました！"
 
-#: src/ui/release_notes.rs:179
+#: src/ui/release_notes.rs:183
 msgid ""
 "I love making Mixtapes and my other projects, but I can't do it without "
 "help. Support my work with a donation:"
-msgstr "Mixtapes や他のプロジェクトを作るのは大好きですが、支えがなければ続けられません。寄付で私の活動を応援してください："
+msgstr ""
+"Mixtapes や他のプロジェクトを作るのは大好きですが、支えがなければ続けられませ"
+"ん。寄付で私の活動を応援してください："
 
 #: src/ui/upload_queue.rs:64
 msgid "Sign in to upload songs"
@@ -3088,301 +3168,321 @@ msgstr "アップロード中…"
 msgid "Uploaded"
 msgstr "アップロード済み"
 
-#: src/ui/widgets/add_to_playlist.rs:122
+#: src/ui/widgets/add_to_playlist.rs:127
 msgid "Search playlists…"
 msgstr "プレイリストを検索…"
 
-#: src/ui/widgets/add_to_playlist.rs:141
+#: src/ui/widgets/add_to_playlist.rs:146
 msgid "No playlists"
 msgstr "プレイリストがありません"
 
-#: src/ui/widgets/add_to_playlist.rs:150
+#: src/ui/widgets/add_to_playlist.rs:160
 msgid "New Playlist…"
 msgstr "新しいプレイリスト…"
 
-#: src/ui/widgets/lyrics_view.rs:38
+#: src/ui/widgets/add_to_playlist.rs:351
+#, fuzzy
+msgid "Select to add to several playlists"
+msgstr "プレイリストに追加できませんでした"
+
+#: src/ui/widgets/add_to_playlist.rs:380
+#, fuzzy, rust-format
+msgid "Add to {n} Playlist"
+msgid_plural "Add to {n} Playlists"
+msgstr[0] "プレイリストに追加…"
+
+#: src/ui/widgets/lyrics_view.rs:39
 msgid "Background vocals"
 msgstr "バックボーカル"
 
-#: src/ui/widgets/lyrics_view.rs:196
+#: src/ui/widgets/lyrics_view.rs:197
 msgid "Word by word"
 msgstr "単語ごと"
 
-#: src/ui/widgets/lyrics_view.rs:197
+#: src/ui/widgets/lyrics_view.rs:198
 msgid "word by word"
 msgstr "単語ごと"
 
-#: src/ui/widgets/lyrics_view.rs:198
+#: src/ui/widgets/lyrics_view.rs:199
 msgid "Line by line"
 msgstr "行ごと"
 
-#: src/ui/widgets/lyrics_view.rs:199
+#: src/ui/widgets/lyrics_view.rs:200
 msgid "line by line"
 msgstr "行ごと"
 
-#: src/ui/widgets/lyrics_view.rs:200
+#: src/ui/widgets/lyrics_view.rs:201
 msgid "No timing"
 msgstr "タイミングなし"
 
-#: src/ui/widgets/lyrics_view.rs:201
+#: src/ui/widgets/lyrics_view.rs:202
 msgid "no timing"
 msgstr "タイミングなし"
 
-#: src/ui/widgets/lyrics_view.rs:223
+#: src/ui/widgets/lyrics_view.rs:224
 msgid "Back to sources"
 msgstr "ソース一覧に戻る"
 
-#: src/ui/widgets/lyrics_view.rs:262 src/ui/widgets/lyrics_view.rs:703
-#: src/ui/widgets/lyrics_view.rs:704
+#: src/ui/widgets/lyrics_view.rs:263 src/ui/widgets/lyrics_view.rs:704
+#: src/ui/widgets/lyrics_view.rs:705
 msgid "No lyrics"
 msgstr "歌詞なし"
 
-#: src/ui/widgets/lyrics_view.rs:262
+#: src/ui/widgets/lyrics_view.rs:263
 msgid "No lyrics found for this track."
 msgstr "この曲の歌詞は見つかりませんでした。"
 
-#: src/ui/widgets/lyrics_view.rs:287
+#: src/ui/widgets/lyrics_view.rs:288
 msgid "Choose lyrics source"
 msgstr "歌詞のソースを選択"
 
-#: src/ui/widgets/lyrics_view.rs:298
+#: src/ui/widgets/lyrics_view.rs:299
 msgid "Lyrics source"
 msgstr "歌詞のソース"
 
-#: src/ui/widgets/lyrics_view.rs:308 src/ui/widgets/lyrics_view.rs:1450
-#: src/ui/widgets/lyrics_view.rs:1493
+#: src/ui/widgets/lyrics_view.rs:309 src/ui/widgets/lyrics_view.rs:1468
+#: src/ui/widgets/lyrics_view.rs:1511
 msgid "Searching…"
 msgstr "検索中…"
 
 #. Translators: heading over the choice of what the smaller line under each lyric shows.
-#: src/ui/widgets/lyrics_view.rs:315
+#: src/ui/widgets/lyrics_view.rs:316
 msgid "Second line"
 msgstr "2 行目"
 
 #. Translators: heading over the buttons that move lyrics earlier or later against the song.
-#: src/ui/widgets/lyrics_view.rs:327
+#: src/ui/widgets/lyrics_view.rs:328
 msgid "Timing"
 msgstr "タイミング"
 
-#: src/ui/widgets/lyrics_view.rs:332
+#: src/ui/widgets/lyrics_view.rs:333
 msgid "Lyrics are late"
 msgstr "歌詞が遅れている"
 
-#: src/ui/widgets/lyrics_view.rs:334
+#: src/ui/widgets/lyrics_view.rs:335
 msgid "Lyrics are early"
 msgstr "歌詞が早すぎる"
 
-#: src/ui/widgets/lyrics_view.rs:336
+#: src/ui/widgets/lyrics_view.rs:337
 msgid "Reset timing"
 msgstr "タイミングをリセット"
 
-#: src/ui/widgets/lyrics_view.rs:348
+#: src/ui/widgets/lyrics_view.rs:349
 msgid "Song title"
 msgstr "曲名"
 
-#: src/ui/widgets/lyrics_view.rs:350
+#: src/ui/widgets/lyrics_view.rs:351
 msgid "Search by name"
 msgstr "名前で検索"
 
-#: src/ui/widgets/lyrics_view.rs:582 src/ui/widgets/lyrics_view.rs:673
+#: src/ui/widgets/lyrics_view.rs:583 src/ui/widgets/lyrics_view.rs:674
 msgid "Not playing"
 msgstr "再生していません"
 
-#: src/ui/widgets/lyrics_view.rs:673
+#: src/ui/widgets/lyrics_view.rs:674
 msgid "Play a song to see lyrics."
 msgstr "曲を再生すると歌詞が表示されます。"
 
-#: src/ui/widgets/lyrics_view.rs:703
+#: src/ui/widgets/lyrics_view.rs:704
 msgid "No lyrics are saved for this song. They load once you are back online."
 msgstr "この曲の歌詞は保存されていません。オンラインに戻ると読み込まれます。"
 
-#: src/ui/widgets/lyrics_view.rs:704
+#: src/ui/widgets/lyrics_view.rs:705
 msgid "Nothing matched automatically. Try another source, or search by name."
-msgstr "自動では一致しませんでした。別のソースを試すか、名前で検索してください。"
+msgstr ""
+"自動では一致しませんでした。別のソースを試すか、名前で検索してください。"
 
-#: src/ui/widgets/lyrics_view.rs:725
+#: src/ui/widgets/lyrics_view.rs:726
 #, rust-format
 msgid "Lyrics source: {source}"
 msgstr "歌詞のソース: {source}"
 
-#: src/ui/widgets/lyrics_view.rs:761
+#: src/ui/widgets/lyrics_view.rs:762
 msgid "Edit Lyrics"
 msgstr "歌詞を編集"
 
-#: src/ui/widgets/lyrics_view.rs:761
+#: src/ui/widgets/lyrics_view.rs:762
 msgid "Write Lyrics"
 msgstr "歌詞を書く"
 
-#: src/ui/widgets/lyrics_view.rs:774
+#: src/ui/widgets/lyrics_view.rs:775
 msgid ""
 "Plain text works. For timing, start a line with [01:23.45]. For word by word "
 "timing, put <01:23.45> before each word, or paste TTML."
-msgstr "プレーンテキストでも使えます。タイミングを付けるには、行の先頭に [01:23.45] を付けます。単語ごとのタイミングを付けるには、各単語の前に <01:23.45> を付けるか、TTML を貼り付けます。"
+msgstr ""
+"プレーンテキストでも使えます。タイミングを付けるには、行の先頭に [01:23.45] "
+"を付けます。単語ごとのタイミングを付けるには、各単語の前に <01:23.45> を付け"
+"るか、TTML を貼り付けます。"
 
-#: src/ui/widgets/lyrics_view.rs:777
+#: src/ui/widgets/lyrics_view.rs:778
 msgid "Delete My Lyrics"
 msgstr "自分の歌詞を削除"
 
-#: src/ui/widgets/lyrics_view.rs:1289
+#: src/ui/widgets/lyrics_view.rs:931
+#, fuzzy
+msgid "Song line copied."
+msgstr "リンクをコピーしました"
+
+#: src/ui/widgets/lyrics_view.rs:1307
 msgid "Search by name…"
 msgstr "名前で検索…"
 
-#: src/ui/widgets/lyrics_view.rs:1296
+#: src/ui/widgets/lyrics_view.rs:1314
 msgid "Edit my lyrics…"
 msgstr "自分の歌詞を編集…"
 
-#: src/ui/widgets/lyrics_view.rs:1296
+#: src/ui/widgets/lyrics_view.rs:1314
 msgid "Write lyrics…"
 msgstr "歌詞を書く…"
 
-#: src/ui/widgets/lyrics_view.rs:1303
+#: src/ui/widgets/lyrics_view.rs:1321
 msgid "Use automatic choice"
 msgstr "自動選択を使う"
 
-#: src/ui/widgets/lyrics_view.rs:1304
+#: src/ui/widgets/lyrics_view.rs:1322
 #, rust-format
 msgid "Pinned to {preferred}"
 msgstr "{preferred} に固定中"
 
 #. Translators: marks the lyrics source the listener chose to keep for this song.
-#: src/ui/widgets/lyrics_view.rs:1319
+#: src/ui/widgets/lyrics_view.rs:1337
 msgid "Pinned"
 msgstr "固定済み"
 
-#: src/ui/widgets/lyrics_view.rs:1325
+#: src/ui/widgets/lyrics_view.rs:1343
 #, rust-format
 msgid "Other matches from {source}"
 msgstr "{source} のその他の候補"
 
-#: src/ui/widgets/lyrics_view.rs:1468
+#: src/ui/widgets/lyrics_view.rs:1486
 #, rust-format
 msgid "No other matches from {source}"
 msgstr "{source} に他の候補はありません"
 
-#: src/ui/widgets/lyrics_view.rs:1508
+#: src/ui/widgets/lyrics_view.rs:1526
 msgid "Nothing found"
 msgstr "見つかりませんでした"
 
-#: src/ui/window.rs:146 src/ui/window.rs:2990
+#: src/ui/window.rs:151 src/ui/window.rs:2997
 msgid "Search"
 msgstr "検索"
 
-#: src/ui/window.rs:151
+#: src/ui/window.rs:156
 msgid "Upload Progress"
 msgstr "アップロードの進行状況"
 
-#: src/ui/window.rs:152
+#: src/ui/window.rs:157
 msgid "Download Progress"
 msgstr "ダウンロードの進行状況"
 
-#: src/ui/window.rs:179
+#: src/ui/window.rs:184
 msgid "Explore"
 msgstr "探索"
 
-#: src/ui/window.rs:192
+#: src/ui/window.rs:197
 msgid "Search..."
 msgstr "検索…"
 
-#: src/ui/window.rs:288
+#: src/ui/window.rs:293
 msgid "No album for this track"
 msgstr "この曲にはアルバムがありません"
 
-#: src/ui/window.rs:378
+#: src/ui/window.rs:383
 msgid "Uploads complete"
 msgstr "アップロードが完了しました"
 
-#: src/ui/window.rs:642
+#: src/ui/window.rs:647
 msgid "Back online"
 msgstr "オンラインに戻りました"
 
-#: src/ui/window.rs:661
+#: src/ui/window.rs:666
 msgid "Offline - downloaded songs still available"
 msgstr "オフライン: ダウンロード済みの曲は引き続き利用できます"
 
-#: src/ui/window.rs:696
+#: src/ui/window.rs:701
 msgid "No internet - running in offline mode"
 msgstr "インターネットに接続できません: オフラインモードで動作中です"
 
-#: src/ui/window.rs:722
+#: src/ui/window.rs:727
 msgid "Already downloaded"
 msgstr "ダウンロード済みです"
 
-#: src/ui/window.rs:744
+#: src/ui/window.rs:749
 msgid "Downloads complete"
 msgstr "ダウンロードが完了しました"
 
-#: src/ui/window.rs:1088
+#: src/ui/window.rs:1093
 msgid "Uploaded artists are not available yet"
 msgstr "アップロードしたアーティストはまだ利用できません"
 
-#: src/ui/window.rs:1185 src/ui/window.rs:1222
+#: src/ui/window.rs:1190 src/ui/window.rs:1227
 #, rust-format
 msgid "{n} uploaded song"
 msgid_plural "{n} uploaded songs"
 msgstr[0] "アップロード済み {n} 曲"
 
-#: src/ui/window.rs:1277
+#: src/ui/window.rs:1282
 msgid "Couldn't open your channel"
 msgstr "チャンネルを開けませんでした"
 
-#: src/ui/window.rs:1302
+#: src/ui/window.rs:1307
 msgid "Mixtapes cannot open this link"
 msgstr "Mixtapes はこのリンクを開けません"
 
-#: src/ui/window.rs:1305
+#: src/ui/window.rs:1310
 msgid "Could not open the link"
 msgstr "リンクを開けませんでした"
 
-#: src/ui/window.rs:1964
+#: src/ui/window.rs:1971
 #, rust-format
 msgid "Couldn't play track: {reason}"
 msgstr "曲を再生できませんでした: {reason}"
 
-#: src/ui/window.rs:1966
+#: src/ui/window.rs:1973
 #, rust-format
 msgid "Couldn't play '{title}': {reason}"
 msgstr "「{title}」を再生できませんでした: {reason}"
 
-#: src/ui/window.rs:2376 src/ui/window.rs:2972
+#: src/ui/window.rs:2383 src/ui/window.rs:2979
 msgid "Preferences"
 msgstr "設定"
 
-#: src/ui/window.rs:2378
+#: src/ui/window.rs:2385
 msgid "About Mixtapes"
 msgstr "Mixtapes について"
 
-#: src/ui/window.rs:2388
+#: src/ui/window.rs:2395
 msgid "Main Menu"
 msgstr "メインメニュー"
 
-#: src/ui/window.rs:2409
+#: src/ui/window.rs:2416
 msgid "Follow System Style"
 msgstr "システムのスタイルに従う"
 
-#: src/ui/window.rs:2410
+#: src/ui/window.rs:2417
 msgid "Light Style"
 msgstr "ライトスタイル"
 
-#: src/ui/window.rs:2411
+#: src/ui/window.rs:2418
 msgid "Dark Style"
 msgstr "ダークスタイル"
 
-#: src/ui/window.rs:2573
+#: src/ui/window.rs:2580
 msgid "Log Out"
 msgstr "ログアウト"
 
-#: src/ui/window.rs:2975
+#: src/ui/window.rs:2982
 msgid "Go Back / Close Search"
 msgstr "戻る / 検索を閉じる"
 
-#: src/ui/window.rs:2980
+#: src/ui/window.rs:2987
 msgid "Minimize"
 msgstr "最小化"
 
-#: src/ui/window.rs:2986
+#: src/ui/window.rs:2993
 msgid "Play / Pause"
 msgstr "再生 / 一時停止"
 
-#: src/ui/window.rs:2987
+#: src/ui/window.rs:2994
 msgid "Open / Close Player"
 msgstr "プレーヤーを開く / 閉じる"
