@@ -817,7 +817,8 @@ impl LyricRow {
         });
 
         row.add_css_class("lyrics-line");
-        row.add_css_class(if opposite_voice { "opposite-voice" } else { "lead-voice" });
+        // The classes leave room on the side the line faces away from, so they follow the side, not the singer (#177).
+        row.add_css_class(if at_end { "opposite-voice" } else { "lead-voice" });
         row.set_selectable(true);
         row.set_activatable(true);
         row.set_can_focus(false);
