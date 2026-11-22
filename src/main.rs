@@ -29,6 +29,8 @@ mod model;
 mod mpris;
 #[cfg(target_os = "linux")]
 mod ducking;
+#[cfg(target_os = "linux")]
+mod inhibit;
 mod net;
 mod paths;
 mod player;
@@ -190,7 +192,9 @@ fn main() -> glib::ExitCode {
                 macos::install(_app);
                 macos::install_menu(_app, &app_ctx.player);
             }
-            on_startup(&app_ctx)
+            on_startup(&app_ctx);
+            #[cfg(target_os = "linux")]
+            inhibit::start(_app, &app_ctx);
         }
     ));
     app.connect_activate(glib::clone!(
