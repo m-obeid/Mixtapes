@@ -2420,6 +2420,14 @@ impl PlaylistPage {
                 let page = self.clone();
                 extras.push(MenuAction::new(&tr!("Copy Selection Data (Debug)"), Section::Clipboard, move || page.copy_selection_debug()));
             }
+        } else if !vid.is_empty() {
+            // Selection mode from the row itself, so a long list needs no trip back to the top.
+            let page = self.clone();
+            let row_c = row.clone();
+            extras.push(MenuAction::new(&tr!("Select"), Section::Remove, move || {
+                page.select_btn.set_active(true);
+                page.toggle_track_selection(&vid, Some(&row_c));
+            }));
         }
         let album = Some((self.title_text.borrow().clone(), self.playlist_id().unwrap_or_default()));
         let opts = SongMenuOptions { prefix: "ctx", selection, extras, nav: Some(self.ctx.nav.clone()), ctx: Some(self.ctx.clone()), album, ..SongMenuOptions::default() };
