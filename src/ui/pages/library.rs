@@ -464,10 +464,10 @@ impl LibraryPage {
             return;
         }
         // Until the network answers, the library as it last loaded says what is saved.
+        // A session still being checked counts too, or an album opened then waits on the whole library (#158).
         let caches = self.ctx.net.caches();
-        if caches.library_ids().is_none() && self.ctx.player.state().authenticated() {
-            let empty = Vec::new();
-            caches.set_library_ids(crate::net::playlists::library_ids_of(saved.get("playlists").unwrap_or(&empty), saved.get("albums").unwrap_or(&empty)));
+        if caches.library_ids().is_none() && self.ctx.net.client().auth_state().has_session() {
+            caches.set_library_ids(saved_library_ids(&saved));
         }
         let targets = [&self.sections[0], &self.sections[1], &self.sections[2], &self.upload_sections[0], &self.upload_sections[1]];
         for (section, label) in targets.into_iter().zip(LIBRARY_LABELS) {
@@ -758,6 +758,17 @@ fn library_file(paths: &crate::paths::Paths) -> std::path::PathBuf {
 
 fn read_library(paths: &crate::paths::Paths) -> SavedLibrary {
     std::fs::read(library_file(paths)).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+}
+
+fn saved_library_ids(saved: &SavedLibrary) -> crate::net::cache::LibraryIds {
+    let empty = Vec::new();
+    crate::net::playlists::library_ids_of(saved.get("playlists").unwrap_or(&empty), saved.get("albums").unwrap_or(&empty))
+}
+
+/// What the library held as it last loaded, for a page asking before the network answers.
+pub fn library_ids_from_disk(paths: &crate::paths::Paths) -> Option<crate::net::cache::LibraryIds> {
+    let saved = read_library(paths);
+    (!saved.is_empty()).then(|| saved_library_ids(&saved))
 }
 
 fn write_library(paths: &crate::paths::Paths, library: SavedLibrary) {

@@ -1945,7 +1945,11 @@ impl PlaylistPage {
             Some(ids) => ids.contains(check_id),
             None => {
                 self.warm_library_ids();
-                false
+                // The library as it last loaded answers at once, and the fetch corrects it (#158).
+                let Some(ids) = crate::ui::pages::library::library_ids_from_disk(&self.ctx.paths) else { return false };
+                let found = ids.contains(check_id);
+                self.ctx.net.caches().set_library_ids(ids);
+                found
             }
         }
     }
