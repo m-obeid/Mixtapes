@@ -494,9 +494,28 @@ const VERSION_MARKS: &[&str] = &[
 ];
 
 /// The version marks in a title, in `VERSION_MARKS` order, so two titles name the same cut when their lists are equal.
+/// Only bracketed text counts, so a song called "Live Forever" or "Cover Me" is no other cut.
 pub(crate) fn version_marks(title: &str) -> Vec<&'static str> {
-    let lowered = title.to_lowercase();
+    let lowered = bracketed(&title.to_lowercase());
     VERSION_MARKS.iter().copied().filter(|mark| has_words(&lowered, mark)).collect()
+}
+
+/// The text inside (), [], full-width brackets and 【】, each part ending in a space so words stay apart.
+fn bracketed(title: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0usize;
+    for c in title.chars() {
+        match c {
+            '(' | '[' | '（' | '【' => depth += 1,
+            ')' | ']' | '）' | '】' if depth > 0 => {
+                depth -= 1;
+                out.push(' ');
+            }
+            _ if depth > 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
 }
 
 fn has_words(text: &str, words: &str) -> bool {
@@ -1202,8 +1221,10 @@ mod tests {
         assert_eq!(version_marks("Song (Inst.)"), ["inst"]);
         assert!(version_marks("旅のゆくえ - Destination of the journey").is_empty());
         assert!(version_marks("すずめ - Suzume (feat. Toaka)").is_empty());
-        assert!(version_marks("Alive - Discover Universal").is_empty(), "only whole words count");
-        assert_eq!(version_marks("Live Forever"), version_marks("Oasis - Live Forever (Official Video)"));
+        assert!(version_marks("Alive (Discover Universal)").is_empty(), "only whole words count");
+        assert!(version_marks("Oasis - Live Forever (Official Video)").is_empty(), "the song's own name is no mark");
+        assert!(version_marks("Cover Me").is_empty());
+        assert_eq!(version_marks("Cover Me [Live at Wembley]"), ["live"]);
     }
 
     #[test]
@@ -1212,6 +1233,7 @@ mod tests {
         assert!(!convertible(&video("旅のゆくえ(English version) - Destination of the journey(English version)", "MUSIC_VIDEO_TYPE_OMV")));
         assert!(!convertible(&video("キラキラの灰 (Instrumental) - Twinkling Ash (Instrumental)", "MUSIC_VIDEO_TYPE_OMV")));
         assert!(convertible(&video("すずめ - Suzume (feat. Toaka)", "MUSIC_VIDEO_TYPE_OMV")));
+        assert!(convertible(&video("Oasis - Live Forever (Official Video)", "MUSIC_VIDEO_TYPE_OMV")));
         assert!(convertible(&video("Twinkling Ash (Instrumental)", "MUSIC_VIDEO_TYPE_UGC")), "an upload says what it is");
         assert!(!convertible(&video("すずめ - Suzume (feat. Toaka)", crate::model::AUDIO_VIDEO_TYPE)), "a song stays itself");
     }
