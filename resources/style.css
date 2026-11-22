@@ -827,6 +827,11 @@ window > windowhandle,
     color: @destructive_color;
 }
 
+/* A state set while a page opens, shown without the button's fade. */
+.no-transition {
+  transition: none;
+}
+
 /* Mobile player bars, nudged past the transport row's baseline the way
    .cover-visualizer does on the desktop cover view. The drawn band is
    pinned to the bottom of the controls overlay, so the shift is what puts

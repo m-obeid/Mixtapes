@@ -1814,10 +1814,24 @@ impl PlaylistPage {
         self.library_btn.set_icon_name(if saved { "starred-symbolic" } else { "non-starred-symbolic" });
         self.library_btn.set_tooltip_text(Some(&if saved { tr!("Remove from Library") } else { tr!("Add to Library") }));
         // The accent the artist page's star takes once subscribed.
-        if saved {
-            self.library_btn.add_css_class("liked-button");
-        } else {
-            self.library_btn.remove_css_class("liked-button");
+        if self.library_btn.has_css_class("liked-button") != saved {
+            // Without the fade the button runs from the last page's state, so the tint shows with the page (#158).
+            self.library_btn.add_css_class("no-transition");
+            if saved {
+                self.library_btn.add_css_class("liked-button");
+            } else {
+                self.library_btn.remove_css_class("liked-button");
+            }
+            // The style settles in the frame after the change, so the fade comes back a frame later.
+            let ticks = Cell::new(0);
+            self.library_btn.add_tick_callback(move |btn, _| {
+                ticks.set(ticks.get() + 1);
+                if ticks.get() < 2 {
+                    return glib::ControlFlow::Continue;
+                }
+                btn.remove_css_class("no-transition");
+                glib::ControlFlow::Break
+            });
         }
     }
 
