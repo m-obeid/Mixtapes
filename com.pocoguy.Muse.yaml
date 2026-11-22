@@ -24,7 +24,11 @@ finish-args:
   - --device=dri
   - --socket=session-bus
   - --filesystem=xdg-music
-  - --filesystem=xdg-run/app/com.discordapp.Discord
+  # Flatpak exposes only paths that exist at launch. A socket Discord makes
+  # later stays invisible, so the folders are created up front and bound
+  # whole. A native Discord started after Mixtapes still needs a restart.
+  - --filesystem=xdg-run/app/com.discordapp.Discord:create
+  - --filesystem=xdg-run/.flatpak/dev.vencord.Vesktop/xdg-run:create
   - --filesystem=xdg-run/discord-ipc-0
 modules:
   - name: nodejs-runtime

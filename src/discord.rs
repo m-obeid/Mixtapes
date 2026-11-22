@@ -15,8 +15,8 @@ use crate::model::PlaybackStatus;
 
 const DISCORD_APP_ID: &str = "1492500060087255231";
 /// Reconnect delays in seconds while the IPC socket is unreachable. The tail
-/// is short so opening Discord later lights presence up within half a minute.
-const RECONNECT_BACKOFF: [u64; 5] = [3, 5, 10, 15, 30];
+/// is short so opening Discord later lights presence up within 15 seconds.
+const RECONNECT_BACKOFF: [u64; 4] = [3, 5, 10, 15];
 /// Below Discord's limit of about five updates per 20 seconds.
 const MIN_UPDATE_INTERVAL: Duration = Duration::from_millis(400);
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -190,6 +190,8 @@ fn candidate_ipc_paths() -> Vec<PathBuf> {
         bases.push(xdg.clone());
         bases.push(xdg.join("app/com.discordapp.Discord"));
         bases.push(xdg.join("app/dev.vencord.Vesktop"));
+        // Vesktop's Flatpak keeps the real socket in its own runtime dir.
+        bases.push(xdg.join(".flatpak/dev.vencord.Vesktop/xdg-run"));
         bases.push(xdg.join("snap.discord"));
     }
     bases.push(std::env::var_os("TMPDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp")));
